@@ -1,0 +1,53 @@
+# Notepad++ is suggested for editing this file.
+
+# Only the live action .bat scripts have cropping enabled, using the --autocrop setting.
+# You can follow the live action .bat example, and add --autocrop to any .bat file you like.
+# Mode options: auto, manual
+crop=auto
+
+# Manual Crop Values
+# Only used if crop=manual
+# Subtracts pixels from the specific side
+top=140
+bottom=140
+left=0
+right=0
+
+[downscaling]
+# Downscaling will be performed after crop.
+# Options available: True, False
+downscale=False
+# Available Kernels:
+#   hermite: Hermite-weighted averaging
+#   bilinear: Bilinear (triangle) averaging
+#   bicubic: Bicubic interpolation
+#   gaussian: Gaussian smoothing
+#   catmull_rom: Catmull-Rom cubic spline
+#   mitchell: Mitchell-Netravalia cubic spline
+#   lanczos: Lanczos reconstruction
+#   spline36: Spline interpolation (36 samples)
+#
+# Recommendations:
+#   * Anime: Hermite
+#   * Live Action: Spline36
+#
+# Target Resolution (WidthxHeight) e.g.
+1920x1080
+# Or provide target width (recommended) and height is calculated for you.
+# Example: Source: 3840x1600, target: 1920, video will be 1900x800
+target_resolution=1920
+# Kernel Type (Choose from options above)
+kernel_type=Spline36
+
+[denoise]
+# Options available: True, False
+denoise=True
+# Anime setting example:
+denoise_setting=src = DFTTest().denoise(src, {0.00:0.30, 0.40:0.30, 0.60:0.60, 0.80:1.50, 1.00:2.00}, planes=[0, 1, 2])
+# Live action example (commented out):
+# denoise_setting=src = DFTTest(sigma=0.2).denoise(src)
+
+[deband]
+# Options available: True, False
+deband=True
+deband_setting=src = core.placebo.Deband(src, threshold=1.5, planes=1)

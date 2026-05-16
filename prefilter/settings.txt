@@ -1,0 +1,18 @@
+[NVIDIA]
+nvidia-downscale=False
+nvidia-downscale-filter=hermite
+nvidia-downscale-resolution=1920x1080
+nvidia-denoise=True
+nvidia-denoise-filter=vpp_fft3d=sigma=0.2
+nvidia-deband=True
+nvidia-deband-threshold=1
+nvidia-deband-radius=16
+
+[x265]
+x265-downscale=False
+x265-downscale-kernel=hermite
+x265-downscale-resolution=1920x1080
+x265-denoise=True
+x265-denoise-filter=DFTTest().denoise(src, {0.00:0.30, 0.40:0.30, 0.60:0.60, 0.80:1.50, 1.00:2.00}, planes=[0, 1, 2])
+x265-deband=False
+x265-deband-filter=core.placebo.Deband(src, threshold=2.0, planes=1)
