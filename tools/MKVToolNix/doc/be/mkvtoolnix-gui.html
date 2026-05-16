@@ -1,0 +1,141 @@
+<!DOCTYPE html
+  PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
+<html>
+   <head>
+      <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+      <title>mkvtoolnix-gui -- графічная абалонка mkvmerge1 з рэдактарам раздзелаў і загалоўкаў</title>
+      <link rel="stylesheet" type="text/css" href="mkvtoolnix-doc.css">
+   </head>
+   <body>
+      <div class="heading">mkvtoolnix-gui -- графічная абалонка <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a> з рэдактарам раздзелаў і загалоўкаў</div>
+      <hr>
+      <div id="toc" class="toc">
+         <h1>Table of contents</h1>
+         <ul>
+            <li><a href="#mkvtoolnix-gui.synopsis">1. Кароткі змест</a></li>
+            <li><a href="#mkvtoolnix-gui.description">2. Апісанне</a></li>
+            <li><a href="#mkvtoolnix-gui.seealso">3. Глядзіце таксама</a></li>
+            <li><a href="#mkvtoolnix-gui.www">4. Хатняя старонка</a></li>
+         </ul>
+      </div>
+      <div class="content">
+         <h1><a name="mkvtoolnix-gui.synopsis">1. Кароткі змест</a><a class="headerlink" href="#mkvtoolnix-gui.synopsis" title="Link to this heading">#</a></h1>
+         
+         
+         <div class="cmdsynopsis"><span class="commandname">mkvtoolnix-gui</span> [[імя-файла-налад.mtxcfg] | [зыходны-файл.ext] | [файл-matroska.mkv] | [файл-раздзелаў.ext] | [файл-matroska.mkv]]</div>
+         
+         <h1><a name="mkvtoolnix-gui.description">2. Апісанне</a><a class="headerlink" href="#mkvtoolnix-gui.description" title="Link to this heading">#</a></h1>
+         
+         
+         <p>
+            <span class="productname">mkvtoolnix-gui</span>(1) — гэта <span class="abbrev">графічная абалонка</span> на аснове
+            <span class="productname">Qt</span><sup>(tm)</sup> для <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a>. Ён таксама рэалізуе функцыі
+            <a href="mkvinfo.html"><span class="productname">mkvinfo</span>(1)</a> і <a href="mkvpropedit.html"><span class="productname">mkvpropedit</span>(1)</a> і будзе развівацца, каб ахапіць таксама
+            <a href="mkvextract.html"><span class="productname">mkvextract</span>(1)</a>. Усе налады (напрыклад, зыходныя файлы, параметры, трэкі ды
+            г. д.) могуць быць захаваныя і адноўленыя.
+            </p>
+         
+         
+         <p>
+            Пералічэнне імяў файлаў канфігурацыі з пашырэннем <span class="literal">.mtxcfg</span>
+            прымушае графічную абалонку загружаць гэтыя файлы канфігурацыі ў адпаведны
+            інструмент. Любое іншае імя файла дадаецца ў якасці ўваходнага файла для
+            зліцця, адкрываецца ў інструменце звестак, рэдактары раздзелаў або ў
+            рэдактары загалоўкаў у залежнасці ад бягучага рэжыма. Бягучы рэжым можна
+            змяніць праз <span class="option">--merge</span>, <span class="option">--info</span>,
+            <span class="option">--edit-chapters</span> або
+            <span class="option">--edit-headers</span>. Стандартны рэжым — даданне файлаў для
+            зліцця.
+            </p>
+         
+         
+         <p>
+            Звярніце ўвагу, што калі экзэмпляр пнраграмы ўжо запушчаны, пры паўторным
+            запуску праграмы, усе імі файлаў, зададзеныя ў камандным радку,
+            апрацоўваюцца першапачаткова запушчаным экзэмплярам.
+            </p>
+         
+         
+         <table class="variablelist">
+            <thead>
+               <tr>
+                  <th>Option</th>
+                  <th>Description</th>
+               </tr>
+            </thead>
+            <tbody>
+               <tr>
+                  <td class="varlistoption"><span class="option">--merge</span></td>
+                  <td>
+                     
+                     <p>Усе наступныя імі файлаў будуць дададзеныя як зыходныя файлы ў бягучае
+                        заданне зліцця. Гэта стандартны рэжым.</p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><span class="option">--info</span></td>
+                  <td>
+                     
+                     <p>Усе наступныя файлы будуць адкрытыя ў інструменце звестак.</p>
+                     
+                     <p>Акрамя таго, пры запуску будзе выбраны інструмент звестак замест інструмента
+                        зліцця.</p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><span class="option">--edit-chapters</span></td>
+                  <td>
+                     
+                     <p>Усе наступныя файлы будуць адкрытыя ў рэдактары загалоўкаў.</p>
+                     
+                     <p>Акрамя таго, пры запуску будзе выбраны рэдактар раздзелаў замест
+                        інструммента зліцця.</p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><span class="option">--edit-headers</span></td>
+                  <td>
+                     
+                     <p>Усе наступныя імі файлаў будуць адкрытыя ў рэдактары загалоўкаў.</p>
+                     
+                     <p>Акрамя таго, пры запуску будзе выбраны рэдактар загалоўкаў замест
+                        інструмента зліцця.</p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><span class="option">-h</span>, <span class="option">--help</span></td>
+                  <td>
+                     
+                     <p>
+                        Паказаць звесткі аб выкарыстанні і выйсці.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><span class="option">-V</span>, <span class="option">--version</span></td>
+                  <td>
+                     
+                     <p>
+                        Паказаць звесткі аб версіі і выйсці.
+                        </p>
+                     </td>
+               </tr>
+            </tbody>
+         </table>
+         
+         <h1><a name="mkvtoolnix-gui.seealso">3. Глядзіце таксама</a><a class="headerlink" href="#mkvtoolnix-gui.seealso" title="Link to this heading">#</a></h1>
+         
+         
+         <p>
+            <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a>, <a href="mkvextract.html"><span class="productname">mkvextract</span>(1)</a>, <a href="mkvinfo.html"><span class="productname">mkvinfo</span>(1)</a>, <a href="mkvpropedit.html"><span class="productname">mkvpropedit</span>(1)</a>
+            </p>
+         
+         <h1><a name="mkvtoolnix-gui.www">4. Хатняя старонка</a><a class="headerlink" href="#mkvtoolnix-gui.www" title="Link to this heading">#</a></h1>
+         
+         
+         <p>
+            Апошняя версія праграмы заўсёды даступная на <a href="https://mkvtoolnix.download/">хатняй старонцы MKVToolNix</a>.
+            </p>
+         </div>
+   </body>
+</html>

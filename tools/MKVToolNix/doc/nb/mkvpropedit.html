@@ -1,0 +1,1172 @@
+<!DOCTYPE html
+  PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
+<html>
+   <head>
+      <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+      <title>mkvpropedit -- Endre egenskapene til eksisterende Matroska filer uten en fullstendig
+demultipleksing</title>
+      <link rel="stylesheet" type="text/css" href="mkvtoolnix-doc.css">
+   </head>
+   <body>
+      <div class="heading">mkvpropedit -- Endre egenskapene til eksisterende <span class="productname">Matroska</span><sup>(tm)</sup> filer uten en fullstendig
+         demultipleksing</div>
+      <hr>
+      <div id="toc" class="toc">
+         <h1>Table of contents</h1>
+         <ul>
+            <li><a href="#mkvpropedit.synopsis">1. Sammendrag</a></li>
+            <li><a href="#mkvpropedit.description">2. Beskrivelse</a></li>
+            <li><a href="#mkvpropedit.edit_selectors">3. Rediger-selektorer</a></li>
+            <li><a href="#mkvpropedit.attachment_selectors">4. Vedleggsvelgere</a></li>
+            <li><a href="#mkvpropedit.language_handling">5. Språkhåndtering</a></li>
+            <li><a href="#mkvpropedit.examples">6. Eksempler</a></li>
+            <li><a href="#d4e1318">7. Avslutningskoder</a></li>
+            <li><a href="#mkvinfo.text_files_and_charsets">8. Tekstfiler og tegnsettkonverteringer</a></li>
+            <li><a href="#mkvpropedit.environment_variables">9. Miljøvariabler</a></li>
+            <li><a href="#mkvpropedit.seealso">10. Se også</a></li>
+            <li><a href="#mkvpropedit.www">11. WWW</a></li>
+         </ul>
+      </div>
+      <div class="content">
+         <h1><a name="mkvpropedit.synopsis">1. Sammendrag</a><a class="headerlink" href="#mkvpropedit.synopsis" title="Link to this heading">#</a></h1>
+         
+         
+         <div class="cmdsynopsis"><span class="commandname">mkvpropedit</span> alternativer {kildefilnavn} {handlinger}</div>
+         
+         <h1><a name="mkvpropedit.description">2. Beskrivelse</a><a class="headerlink" href="#mkvpropedit.description" title="Link to this heading">#</a></h1>
+         
+         
+         <p>
+            Dette programmet analyserer en eksisterende <span class="productname">Matroska</span><sup>(tm)</sup> fil og endrer noen av
+            dens egenskaper. Deretter skriver den disse endringene til den eksisterende
+            filen. Blant egenskapene som kan endres, er segmentinformasjonselementene
+            (f.eks. tittelen) og spordatahodene (f.eks. språkkoden,
+            'standardspor'-flagget eller navnet).
+            </p>
+         
+         
+         <p>
+            Alternativer:
+            </p>
+         
+         
+         <table class="variablelist">
+            <thead>
+               <tr>
+                  <th>Option</th>
+                  <th>Description</th>
+               </tr>
+            </thead>
+            <tbody>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.list_property_names"><span class="option">-l</span>, <span class="option">--list-property-names</span></a><a class="headerlink" href="#mkvpropedit.description.list_property_names" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Viser alle kjente og redigerbare egenskapsnavn, deres type (streng, heltall,
+                        boolsk osv.) og en kort beskrivelse. Programmet avsluttes
+                        etterpå. Parameteren <span class="parameter">kilde-filnavn</span> trenger derfor
+                        ikke å angis.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.parse_mode"><span class="option">-p</span>, <span class="option">--parse-mode</span>
+                        <span class="parameter">modus</span></a><a class="headerlink" href="#mkvpropedit.description.parse_mode" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Angir analysemodusen. Parameteren '<span class="parameter">modus</span>' kan enten
+                        være '<span class="literal">fast</span>' (som også er standard) eller
+                        '<span class="literal">full</span>'. '<span class="literal">Rask</span>'-modus analyserer ikke
+                        hele filen, men bruker metasøkelementene for å finne de nødvendige
+                        elementene i en kildefil. I 99% av alle tilfeller er dette nok. Men for
+                        filer som ikke inneholder metasøkingselementer eller som er skadet, må
+                        brukeren kanskje sette "<span class="literal">full</span>"-analysemodus. En full
+                        skanning av en fil kan ta et par minutter, mens en rask skanning bare tar
+                        sekunder.
+                        </p>
+                     </td>
+               </tr>
+            </tbody>
+         </table>
+         
+         
+         <p>
+            Handlinger som omhandler egenskaper for spor- og segmentinformasjon:
+            </p>
+         
+         
+         <table class="variablelist">
+            <thead>
+               <tr>
+                  <th>Option</th>
+                  <th>Description</th>
+               </tr>
+            </thead>
+            <tbody>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.edit"><span class="option">-e</span>, <span class="option">--edit</span> <span class="parameter">selektor</span></a><a class="headerlink" href="#mkvpropedit.description.edit" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Angir <span class="productname">Matroska</span><sup>(tm)</sup> fildelen (segmentinformasjon eller datahodene til et
+                        bestemt spor) som alle etterfølgende <a href="#mkvpropedit.description.add">legg til</a>, <a href="#mkvpropedit.description.set">angi</a> og <a href="#mkvpropedit.description.delete">slett</a>-handlinger fungerer
+                        på. Dette alternativet kan brukes flere ganger for å gjøre endringer i mer
+                        enn ett element.
+                        </p>
+                     
+                     
+                     <p>
+                        Som standard vil <span class="productname">mkvpropedit</span>(1) redigere segmentinformasjonsdelen.
+                        </p>
+                     
+                     
+                     <p>
+                        Se avsnittet om <a href="#mkvpropedit.edit_selectors">rediger-selektorer</a> for en
+                        fullstendig beskrivelse av syntaksen.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.add"><span class="option">-a</span>, <span class="option">--add</span>
+                        <span class="parameter">navn</span>=<span class="parameter">verdi</span></a><a class="headerlink" href="#mkvpropedit.description.add" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Legger til en egenskap <span class="parameter">navn</span> med verdien
+                        <span class="parameter">verdi</span>. Egenskapen vil bli lagt til selv om en slik
+                        egenskap allerede eksisterer. Vær oppmerksom på at de fleste egenskaper er
+                        unike og ikke kan forekomme mer enn én gang.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.set"><span class="option">-s</span>, <span class="option">--set</span>
+                        <span class="parameter">navn</span>=<span class="parameter">verdi</span></a><a class="headerlink" href="#mkvpropedit.description.set" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Setter alle forekomster av egenskapen <span class="parameter">navn</span> til
+                        verdien <span class="parameter">verdi</span>. Hvis ingen slik egenskap eksisterer,
+                        vil den bli lagt til.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.delete"><span class="option">-d</span>, <span class="option">--delete</span> <span class="parameter">navn</span></a><a class="headerlink" href="#mkvpropedit.description.delete" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Sletter alle forekomster av egenskapen <span class="parameter">navn</span>. Vær
+                        oppmerksom på at enkelte egenskaper er obligatoriske og ikke kan slettes.
+                        </p>
+                     </td>
+               </tr>
+            </tbody>
+         </table>
+         
+         
+         <p>
+            Handlinger som omhandler tagger og kapitler:
+            </p>
+         
+         
+         <table class="variablelist">
+            <thead>
+               <tr>
+                  <th>Option</th>
+                  <th>Description</th>
+               </tr>
+            </thead>
+            <tbody>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.tags"><span class="option">-t</span>, <span class="option">--tags</span>
+                        <span class="parameter">selektor</span>:<span class="parameter">filnavn</span></a><a class="headerlink" href="#mkvpropedit.description.tags" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Legg til eller erstatt tagger i filen med de fra
+                        <span class="filename">filnavnet</span>, eller fjern dem hvis
+                        <span class="filename">filnavnet</span> er tomt. <span class="productname">mkvpropedit</span>(1) leser det samme
+                        XML-taggformatet som <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a> leser også.
+                        </p>
+                     
+                     
+                     <p>
+                        <span class="parameter">Selektoren</span> må være et av ordene
+                        <span class="constant">all</span>, <span class="constant">global</span> eller
+                        <span class="constant">track</span>. For <span class="constant">all</span> vil <span class="productname">mkvpropedit</span>(1)
+                        erstatte eller fjerne alle tagger i en fil. Med <span class="constant">global</span>
+                        vil bare globale tagger bli erstattet eller fjernet.
+                        </p>
+                     
+                     
+                     <p>
+                        Med <span class="constant">track</span> vil <span class="productname">mkvpropedit</span>(1) erstatte tagger for et
+                        bestemt spor. I tillegg vil taggene som leses fra
+                        <span class="filename">filnavn</span> bli tilordnet samme spor. Sporet spesifiseres
+                        på samme måte som <a href="#mkvpropedit.edit_selectors">rediger-selektorer</a> spesifiseres
+                        (se nedenfor), f.eks. <span class="code">--tags track:a1:nye-lyd-tagger.xml</span>.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.add_track_statistics_tags"><span class="option">--add-track-statistics-tags</span></a><a class="headerlink" href="#mkvpropedit.description.add_track_statistics_tags" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Beregner statistikk for alle spor i en fil og legger til nye
+                        statistikktagger for dem. Hvis filen allerede inneholder slike tagger, blir
+                        de oppdatert.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.delete_track_statistics_tags"><span class="option">--delete-track-statistics-tags</span></a><a class="headerlink" href="#mkvpropedit.description.delete_track_statistics_tags" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Sletter alle eksisterende sporstatistikktagger fra en fil. Hvis filen ikke
+                        inneholder sporstatistikktagger, blir den ikke endret.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.chapters"><span class="option">-c</span>, <span class="option">--chapters</span>
+                        <span class="parameter">filnavn</span></a><a class="headerlink" href="#mkvpropedit.description.chapters" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Legg til eller erstatt kapitler i filen med de fra
+                        <span class="filename">filnavnet</span>, eller fjern dem hvis
+                        <span class="filename">filnavnet</span> er tomt. <span class="productname">mkvpropedit</span>(1) leser samme XML og
+                        enkle kapittelformater som <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a> også leser.
+                        </p>
+                     </td>
+               </tr>
+            </tbody>
+         </table>
+         
+         
+         <p>
+            Handlinger for håndtering av vedlegg:
+            </p>
+         
+         
+         <table class="variablelist">
+            <thead>
+               <tr>
+                  <th>Option</th>
+                  <th>Description</th>
+               </tr>
+            </thead>
+            <tbody>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.add_attachment"><span class="option">--add-attachment</span> <span class="parameter">filnavn</span></a><a class="headerlink" href="#mkvpropedit.description.add_attachment" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Legg til et nytt vedlegg fra <span class="parameter">filnavn</span>.
+                        </p>
+                     
+                     
+                     <p>
+                        Hvis alternativet <span class="option">--attachment-name</span> har blitt brukt før
+                        dette alternativet, brukes verdien som navnet på det nye vedlegget. Ellers
+                        er det avledet fra <span class="parameter">filnavn</span>.
+                        </p>
+                     
+                     
+                     <p>
+                        Hvis alternativet <span class="option">--attachment-mime-type</span> er brukt før dette
+                        alternativet, brukes verdien som MIME-typen for det nye vedlegget. Ellers
+                        oppdages det automatisk fra innholdet i <span class="parameter">filnavnet</span>.
+                        </p>
+                     
+                     
+                     <p>
+                        Hvis alternativet <span class="option">--attachment-description</span> har blitt brukt
+                        før dette alternativet, brukes verdien som beskrivelsen av det nye
+                        vedlegget. Ellers vil ingen beskrivelse bli satt.
+                        </p>
+                     
+                     
+                     <p>
+                        Hvis alternativet <span class="option">--attachment-uid</span> har blitt brukt før
+                        dette alternativet, brukes verdien som det nye vedleggets UID. Ellers
+                        genereres en tilfeldig UID automatisk.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.replace_attachment"><span class="option">--replace-attachment</span>
+                        <span class="parameter">selektor</span><span class="literal">:</span><span class="parameter">filnavn</span></a><a class="headerlink" href="#mkvpropedit.description.replace_attachment" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Erstatter ett eller flere vedlegg som samsvarer
+                        <span class="parameter">selektor</span> med filen
+                        <span class="parameter">filnavn</span>. Hvis mer enn ett eksisterende vedlegg
+                        samsvarer med <span class="parameter">selektor</span>, erstattes alt innholdet av
+                        innholdet i <span class="parameter">filnavnet</span>.
+                        </p>
+                     
+                     
+                     <p>
+                        <span class="parameter">Selektoren</span> kan ha en av fire former. De er forklart
+                        nedenfor i avsnittet <a href="#mkvpropedit.attachment_selectors">vedlegg-selektorer</a>.
+                        </p>
+                     
+                     
+                     <p>
+                        Hvis alternativet <span class="option">--attachment-name</span> har blitt brukt før
+                        dette alternativet, angis verdien som det nye navnet for hvert endret
+                        vedlegg. Ellers endres ikke navnene.
+                        </p>
+                     
+                     
+                     <p>
+                        Hvis alternativet <span class="option">--attachment-mime-type</span> har blitt brukt
+                        før dette alternativet, angis verdien som den nye MIME-typen for hvert
+                        endret vedlegg. Ellers endres ikke MIME-typene.
+                        </p>
+                     
+                     
+                     <p>
+                        Hvis alternativet <span class="option">--attachment-description</span> har blitt brukt
+                        før dette alternativet, angis verdien som den nye beskrivelsen for hvert
+                        modifisert vedlegg. Ellers endres ikke beskrivelsene.
+                        </p>
+                     
+                     
+                     <p>
+                        Hvis alternativet <span class="option">--attachment-uid</span> har blitt brukt før
+                        dette alternativet, angis verdien som den nye UID-en for hvert endrede
+                        vedlegg. Ellers endres ikke UID-ene.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.update_attachment"><span class="option">--update-attachment</span> <span class="parameter">selektor</span></a><a class="headerlink" href="#mkvpropedit.description.update_attachment" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Angir egenskapene for ett eller flere vedlegg som samsvarer med
+                        <span class="parameter">selektoren</span>. Hvis mer enn ett eksisterende vedlegg
+                        samsvarer med <span class="parameter">selektoren</span>, oppdateres alle
+                        egenskapene.
+                        </p>
+                     
+                     
+                     <p>
+                        <span class="parameter">Selektoren</span> kan ha en av fire former. De er forklart
+                        nedenfor i avsnittet <a href="#mkvpropedit.attachment_selectors">vedlegg-selektorer</a>.
+                        </p>
+                     
+                     
+                     <p>
+                        Hvis alternativet <span class="option">--attachment-name</span> har blitt brukt før
+                        dette alternativet, angis verdien som det nye navnet for hvert endret
+                        vedlegg. Ellers endres ikke navnene.
+                        </p>
+                     
+                     
+                     <p>
+                        Hvis alternativet <span class="option">--attachment-mime-type</span> har blitt brukt
+                        før dette alternativet, angis verdien som den nye MIME-typen for hvert
+                        endret vedlegg. Ellers endres ikke MIME-typene.
+                        </p>
+                     
+                     
+                     <p>
+                        Hvis alternativet <span class="option">--attachment-description</span> har blitt brukt
+                        før dette alternativet, angis verdien som den nye beskrivelsen for hvert
+                        modifisert vedlegg. Ellers endres ikke beskrivelsene.
+                        </p>
+                     
+                     
+                     <p>
+                        Hvis alternativet <span class="option">--attachment-uid</span> har blitt brukt før
+                        dette alternativet, angis verdien som den nye UID-en for hvert endrede
+                        vedlegg. Ellers endres ikke UID-ene.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.delete_attachment"><span class="option">--delete-attachment</span> <span class="parameter">selektor</span></a><a class="headerlink" href="#mkvpropedit.description.delete_attachment" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Sletter ett eller flere vedlegg som samsvarer med
+                        <span class="parameter">selektoren</span>.
+                        </p>
+                     
+                     
+                     <p>
+                        <span class="parameter">Selektoren</span> kan ha en av fire former. De er forklart
+                        nedenfor i avsnittet <a href="#mkvpropedit.attachment_selectors">vedlegg-selektorer</a>.
+                        </p>
+                     </td>
+               </tr>
+            </tbody>
+         </table>
+         
+         
+         <p>
+            Alternativer for vedleggshandlinger:
+            </p>
+         
+         
+         <table class="variablelist">
+            <thead>
+               <tr>
+                  <th>Option</th>
+                  <th>Description</th>
+               </tr>
+            </thead>
+            <tbody>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.attachment_name"><span class="option">--attachment-name</span> <span class="parameter">navn</span></a><a class="headerlink" href="#mkvpropedit.description.attachment_name" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Angir navnet som skal brukes for følgende <span class="option">--add-attachment</span>-
+                        eller <span class="option">--replace-attachment</span>-operasjon.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.attachment_mime_type"><span class="option">--attachment-mime-type</span> <span class="parameter">mime-type</span></a><a class="headerlink" href="#mkvpropedit.description.attachment_mime_type" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Angir MIME-typen som skal brukes for følgende
+                        <span class="option">--add-attachment</span>- eller
+                        <span class="option">--replace-attachment</span>-operasjon.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.attachment_description"><span class="option">--attachment-description</span> <span class="parameter">beskrivelse</span></a><a class="headerlink" href="#mkvpropedit.description.attachment_description" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Angir beskrivelsen som skal brukes for følgende
+                        <span class="option">--add-attachment</span>- eller
+                        <span class="option">--replace-attachment</span>-operasjon.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.enable_legacy_font_mime_types"><span class="option">--enable-legacy-font-mime-types</span></a><a class="headerlink" href="#mkvpropedit.description.enable_legacy_font_mime_types" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Aktiverer bruk av eldre <span class="abbrev">MIME</span>-typer for visse typer
+                        skriftvedlegg. For eksempel vil
+                        '<span class="literal">application/x-truetype-font</span>' bli brukt for
+                        TrueType-fonter i stedet for '<span class="literal">fonts/ttf</span>'.
+                        </p>
+                     
+                     
+                     <p>
+                        Dette påvirker både å legge til nye vedlegg og erstatte eksisterende
+                        vedlegg, men bare hvis den nye <span class="abbrev">MIME</span>-typen ikke er
+                        angitt. Andre eksisterende vedlegg endres ikke.
+                        </p>
+                     
+                     
+                     <p>
+                        De berørte <span class="abbrev">MIME</span>-typene er '<span class="literal">font/sfnt</span>',
+                        '<span class="literal">font/ttf</span>' og '<span class="literal">font/collection</span>' som
+                        alle er tilordnet '<span class="literal">application/x-truetype-fonts</span>' og
+                        '<span class="literal">font/otf</span>' som er tilordnet '<span class="literal">application/vnd'
+                           .ms-opentype</span>'.
+                        </p>
+                     </td>
+               </tr>
+            </tbody>
+         </table>
+         
+         
+         <p>
+            Andre alternativer:
+            </p>
+         
+         
+         <table class="variablelist">
+            <thead>
+               <tr>
+                  <th>Option</th>
+                  <th>Description</th>
+               </tr>
+            </thead>
+            <tbody>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.disable_language_ietf"><span class="option">--disable-language-ietf</span></a><a class="headerlink" href="#mkvpropedit.description.disable_language_ietf" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Vanligvis når brukeren ber om endringer i
+                        '<span class="literal">language</span>'-spordatahodet-egenskapen, vil <span class="productname">mkvpropedit</span>(1)
+                        anvende den samme endringen på det nye
+                        <span class="classname">LanguageIETF</span>-spordatahodeelementet i tillegg til det
+                        eldre <span class="classname">Language</span>-elementet. Hvis dette alternativet
+                        brukes, blir endringen bare brukt på det eldre
+                        <span class="classname">Language</span>-elementet.
+                        </p>
+                     
+                     
+                     <p>
+                        Dette alternativet påvirker ikke endringer forespurt via
+                        spordatahodeegenskapen '<span class="literal">language-ietf'</span>.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.normalize_language_ietf"><span class="option">--normalize-language-ietf</span> <span class="parameter">modus</span></a><a class="headerlink" href="#mkvpropedit.description.normalize_language_ietf" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Gjør det mulig å normalisere alle IETF BCP 47-språktagger til enten deres
+                        kanoniske form med modus '<span class="literal">kanonisk</span>', til deres utvidede
+                        språkundertagger dannes med modus '<span class="literal">extlang</span>' eller slår
+                        den av med modus '<span class="literal">av</span>'. Som standard brukes normalisering
+                        til den kanoniske formen.
+                        </p>
+                     
+                     
+                     <p>
+                        I kanonisk form erstattes alle undertagger som det finnes foretrukne verdier
+                        for, med de foretrukne verdiene. Dette konverterer for eksempel
+                        '<span class="literal">zh-yue-jyutping</span>' til '<span class="literal">yue-jyutping</span>'
+                        eller '<span class="literal">fr-FX</span>' til '<span class="literal">fr-FR</span>'.
+                        </p>
+                     
+                     
+                     <p>
+                        For undertaggene for utvidet språk bygges den kanoniske formen
+                        først. Deretter erstattes alle primærspråk som det finnes en utvidet
+                        språkundertagg for, med den utvidede språkundertaggen og prefikset. Dette
+                        konverterer for eksempel '<span class="literal">yue-jyutping</span>' tilbake til
+                        '<span class="literal">zh-yue-jyutping</span>', men har ingen effekt på
+                        '<span class="literal">fr-FR</span>' da '<span class="literal">fr</span>' ikke er en undertagg
+                        for utvidet språk.
+                        </p>
+                     
+                     
+                     <p>
+                        Denne normaliseringen anvendes bare på elementer som faktisk endres:
+                        </p>
+                     
+                     
+                     <ul>
+                        
+                        <li>
+                           
+                           <p>
+                              Når du redigerer spordatahoder, påvirkes bare sporspråkelementene som angis
+                              via redigeringsspesifikasjoner. Språk for spor som ikke redigeres, endres
+                              ikke. Hvis du redigerer et spor, men bare angir andre egenskaper enn
+                              språket, påvirkes heller ikke språket.
+                              </p>
+                           </li>
+                        
+                        
+                        <li>
+                           
+                           <p>
+                              Når du redigerer kapitler, påvirkes alle språkelementer i alle
+                              kapittelelementene, da eksisterende kapitler alltid erstattes fullstendig.
+                              </p>
+                           </li>
+                        
+                        
+                        <li>
+                           
+                           <p>
+                              Når du redigerer tagger, påvirkes bare språkelementene i taggene som faktisk
+                              erstattes. Når du for eksempel erstatter globale tagger, påvirkes ikke
+                              eksisterende sportagger.
+                              </p>
+                           </li>
+                        </ul>
+                     
+                     
+                     <p>
+                        Den beste måten å normalisere alle eksisterende språktagger i en fil er å
+                        multiplekse den med <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a> og sette alternativet
+                        '<span class="literal">--normalize-language-ietf</span>' til ønsket modus.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.command_line_charset"><span class="option">--command-line-charset</span> <span class="parameter">character-set</span></a><a class="headerlink" href="#mkvpropedit.description.command_line_charset" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Angir tegnsettet for å konvertere strenger fra gitt på kommandolinjen. Den
+                        er standard til tegnsettet gitt av systemets gjeldende lokalitet.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.output_charset"><span class="option">--output-charset</span> <span class="parameter">character-set</span></a><a class="headerlink" href="#mkvpropedit.description.output_charset" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Angir tegnsettet som strenger konverteres til som skal sendes ut. Den er
+                        standard til tegnsettet gitt av systemets gjeldende lokalitet.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.redirect_output"><span class="option">-r</span>, <span class="option">--redirect-output</span>
+                        <span class="parameter">filnavn</span></a><a class="headerlink" href="#mkvpropedit.description.redirect_output" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Skriver alle meldinger til filen <span class="parameter">filnavn</span> i stedet for
+                        til konsollen.  Selv om dette kan gjøres enkelt med omdirigering av utdata,
+                        er det tilfeller der dette alternativet er nødvendig: når terminalen tolker
+                        utdataene på nytt før du skriver den til en fil. Tegnsettet angitt med <a href="#mkvpropedit.description.output_charset">--output-charset</a>
+                        er hedret.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.ui_language"><span class="option">--ui-language</span> <span class="parameter">kode</span></a><a class="headerlink" href="#mkvpropedit.description.ui_language" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Tvinger oversettelsene for språk- <span class="parameter">koden</span> som skal
+                        brukes (eks.  '<span class="literal">de_DE</span>' for tyske oversettelser). Ved å
+                        skrive inn '<span class="literal">list</span>' som <span class="parameter">koden</span> vil
+                        føre til at programmet sender ut en liste over tilgjengelige oversettelser.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.abort_on_warnings"><span class="option">--abort-on-warnings</span></a><a class="headerlink" href="#mkvpropedit.description.abort_on_warnings" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Ber programmet om å avbryte etter at den første advarselen er sendt
+                        ut. Programmets avslutningskode vil være 1.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.debug"><span class="option">--debug</span> <span class="parameter">emne</span></a><a class="headerlink" href="#mkvpropedit.description.debug" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Slå på feilsøking for en bestemt funksjon. Dette alternativet er bare nyttig
+                        for utviklere.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.engage"><span class="option">--engage</span> <span class="parameter">funksjon</span></a><a class="headerlink" href="#mkvpropedit.description.engage" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Slå på eksperimentelle funksjoner. En liste over tilgjengelige funksjoner
+                        kan bes med <span class="command">mkvpropedit --engage-list</span>. Disse funksjonene
+                        er ikke ment å brukes i normale situasjoner.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.gui_mode"><span class="option">--gui-mode</span></a><a class="headerlink" href="#mkvpropedit.description.gui_mode" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Slår på det grafiske grensesnittet. I denne modusen kan spesialformaterte
+                        linjer være utdata som kan fortelle et kontrollerende grafisk grensesnitt
+                        hva som skjer. Disse meldingene følger formatet
+                        '<span class="literal">#GUI#melding</span>'. Meldingen kan etterfølges av
+                        nøkkel/verdipar som i
+                        '<span class="literal">#GUI#melding#nøkkel1=verdi1#nøkkel2=verdi2…</span>'. Verken
+                        meldingene eller nøklene blir noen gang oversatt og sendes alltid ut på
+                        engelsk.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.verbose"><span class="option">-v</span>, <span class="option">--verbose</span></a><a class="headerlink" href="#mkvpropedit.description.verbose" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Vær detaljert og vis alle de viktige <span class="productname">Matroska</span><sup>(tm)</sup> elementene mens de leses.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.help"><span class="option">-h</span>, <span class="option">--help</span></a><a class="headerlink" href="#mkvpropedit.description.help" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Vis bruksinformasjon og avslutt.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.version"><span class="option">-V</span>, <span class="option">--version</span></a><a class="headerlink" href="#mkvpropedit.description.version" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Vis versjonsinformasjon og avslutt.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.at_sign"><span class="option">@</span><span class="parameter">alternativer-fil.json</span></a><a class="headerlink" href="#mkvpropedit.description.at_sign" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Leser flere kommandolinjeargumenter fra filen
+                        <span class="parameter">alternativer-fil</span>. Hvis du vil ha en fullstendig
+                        forklaring på hvilke formater som støttes for slike filer, kan du se
+                        avsnittet "Alternativfiler" i <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a> manualside.
+                        </p>
+                     </td>
+               </tr>
+            </tbody>
+         </table>
+         
+         <h1><a name="mkvpropedit.edit_selectors">3. Rediger-selektorer</a><a class="headerlink" href="#mkvpropedit.edit_selectors" title="Link to this heading">#</a></h1>
+         
+         
+         <p>
+            <a href="#mkvpropedit.description.edit">--edit</a>-alternativet
+            angir <span class="productname">Matroska</span><sup>(tm)</sup> fildelen (segmentinformasjon eller datahodene til et
+            bestemt spor) som alle følgende <a href="#mkvpropedit.description.add">add</a>, <a href="#mkvpropedit.description.set">set</a> og <a href="#mkvpropedit.description.delete">delete</a> handlinger opererer
+            på. Dette forblir gyldig til neste <a href="#mkvpropedit.description.edit">--edit</a>-alternativet
+            er funnet. Argumentet til dette alternativet kalles redigeringsselektoren.
+            </p>
+         
+         
+         <p>
+            Som standard vil <span class="productname">mkvpropedit</span>(1) redigere segmentinformasjonsdelen.
+            </p>
+         
+         
+         <h2><a name="mkvpropedit.edit_selectors.segment_info">3.1. Segmentinformasjon</a><a class="headerlink" href="#mkvpropedit.edit_selectors.segment_info" title="Link to this heading">#</a></h2>
+         
+         
+         <p>
+            Segmentinformasjonen kan velges med ett av disse tre ordene:
+            '<span class="literal">info</span>', '<span class="literal">segment_info</span>' eller
+            '<span class="literal">segmentinfo</span>'. Den inneholder egenskaper som
+            segmenttittelen eller segment-<span class="abbrev">UID-en</span>.
+            </p>
+         
+         
+         
+         <h2><a name="mkvpropedit.edit_selectors.track_headers">3.2. Spordatahoder</a><a class="headerlink" href="#mkvpropedit.edit_selectors.track_headers" title="Link to this heading">#</a></h2>
+         
+         
+         <p>
+            Spordatahoder kan velges med en litt mer kompleks selektor. Alle varianter
+            starter med '<span class="literal">track:</span>'. Egenskapene for sporhodet
+            inkluderer elementer som språkkoden, 'standardspor'-flagget eller sporets
+            navn.
+            </p>
+         
+         
+         <table class="variablelist">
+            <thead>
+               <tr>
+                  <th>Option</th>
+                  <th>Description</th>
+               </tr>
+            </thead>
+            <tbody>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.track_nth"><span class="option">track:</span><span class="parameter">n</span></a><a class="headerlink" href="#mkvpropedit.description.track_nth" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Hvis parameteren <span class="parameter">n</span> er et tall, velges det
+                        <span class="parameter">n</span>-te sporet. Sporrekkefølgen er den samme som
+                        <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a>s <span class="option">--identify</span>-alternativutdata.
+                        </p>
+                     
+                     
+                     <p>
+                        Nummereringen starter på 1.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.track_type_nth"><span class="option">track:</span><span class="parameter">t</span><span class="parameter">n</span></a><a class="headerlink" href="#mkvpropedit.description.track_type_nth" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Hvis parameteren starter med ett enkelt tegn <span class="parameter">t</span>
+                        etterfulgt av en <span class="parameter">n</span>vil <span class="parameter">n</span>-te
+                        spor av en bestemt sportype vil bli valgt. Parameteren for sportype
+                        <span class="parameter">t</span> må være en av disse fire tegnene:
+                        '<span class="literal">a</span>' for et lydspor, '<span class="literal">b</span>' for et
+                        knappsor, '<span class="literal">s</span>'for et undertekstspor og
+                        '<span class="literal">v</span>' for et videospor. Sporrekkefølgen er den samme som
+                        <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a>'s <span class="option">--identify</span>-alternativet sender ut.
+                        </p>
+                     
+                     
+                     <p>
+                        Nummereringen starter på 1.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.track_uid"><span class="option">track:</span>=<span class="parameter">uid</span></a><a class="headerlink" href="#mkvpropedit.description.track_uid" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Hvis parameteren starter med en '<span class="literal">=</span>' etterfulgt av en
+                        tall-<span class="parameter">uid</span>, vil sporet hvis
+                        spor-<span class="abbrev">UID</span>-element tilsvarer den gitte
+                        <span class="parameter">uid-en</span>, velges. Spor-<span class="abbrev">UID-er</span> kan fås
+                        med <a href="mkvinfo.html"><span class="productname">mkvinfo</span>(1)</a>.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.track_number"><span class="option">track:</span>@<span class="parameter">tall</span></a><a class="headerlink" href="#mkvpropedit.description.track_number" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Hvis parameteren starter med et '<span class="literal">@</span>' etterfulgt av et
+                        <span class="parameter">tallnummer</span>, vil sporet hvis spornummerelement
+                        tilsvarer dette <span class="parameter">nummeret</span> bli valgt. Spornumre kan fås
+                        med <a href="mkvinfo.html"><span class="productname">mkvinfo</span>(1)</a>.
+                        </p>
+                     </td>
+               </tr>
+            </tbody>
+         </table>
+         
+         
+         
+         <h2><a name="mkvpropedit.edit_selectors.notes">3.3. Merknader</a><a class="headerlink" href="#mkvpropedit.edit_selectors.notes" title="Link to this heading">#</a></h2>
+         
+         
+         <p>
+            På grunn av sporredigeringsvelgernes natur er det mulig at flere selektorer
+            faktisk samsvarer med de samme spordatahodene. I slike tilfeller vil alle
+            handlinger for disse redigeringsvelgerne bli kombinert og utført i den
+            rekkefølgen de er gitt på kommandolinjen.
+            </p>
+         
+         
+         <h1><a name="mkvpropedit.attachment_selectors">4. Vedleggsvelgere</a><a class="headerlink" href="#mkvpropedit.attachment_selectors" title="Link to this heading">#</a></h1>
+         
+         
+         
+         <p>
+            En vedleggsvelger brukes med de to handlingene <a href="#mkvpropedit.description.replace_attachment">--replace-attachment</a>
+            og <a href="#mkvpropedit.description.delete_attachment">--delete-attachment</a>.
+            Den kan ha en av følgende fire former:
+            </p>
+         
+         
+         <ol>
+            
+            <li>
+               
+               <p>
+                  Valg etter vedleggs-ID. I denne formen er velgeren ganske enkelt et tall,
+                  vedleggets ID som sendt ut av <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a>s identifikasjonskommando.
+                  </p>
+               </li>
+            
+            
+            <li>
+               
+               <p>
+                  Valg etter vedlegg-UID (unik ID). I denne formen er velgeren likhetstegnet
+                  <span class="literal">=</span> etterfulgt av et tall, vedleggets unike ID som utdata
+                  av <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a>s ordrike identifikasjonskommando.
+                  </p>
+               </li>
+            
+            
+            <li>
+               
+               <p>
+                  Valg etter vedleggsnavn. I denne formen er velgeren det bokstavelige
+                  <span class="literal">navnet</span>: etterfulgt av det eksisterende vedleggets
+                  navn. Hvis denne velgeren brukes med <span class="option">--replace-attachment</span>,
+                  må kolon i navnet som skal samsvare, unnslippes som <span class="literal">\c</span>.
+                  </p>
+               </li>
+            
+            
+            <li>
+               
+               <p>
+                  Valg etter MIME-type. I denne formen er velgeren det bokstavelige ordet
+                  <span class="literal">mime-type:</span> etterfulgt av det eksisterende vedleggets
+                  MIME-type. Hvis denne velgeren brukes med
+                  <span class="option">--replace-attachment</span>, må koloner innenfor MIME-typen for å
+                  matche unnslippes som <span class="literal">\c</span>.
+                  </p>
+               </li>
+            </ol>
+         
+         <h1><a name="mkvpropedit.language_handling">5. Språkhåndtering</a><a class="headerlink" href="#mkvpropedit.language_handling" title="Link to this heading">#</a></h1>
+         
+         
+         
+         <p>
+            <span class="productname">mkvpropedit</span>(1) prøver for det meste å gjøre det rette som standard. Derfor
+            vil endringer i <span class="option">language</span>-egenskapen føre til at
+            <span class="productname">mkvpropedit</span>(1) anvender den samme endringen på både det nye
+            "LanguageIETF"-elementet og det gamle "Language"-elementet på samme måte som
+            <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a> bruker språket på begge elementene. For eksempel, når du bruker
+            <span class="literal">mkvpropedit film.mkv --edit track: 2 --set language =
+               zh-TW</span>, vil "LanguageIETF" -elementet bli satt til
+            <span class="literal">zh-TW</span> og det gamle "Language" -elementet til
+            <span class="literal">chi</span>.
+            </p>
+         
+         
+         <p>
+            I tillegg er det en ny spordatahodeegenskap kalt
+            <span class="option">language-ietf</span> som kan settes eller fjernes. Endringer i
+            denne egenskapen gjelder kun for det nye
+            "LanguageIETF"-sporhodeelementet. En advarsel er at det gamle "Language"
+            spordatahodeelementet er et obligatorisk element i Matroska - noe som betyr
+            at selv om det ikke er til stede i filen, har det fortsatt en underforstått
+            verdi. Når brukeren bare setter <span class="option">language-ietf</span>-egenskapen,
+            men ikke språkegenskapen, vil <span class="productname">mkvpropedit</span>(1) vil derfor legge til det gamle
+            "<span class="option">language</span>"-elementet i visse tilfeller &amp; sette den til
+            <span class="literal">und</span> (som betyr "ubestemt") siden brukeren ikke
+            spesifiserte en verdi for den.
+            </p>
+         
+         
+         <p>Når du leser XML-kapittel eller taggfiler fungerer <span class="productname">mkvpropedit</span>(1) som
+            <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a> gjør.</p>
+         
+         
+         <p>Opprettelsen av de nye elementene kan deaktiveres helt med
+            kommandolinjealternativet '--disable-language-ietf' som opererer på alle tre
+            nye elementene.</p>
+         
+         
+         <p>Du kan velge normaliseringsmetoden som brukes på utvidede språkundertagger
+            med parameteren <span class="option">--normalize-language-ietf</span>.</p>
+         
+         <h1><a name="mkvpropedit.examples">6. Eksempler</a><a class="headerlink" href="#mkvpropedit.examples" title="Link to this heading">#</a></h1>
+         
+         
+         <p>
+            Følgende eksempel redigerer en fil kalt '<span class="literal">film.mkv</span>'. Den
+            angir segmenttittelen og endrer språkkoden til en lyd og et
+            undertekstspor. Merk at dette eksemplet kan forkortes ved å utelate det
+            første <a href="#mkvpropedit.description.edit">--edit</a>-alternativet
+            fordi redigering av segmentinformasjonselementet er standard for alle
+            alternativene som finnes før det første <a href="#mkvpropedit.description.edit">--edit</a>-alternativet
+            uansett.
+            </p>
+         
+         
+         <pre class="screen">$ mkvpropedit film.mkv --edit info --set "title=Filmen" --edit track:a1 --set language=fre --edit track:a2 --set language=ita</pre>
+         
+         
+         <p>
+            Det andre eksemplet fjerner 'standard sporflagg' fra det første
+            undertekstsporet og angir det for det andre. Merk at <span class="productname">mkvpropedit</span>(1), i
+            motsetning til <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a>, ikke setter 'standard sporflagg' for andre spor
+            til '0' hvis den er satt til '1' for et annet spor automatisk.
+            </p>
+         
+         
+         <pre class="screen">$ mkvpropedit film.mkv --edit track:s1 --set flag-default=0 --edit track:s2 --set flag-default=1</pre>
+         
+         
+         <p>
+            Bytting av taggene for det andre undertekstsporet i en fil ser slik ut:
+            </p>
+         
+         
+         <pre class="screen">$ mkvpropedit film.mkv --tags track:s2:nye-undertekst-tagger.xml</pre>
+         
+         
+         <p>
+            Hvis du fjerner alle tagger, må du utelate filnavnet:
+            </p>
+         
+         
+         <pre class="screen">$ mkvpropedit film.mkv --tags all:</pre>
+         
+         
+         <p>
+            Erstatte kapitlene i en fil ser slik ut:
+            </p>
+         
+         
+         <pre class="screen">$ mkvpropedit film.mkv --chapters nye-kapitler.xml</pre>
+         
+         
+         <p>
+            Fjerning av alle kapitler krever at du utelater filnavnet:
+            </p>
+         
+         
+         <pre class="screen">$ mkvpropedit film.mkv --chapters ''</pre>
+         
+         
+         <p>
+            Legge til en fontfil (<span class="literal">Arial.ttf</span>) som et vedlegg:
+            </p>
+         
+         
+         <pre class="screen">$ mkvpropedit film.mkv --add-attachment Arial.ttf</pre>
+         
+         
+         <p>
+            Legge til en fontfil (<span class="literal">89719823.ttf</span>) som et vedlegg og gi
+            litt informasjon siden det egentlig bare er Arial:
+            </p>
+         
+         
+         <pre class="screen">$ mkvpropedit film.mkv --attachment-name Arial.ttf --attachment-description 'Arial-skriften som en TrueType skrift' --attachment-mime-type application/x-truetype-font --add-attachment 89719823.ttf</pre>
+         
+         
+         <p>
+            Bytte ut en vedlagt font (<span class="literal">Comic.ttf</span>) fil med en annen
+            (<span class="literal">Arial.ttf</span>):
+            </p>
+         
+         
+         <pre class="screen">$ mkvpropedit film.mkv --attachment-name Arial.ttf --attachment-description 'Arial-skrift som en TrueType skrift' --replace-attachment name:Comic.ttf:Arial.ttf</pre>
+         
+         
+         <p>
+            Sletting av den andre vedlagte filen, uansett hva den måtte være:
+            </p>
+         
+         
+         <pre class="screen">$ mkvpropedit film.mkv --delete-attachment 2</pre>
+         
+         
+         <p>
+            Sletter alle vedlagte skrifter etter MIME-type:
+            </p>
+         
+         
+         <pre class="screen">$ mkvpropedit film.mkv --delete-attachment mime-type:application/x-truetype-font</pre>
+         
+         <h1><a name="d4e1318">7. Avslutningskoder</a><a class="headerlink" href="#d4e1318" title="Link to this heading">#</a></h1>
+         
+         
+         
+         <p>
+            <span class="productname">mkvpropedit</span>(1) avsluttes med en av tre avslutningskoder:
+            </p>
+         
+         
+         <ul>
+            
+            <li>
+               
+               <p>
+                  <span class="constant">0</span> -- Denne avslutningskoden betyr at endringen er
+                  fullført.
+                  </p>
+               </li>
+            
+            
+            <li>
+               
+               <p>
+                  <span class="constant">1</span> -- I dette tilfellet har <span class="productname">mkvpropedit</span>(1) sendt ut minst
+                  en advarsel, men endringen fortsatte. En advarsel er prefikset med teksten
+                  '<span class="literal">Advarsel:</span>'.  Avhengig av problemene som er involvert,
+                  kan de resulterende filene være ok eller ikke. Brukeren oppfordres til å
+                  sjekke både advarselen og resultatfilene.
+                  </p>
+               </li>
+            
+            
+            <li>
+               
+               <p>
+                  <span class="constant">2</span> -- Denne avslutningskoden brukes etter at det oppstod
+                  en feil. <span class="productname">mkvpropedit</span>(1) avbryter rett etter at feilmeldingen er sendt
+                  ut. Feilmeldinger varierer fra feil kommandolinjeargumenter over
+                  lese-/skrivefeil til ødelagte filer.
+                  </p>
+               </li>
+            </ul>
+         
+         <h1><a name="mkvinfo.text_files_and_charsets">8. Tekstfiler og tegnsettkonverteringer</a><a class="headerlink" href="#mkvinfo.text_files_and_charsets" title="Link to this heading">#</a></h1>
+         
+         
+         
+         <p>
+            For en grundig diskusjon om hvordan alle verktøyene i MKVToolNix-pakken
+            håndterer tegnsettkonverteringer, inndata- / utdatakoding,
+            kommandolinjekoding og konsollkoding, se delen med identisk navn i
+            <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a> manualsiden.
+            </p>
+         
+         <h1><a name="mkvpropedit.environment_variables">9. Miljøvariabler</a><a class="headerlink" href="#mkvpropedit.environment_variables" title="Link to this heading">#</a></h1>
+         
+         
+         
+         <p>
+            <span class="productname">mkvpropedit</span>(1) bruker standardvariablene som bestemmer systemets lokalitet
+            (for eksempel <span class="varname">LANG</span> og
+            <span class="varname">LC_*</span>-familien). Ytterligere variabler:
+            </p>
+         
+         
+         <table class="variablelist">
+            <thead>
+               <tr>
+                  <th>Option</th>
+                  <th>Description</th>
+               </tr>
+            </thead>
+            <tbody>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.environment_variables.debug"><span class="varname">MKVPROPEDIT_DEBUG</span>, <span class="varname">MKVTOOLNIX_DEBUG</span> og
+                        dens korte form <span class="varname">MTX_DEBUG</span></a><a class="headerlink" href="#mkvpropedit.environment_variables.debug" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>Innholdet behandles som om det hadde blitt sendt via <a href="#mkvpropedit.description.debug">--debug</a>-alternativet.</p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.environment_variables.engage"><span class="varname">MKVPROPEDIT_ENGAGE</span>, <span class="varname">MKVTOOLNIX_ENGAGE</span>
+                        og dens korte form <span class="varname">MTX_ENGAGE</span></a><a class="headerlink" href="#mkvpropedit.environment_variables.engage" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>Innholdet behandles som om det hadde blitt sendt via <a href="#mkvpropedit.description.engage">--engage</a>-alternativet.</p>
+                     </td>
+               </tr>
+            </tbody>
+         </table>
+         
+         <h1><a name="mkvpropedit.seealso">10. Se også</a><a class="headerlink" href="#mkvpropedit.seealso" title="Link to this heading">#</a></h1>
+         
+         
+         <p>
+            <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a>, <a href="mkvinfo.html"><span class="productname">mkvinfo</span>(1)</a>, <a href="mkvextract.html"><span class="productname">mkvextract</span>(1)</a>, <a href="mkvtoolnix-gui.html"><span class="productname">mkvtoolnix-gui</span>(1)</a>
+            </p>
+         
+         <h1><a name="mkvpropedit.www">11. WWW</a><a class="headerlink" href="#mkvpropedit.www" title="Link to this heading">#</a></h1>
+         
+         
+         <p>
+            Den nyeste versjonen finner du alltid på <a href="https://mkvtoolnix.download/">MKVToolNixs hjemmeside</a>.
+            </p>
+         </div>
+   </body>
+</html>

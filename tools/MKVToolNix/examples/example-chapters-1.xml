@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="ISO-8859-1"?>
+
+<!DOCTYPE Chapters SYSTEM "matroskachapters.dtd">
+
+<!-- A simple example. The movie in question contains four parts: -->
+<!-- The intro starting at the beginning, the first act, the second -->
+<!-- act, and the credits. -->
+
+<!-- Note that the end timestamps are optional. -->
+
+<!-- The timestamps use the normal format of HH:MM:SS.mmm with -->
+<!-- HH beging the hour, MM the minute, SS the second and -->
+<!-- mmm the milliseconds. -->
+
+<Chapters>
+  <EditionEntry>
+    <EditionDisplay>
+      <EditionString>Example movie</EditionString>
+      <EditionLanguageIETF>en</EditionLanguageIETF>
+    </EditionDisplay>
+    <ChapterAtom>
+      <ChapterTimeStart>00:00:00.000</ChapterTimeStart>
+      <ChapterDisplay>
+        <ChapterString>Intro</ChapterString>
+        <ChapterLanguage>eng</ChapterLanguage>
+      </ChapterDisplay>
+      <ChapterSkipType>1</ChapterSkipType>
+    </ChapterAtom>
+    <ChapterAtom>
+      <ChapterTimeStart>00:01:00.000</ChapterTimeStart>
+      <ChapterDisplay>
+        <ChapterString>Act 1</ChapterString>
+        <ChapLanguageIETF>en</ChapLanguageIETF>
+      </ChapterDisplay>
+      <ChapterSkipType>0</ChapterSkipType>
+    </ChapterAtom>
+    <ChapterAtom>
+      <ChapterTimeStart>00:05:30.000</ChapterTimeStart>
+      <ChapterDisplay>
+        <ChapterString>Act 2</ChapterString>
+        <ChapLanguageIETF>en</ChapLanguageIETF>
+      </ChapterDisplay>
+      <ChapterSkipType>0</ChapterSkipType>
+    </ChapterAtom>
+    <ChapterAtom>
+      <ChapterTimeStart>00:12:20.000</ChapterTimeStart>
+      <ChapterTimeEnd>00:12:55.000</ChapterTimeEnd>
+      <ChapterDisplay>
+        <ChapterString>Credits</ChapterString>
+        <ChapLanguageIETF>en</ChapLanguageIETF>
+      </ChapterDisplay>
+      <ChapterSkipType>2</ChapterSkipType>
+    </ChapterAtom>
+  </EditionEntry>
+
+  <!-- There are two new flags that have been added to Matroska lately. -->
+  <!-- They are flags that enable/disable and hide/unhide chapters. -->
+  <!-- Here's just a small example: -->
+  <EditionEntry>
+    <ChapterAtom>
+      <ChapterTimeStart>00:02:00.000</ChapterTimeStart>
+      <ChapterTimeEnd>00:04:00.000</ChapterTimeEnd>
+      <ChapterFlagHidden>1</ChapterFlagHidden>
+      <ChapterFlagEnabled>0</ChapterFlagEnabled>
+      <ChapterDisplay>
+        <ChapterString>A hidden and not enabled chapter.</ChapterString>
+        <ChapterLanguage>eng</ChapterLanguage>
+      </ChapterDisplay>
+    </ChapterAtom>
+  </EditionEntry>
+</Chapters>

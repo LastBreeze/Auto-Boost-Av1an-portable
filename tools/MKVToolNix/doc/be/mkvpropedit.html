@@ -1,0 +1,1170 @@
+<!DOCTYPE html
+  PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
+<html>
+   <head>
+      <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+      <title>mkvpropedit -- Змена ўласцівасцяў існуючых файлаў Matroska без поўнага зліцця нанава</title>
+      <link rel="stylesheet" type="text/css" href="mkvtoolnix-doc.css">
+   </head>
+   <body>
+      <div class="heading">mkvpropedit -- Змена ўласцівасцяў існуючых файлаў <span class="productname">Matroska</span><sup>(tm)</sup> без поўнага зліцця нанава</div>
+      <hr>
+      <div id="toc" class="toc">
+         <h1>Table of contents</h1>
+         <ul>
+            <li><a href="#mkvpropedit.synopsis">1. Кароткі змест</a></li>
+            <li><a href="#mkvpropedit.description">2. Апісанне</a></li>
+            <li><a href="#mkvpropedit.edit_selectors">3. Праўка селектараў</a></li>
+            <li><a href="#mkvpropedit.attachment_selectors">4. Селектары далучэнняў</a></li>
+            <li><a href="#mkvpropedit.language_handling">5. Праца з мовамі</a></li>
+            <li><a href="#mkvpropedit.examples">6. Прыклады</a></li>
+            <li><a href="#d4e1318">7. Коды завяршэння</a></li>
+            <li><a href="#mkvinfo.text_files_and_charsets">8. Канвертацыя тэкставых файлаў і кадзіровак</a></li>
+            <li><a href="#mkvpropedit.environment_variables">9. Пераменныя асяроддзя</a></li>
+            <li><a href="#mkvpropedit.seealso">10. Глядзіце таксама</a></li>
+            <li><a href="#mkvpropedit.www">11. Хатняя старонка</a></li>
+         </ul>
+      </div>
+      <div class="content">
+         <h1><a name="mkvpropedit.synopsis">1. Кароткі змест</a><a class="headerlink" href="#mkvpropedit.synopsis" title="Link to this heading">#</a></h1>
+         
+         
+         <div class="cmdsynopsis"><span class="commandname">mkvpropedit</span> параметры {імя-зыходнага-файла} {дзеянні}</div>
+         
+         <h1><a name="mkvpropedit.description">2. Апісанне</a><a class="headerlink" href="#mkvpropedit.description" title="Link to this heading">#</a></h1>
+         
+         
+         <p>
+            Гэтая праграма аналізуе існуючы файл <span class="productname">Matroska</span><sup>(tm)</sup> і змяняе некаторыя ягоныя
+            ўласцівасці. Затым яна запісвае гэтыя змены ў існуючы файл. Сярод
+            уласцівасцяў, якія можна змяніць, ёсць элементы звестак аб сегментах
+            (напрыклад, назва) і загалоўкі трэкаў (напрыклад, код мовы, пазнака «трэк па
+            змаўчанні» або імя).
+            </p>
+         
+         
+         <p>
+            Параметры:
+            </p>
+         
+         
+         <table class="variablelist">
+            <thead>
+               <tr>
+                  <th>Option</th>
+                  <th>Description</th>
+               </tr>
+            </thead>
+            <tbody>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.list_property_names"><span class="option">-l</span>, <span class="option">--list-property-names</span></a><a class="headerlink" href="#mkvpropedit.description.list_property_names" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Пералічае ўсе вядомыя і змяняльныя імі ўласцівасцяў, іхні тып (радок, цэлы
+                        лік, булевае значэнне ды г. д.) і кароткае апісанне. Пасля гэтага праграма
+                        завяршаецца. Таму параметр <span class="parameter">source-filename</span> не трэба
+                        задаваць.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.parse_mode"><span class="option">-p</span>, <span class="option">--parse-mode</span>
+                        <span class="parameter">режим</span></a><a class="headerlink" href="#mkvpropedit.description.parse_mode" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Задае рэжым разбору. Параметр '<span class="parameter">рэжым</span>' можа быць
+                        '<span class="literal">хуткім</span>' (якім ён таксама з'яўляецца па змаўчанні) або
+                        '<span class="literal">поўным</span>'. '<span class="literal">Хуткі</span>' рэжым не аналізуе
+                        ўвесь файл, а выкарыстоўвае метаэлементы пошуку для пошуку неабходных
+                        элементаў зыходнага файла. У 99 % выпадкаў гэтага дастаткова. Але для
+                        файлаў, якія не змяшчаюць элементаў метапошуку або пашкоджаных элементаў,
+                        карыстальніку прыйдзецца задаць '<span class="literal">поўны</span>' рэжым
+                        аналізу. Поўнае сканаванне файла можа заняць некалькі хвілін, а хуткае
+                        сканаванне зойме ўсяго некалькі секунд.
+                        </p>
+                     </td>
+               </tr>
+            </tbody>
+         </table>
+         
+         
+         <p>
+            Дзеянні для працы з трэкамі і ўласцівасцямі звестак аб сегментах:
+            </p>
+         
+         
+         <table class="variablelist">
+            <thead>
+               <tr>
+                  <th>Option</th>
+                  <th>Description</th>
+               </tr>
+            </thead>
+            <tbody>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.edit"><span class="option">-e</span>, <span class="option">--edit</span> <span class="parameter">selector</span></a><a class="headerlink" href="#mkvpropedit.description.edit" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Задае секцыю файла <span class="productname">Matroska</span><sup>(tm)</sup> (звесткі аб сегменце або загалоўках пэўнага
+                        трэка), з якім дзейнічаюць усе наступныя дзеянні <a href="#mkvpropedit.description.add">add</a>, <a href="#mkvpropedit.description.set">set</a> і <a href="#mkvpropedit.description.delete">delete</a>. Гэты параметр можна
+                        выкарыстоўваць некалькі разоў для ўнясення змен у некалькі элементаў.
+                        </p>
+                     
+                     
+                     <p>
+                        Па змаўчанні <span class="productname">mkvpropedit</span>(1) будзе змяняць секцыю звестак аб сегменце.
+                        </p>
+                     
+                     
+                     <p>
+                        Глядзіце секцыю аб <a href="#mkvpropedit.edit_selectors">праўцы
+                           селектараў</a> для поўнага апісання сінтаксісу.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.add"><span class="option">-a</span>, <span class="option">--add</span>
+                        <span class="parameter">name</span>=<span class="parameter">значение</span></a><a class="headerlink" href="#mkvpropedit.description.add" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Дадае ўласцівасць <span class="parameter">name</span> са
+                        <span class="parameter">значэннем</span>. Уласцівасць будзе дададзеная, нават калі
+                        яна ўжо існуе. Заўвага: большасць уласцівасцяў унікальныя і не могуць
+                        сустракацца больш за адзін раз.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.set"><span class="option">-s</span>, <span class="option">--set</span>
+                        <span class="parameter">name</span>=<span class="parameter">значэнне</span></a><a class="headerlink" href="#mkvpropedit.description.set" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Задае дя ўсіх уваходжанняў уласцівасці <span class="parameter">імя</span> значэнне
+                        <span class="parameter">пераменнай</span>. Калі такой уласцівасці не існуе, то яна
+                        будзе дададзеная.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.delete"><span class="option">-d</span>, <span class="option">--delete</span> <span class="parameter">name</span></a><a class="headerlink" href="#mkvpropedit.description.delete" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Выдаляе ўсе ўваходжанні ўласцівасці <span class="parameter">name</span>. Заўвага:
+                        некаторыя ўласцівасці абавязковыя і не могуць быць выдаленыя.
+                        </p>
+                     </td>
+               </tr>
+            </tbody>
+         </table>
+         
+         
+         <p>
+            Дзеянні для працы з тэгамі і раздзеламі:
+            </p>
+         
+         
+         <table class="variablelist">
+            <thead>
+               <tr>
+                  <th>Option</th>
+                  <th>Description</th>
+               </tr>
+            </thead>
+            <tbody>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.tags"><span class="option">-t</span>, <span class="option">--tags</span>
+                        <span class="parameter">selector</span>:<span class="parameter">імя-файла</span></a><a class="headerlink" href="#mkvpropedit.description.tags" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Дадае або замяняе тэгі ў файле на тэгі з <span class="filename">filename</span> або
+                        выдаляе іх, калі <span class="filename">filename</span> пусты. <span class="productname">mkvpropedit</span>(1) чытае
+                        тыя ж фарматы XML-тэгаў, якія чытае і <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a>.
+                        </p>
+                     
+                     
+                     <p>
+                        <span class="parameter">selector</span> павінен быць адным са слоў
+                        <span class="constant">all</span>, <span class="constant">global</span> або
+                        <span class="constant">track</span>. Для <span class="constant">all</span> <span class="productname">mkvpropedit</span>(1)
+                        заменіць або выдаліць усе тэгі ў файле. З <span class="constant">global</span> толькі
+                        глабальныя тэгі будуць замененыя або выдаленыя.
+                        </p>
+                     
+                     
+                     <p>
+                        З <span class="constant">трэкам</span> <span class="productname">mkvpropedit</span>(1) заменіць тэгі для пэўнага
+                        трэка. Акрамя таго, тэгі, прачытаныя з <span class="filename">filename</span>, будуць
+                        назначаныя таму ж трэку. Трэк задаецца гэтак жа, як ззадаюцца <a href="#mkvpropedit.edit_selectors">селектары праўкі</a> (гл. ніжэй),
+                        напрыклад, <span class="code">--tags track:a1:new-audio-tags.xml</span>.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.add_track_statistics_tags"><span class="option">--add-track-statistics-tags</span></a><a class="headerlink" href="#mkvpropedit.description.add_track_statistics_tags" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Вылічвае статыстыку для ўсіх трэкаў у файле і дадае новыя тэгі статыстыкі
+                        для іх. Калі файл ужо змяшчае гэтыя тэгі, то яны будуць абноўленыя.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.delete_track_statistics_tags"><span class="option">--delete-track-statistics-tags</span></a><a class="headerlink" href="#mkvpropedit.description.delete_track_statistics_tags" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Выдаляе ўсе меткі статыстыкі існуючага трэка з файла. Калі ў файле няма
+                        метак статыстыкі трэка, яны не будуць змененыя.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.chapters"><span class="option">-c</span>, <span class="option">--chapters</span>
+                        <span class="parameter">імя-файла</span></a><a class="headerlink" href="#mkvpropedit.description.chapters" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Дадае або замяняе раздзелы ў файле адпаведным з
+                        <span class="filename">filename</span> або выдаляе іх, калі
+                        <span class="filename">filename</span> пусты. <span class="productname">mkvpropedit</span>(1) счытвае тыя ж XML і
+                        простыя фарматы раздзелаў, што і <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a>.
+                        </p>
+                     </td>
+               </tr>
+            </tbody>
+         </table>
+         
+         
+         <p>
+            Дзеянні для апрацоўкі далучэнняў:
+            </p>
+         
+         
+         <table class="variablelist">
+            <thead>
+               <tr>
+                  <th>Option</th>
+                  <th>Description</th>
+               </tr>
+            </thead>
+            <tbody>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.add_attachment"><span class="option">--add-attachment</span> <span class="parameter">імя-файла</span></a><a class="headerlink" href="#mkvpropedit.description.add_attachment" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Дадае новае далучэнне з <span class="parameter">імя-файла</span>.
+                        </p>
+                     
+                     
+                     <p>
+                        Калі параметр <span class="option">--attachment-name</span> выкарыстоўваўся да гэтага
+                        параметра, яго значэнне выкарыстоўваецца як імя новага далучэння. Інакш ён
+                        з'яўляецца вытворным ад <span class="parameter">filename</span>.
+                        </p>
+                     
+                     
+                     <p>
+                        Калі параметр <span class="option">--attachment-mime-type</span> выкарыстоўваўся да
+                        гэтага параметра, яго значэнне выкарыстоўваецца як тып MIME новага
+                        далучэння. Інакш ён аўтаматычна выяўляецца са змесціва
+                        <span class="parameter">filename</span>.
+                        </p>
+                     
+                     
+                     <p>
+                        Калі параметр <span class="option">--attachment-description</span> выкарыстоўваўся да
+                        гэтага параметра, яго значэнне выкарыстоўваецца як апісанне новага
+                        далучэння. Інакш апісанне не задаецца.
+                        </p>
+                     
+                     
+                     <p>
+                        Калі параметр <span class="option">--attachment-uid</span> выкарыстоўваўся да гэтага
+                        параметра, яго значэнне выкарыстоўваецца як UID новага далучэння. У іншым
+                        выпадку будзе аўтаматычна створаны выпадковы UID.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.replace_attachment"><span class="option">--replace-attachment</span>
+                        <span class="parameter">селектар</span><span class="literal">:</span><span class="parameter">імя-файла</span></a><a class="headerlink" href="#mkvpropedit.description.replace_attachment" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Замяняе адно або некалькі далучэнняў, якія супадаюць з
+                        <span class="parameter">selector</span> па <span class="parameter">filename</span>
+                        файла. Калі больш за адно даступнае далучэнне адпавядае
+                        <span class="parameter">selector</span>, то ўсё іх змесціва будзе заменена змесцівам
+                        <span class="parameter">filename</span>.
+                        </p>
+                     
+                     
+                     <p>
+                        <span class="parameter">selector</span> можа мець адну з чатырох форм. Яны апісаныя
+                        ніжэй у секцыі <a href="#mkvpropedit.attachment_selectors">селектары
+                           далучэнняў</a>.
+                        </p>
+                     
+                     
+                     <p>
+                        Калі параметр <span class="option">--attachment-name</span> выкарыстоўваўся да гэтага
+                        параметра, яго значэнне задаецца ў выглядзе новага імя для кожнага змененага
+                        далучэння. Інакш імі не мяняюцца.
+                        </p>
+                     
+                     
+                     <p>
+                        Калі параметр <span class="option">--attachment-mime-type</span> выкарыстоўваўся да
+                        гэтага параметра, яго значэнне задаецца ў выглядзе новага тыпу MIME для
+                        кожнага змененага далучэння. Інакш тыпы MIME не мяняюцца.
+                        </p>
+                     
+                     
+                     <p>
+                        Калі параметр <span class="option">--attachment-description</span> выкарыстоўваўся да
+                        гэтага параметра, яго значэнне задаецца ў выглядзе новага апісання для
+                        кожнага змененага далучэння. Інакш апісанні не мяняюцца.
+                        </p>
+                     
+                     
+                     <p>
+                        Калі параметр <span class="option">--attachment-uid</span> выкарыстоўваўся да гэтага
+                        параметра, яго значэнне задаецца ў выглядзе новага UID для кожнага змененага
+                        далучэння. Інакш UID не мяняюцца.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.update_attachment"><span class="option">--update-attachment</span> <span class="parameter">селектар</span></a><a class="headerlink" href="#mkvpropedit.description.update_attachment" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Задае ўласцівасці для аднаго і больш далучэнняў, якія супадаюць з
+                        <span class="parameter">селектарам</span>. Калі больш за адно далучэнне супадае з
+                        <span class="parameter">селектарам</span>, тады ўсе іхнія ўласцівасці будуць
+                        абноўленыя.
+                        </p>
+                     
+                     
+                     <p>
+                        <span class="parameter">selector</span> можа мець адну з чатырох форм. Яны апісаныя
+                        ніжэй у секцыі <a href="#mkvpropedit.attachment_selectors">селектары
+                           далучэнняў</a>.
+                        </p>
+                     
+                     
+                     <p>
+                        Калі параметр <span class="option">--attachment-name</span> выкарыстоўваўся да гэтага
+                        параметра, яго значэнне задаецца ў выглядзе новага імя для кожнага змененага
+                        далучэння. Інакш імі не мяняюцца.
+                        </p>
+                     
+                     
+                     <p>
+                        Калі параметр <span class="option">--attachment-mime-type</span> выкарыстоўваўся да
+                        гэтага параметра, яго значэнне задаецца ў выглядзе новага тыпу MIME для
+                        кожнага змененага далучэння. Інакш тыпы MIME не мяняюцца.
+                        </p>
+                     
+                     
+                     <p>
+                        Калі параметр <span class="option">--attachment-description</span> выкарыстоўваўся да
+                        гэтага параметра, яго значэнне задаецца ў выглядзе новага апісання для
+                        кожнага змененага далучэння. Інакш апісанні не мяняюцца.
+                        </p>
+                     
+                     
+                     <p>
+                        Калі параметр <span class="option">--attachment-uid</span> выкарыстоўваўся да гэтага
+                        параметра, яго значэнне задаецца ў выглядзе новага UID для кожнага змененага
+                        далучэння. Інакш UID не мяняюцца.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.delete_attachment"><span class="option">--delete-attachment</span> <span class="parameter">селектар</span></a><a class="headerlink" href="#mkvpropedit.description.delete_attachment" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Выдаляе адно ці некалькі далучэнняў, якія падыходзяць пад
+                        <span class="parameter">селектар</span>.
+                        </p>
+                     
+                     
+                     <p>
+                        <span class="parameter">selector</span> можа мець адну з чатырох форм. Яны апісаныя
+                        ніжэй у секцыі <a href="#mkvpropedit.attachment_selectors">селектары
+                           далучэнняў</a>.
+                        </p>
+                     </td>
+               </tr>
+            </tbody>
+         </table>
+         
+         
+         <p>
+            Параметры дзеянняў над далучэннямі:
+            </p>
+         
+         
+         <table class="variablelist">
+            <thead>
+               <tr>
+                  <th>Option</th>
+                  <th>Description</th>
+               </tr>
+            </thead>
+            <tbody>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.attachment_name"><span class="option">--attachment-name</span> <span class="parameter">імя</span></a><a class="headerlink" href="#mkvpropedit.description.attachment_name" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Задае выкарыстанне імя для наступнай аперацыі
+                        <span class="option">--add-attachment</span> або <span class="option">--replace-attachment</span>.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.attachment_mime_type"><span class="option">--attachment-mime-type</span> <span class="parameter">тып-mime</span></a><a class="headerlink" href="#mkvpropedit.description.attachment_mime_type" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Задае выкарыстанне тыпу MIME для наступнай аперацыі
+                        <span class="option">--add-attachment</span> або <span class="option">--replace-attachment</span>.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.attachment_description"><span class="option">--attachment-description</span> <span class="parameter">апісанне</span></a><a class="headerlink" href="#mkvpropedit.description.attachment_description" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Задае выкарыстанне апісання для наступнай аперацыі
+                        <span class="option">--add-attachment</span> або <span class="option">--replace-attachment</span>.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.enable_legacy_font_mime_types"><span class="option">--enable-legacy-font-mime-types</span></a><a class="headerlink" href="#mkvpropedit.description.enable_legacy_font_mime_types" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Дазваляе выкарыстоўваць састарэлыя тыпы <span class="abbrev">MIME</span> для пэўных
+                        тыпаў далучэнняў шрыфтоў. Напрыклад,
+                        «<span class="literal">application/x-truetype-font</span>» будзе выкарыстоўвацца для
+                        шрыфтоў TrueType замест «<span class="literal">fonts/ttf</span>».
+                        </p>
+                     
+                     
+                     <p>
+                        Гэта ўплывае як на даданне новых далучэнняў, так і на замену існуючых
+                        далучэнняў, але толькі калі новы тып <span class="abbrev">MIME</span> не
+                        зададзены. Іншыя даступныя далучэнні не мяняюцца.
+                        </p>
+                     
+                     
+                     <p>
+                        Закранаюцца тыпы <span class="abbrev">MIME</span>: «<span class="literal">font/sfnt</span>»,
+                        «<span class="literal">font/ttf</span>» і «<span class="literal">font/collection</span>»; яны
+                        супастаўляюцца з «<span class="literal">application/x-truetype-fonts</span>» і
+                        «<span class="literal">font/otf</span>», які супастаўляецца з
+                        «<span class="literal">application/vnd .ms-opentype</span>».
+                        </p>
+                     </td>
+               </tr>
+            </tbody>
+         </table>
+         
+         
+         <p>
+            Іншыя параметры:
+            </p>
+         
+         
+         <table class="variablelist">
+            <thead>
+               <tr>
+                  <th>Option</th>
+                  <th>Description</th>
+               </tr>
+            </thead>
+            <tbody>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.disable_language_ietf"><span class="option">--disable-language-ietf</span></a><a class="headerlink" href="#mkvpropedit.description.disable_language_ietf" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Звычайна, калі карыстальнік запытвае змены ва ўласцівасці загалоўка трэка
+                        '<span class="literal">language</span>', <span class="productname">mkvpropedit</span>(1) ужывае тую ж змену да новага
+                        элемента загалоўка трэка <span class="classname">LanguageIETF</span> у дапаўненне да
+                        састарэлага элемента <span class="classname">Language</span>. Калі выкарыстоўваецца
+                        гэты параметр, змена будзе ўжытая толькі да састарэлага элемента
+                        <span class="classname">Language</span>.
+                        </p>
+                     
+                     
+                     <p>
+                        Гэты параметр не ўплывае на змены, якія запытваюцца праз уласцівасць
+                        '<span class="literal">language-ietf</span>' загалоўка трэка.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.normalize_language_ietf"><span class="option">--normalize-language-ietf</span> <span class="parameter">рэжым</span></a><a class="headerlink" href="#mkvpropedit.description.normalize_language_ietf" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Дазваляе нармалізаваць усе моўныя тэгі IETF BCP 47 да іхняй кананічнай формы
+                        з рэжымам <span class="literal">canonical</span>, да іхняй формы пашыраных моўных
+                        падтэгаў праз рэжым <span class="literal">extlang</span> або адключае яго ў рэжыме
+                        <span class="literal">off</span>. Па змаўчанні ўжываецца нармалізацыя да кананічнай
+                        формы.
+                        </p>
+                     
+                     
+                     <p>
+                        У кананічнай форме ўсе падтэгі, для якіх існуюць пераважныя значэнні,
+                        замяняюцца гэтымі пераважнымі значэннямі. Гэта канвертуе, напрыклад,
+                        <span class="literal">zh-yue-jyutping</span> у <span class="literal">yue-jyutping</span> або
+                        <span class="literal">fr-FX</span> у <span class="literal">fr-FR</span>.
+                        </p>
+                     
+                     
+                     <p>
+                        Для формы пашыраных моўных падтэгаў першапачаткова будуецца кананічная
+                        форма. Пасля гэтага ўсе асноўныя мовы, для якіх існуе пашыраны моўны падтэг,
+                        замяняюцца гэтым пашыраным моўным падтэгам і ягоным прэфіксам. Гэта
+                        канвертуе, напрыклад, <span class="literal">yue-jyutping</span> назад да
+                        <span class="literal">zh-yue-jyutping</span>, але не ўплывае на
+                        <span class="literal">fr-FR</span>, таму што <span class="literal">fr</span> не з'яўляецца
+                        пашыраным моўным падтэгам.
+                        </p>
+                     
+                     
+                     <p>
+                        Гэтая нармалізацыя ўжываецца толькі да элементаў, якія фактычна змененыя:
+                        </p>
+                     
+                     
+                     <ul>
+                        
+                        <li>
+                           
+                           <p>
+                              Пры рэдагаванні загалоўкаў трэкаў закранаюцца толькі тыя элементы моў
+                              трэкаў, якія зададзеныя ў адпаведнасці са спецыфікацыямі рэдагавання. Мовы
+                              трэкаў, якія не рэдагуюцца, не мяняюцца. Рэжагаванне трэка, але заданне
+                              толькі ўласцівасцяў, адрозных ад мовы, таксама не паўплывае на мову.
+                              </p>
+                           </li>
+                        
+                        
+                        <li>
+                           
+                           <p>
+                              Пры праўцы раздзелаў падвяргаюцца ўздзеянню ўсе моўныя элементы ўсіх
+                              элементаў раздзела, паколькі існуючыя раздзелы заўжды замяняюцца цалкам.
+                              </p>
+                           </li>
+                        
+                        
+                        <li>
+                           
+                           <p>
+                              Пры праўцы тэгаў падвяргаюцца ўздзеянню толькі тыя моўныя элементы тэгаў,
+                              якія фактычна замененыя. Напрыклад, замена глабальных тэгаў не ўплывае на
+                              існуючыя тэгі трэкаў.
+                              </p>
+                           </li>
+                        </ul>
+                     
+                     
+                     <p>
+                        Найлепшы спосаб нармалізаваць усе наяўныя моўныя тэгі ў файле — гэта зрабіць
+                        зліццё нанава праз <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a> і задаць ягоны параметр
+                        «<span class="literal">--normalize-language-ietf</span>» у запатрабаваны рэжым.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.command_line_charset"><span class="option">--command-line-charset</span> <span class="parameter">кадзіроўка</span></a><a class="headerlink" href="#mkvpropedit.description.command_line_charset" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Задае кадзіроўку для канвертацыі радкоў, зададзеных у камандным
+                        радку. Стандартная кадзіроўка прывязаная да сістэмнай лакалізацыі.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.output_charset"><span class="option">--output-charset</span> <span class="parameter">кадзіроўка</span></a><a class="headerlink" href="#mkvpropedit.description.output_charset" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Задае кадзіроўку, у якой канвертуюцца выхадныя радкі. Па змаўчанні
+                        выкарыстоўваецца бягучая кадзіроўка сістэмнай мовы.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.redirect_output"><span class="option">-r</span>, <span class="option">--redirect-output</span>
+                        <span class="parameter">імя-файла</span></a><a class="headerlink" href="#mkvpropedit.description.redirect_output" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Запісвае ўсе паведамленні ў файл <span class="parameter">file-name</span> замест
+                        кансолі. Хаця гэта можна лёгка зрабіць праз перанакіраванне вываду, ёсць
+                        выпадкі, калі гэты параметр патрэбны: калі тэрмінал паўторна інтэрпрэтуе
+                        выхад пераз запісам яго ў файл. Набор сімвалаў, зададзены з <a href="#mkvpropedit.description.output_charset">--output-charset</a>,
+                        улічваецца.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.ui_language"><span class="option">--ui-language</span> <span class="parameter">код</span></a><a class="headerlink" href="#mkvpropedit.description.ui_language" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Прымусова выкарыстоўваць пераклад на <span class="parameter">код</span> мовы (напр.,
+                        «<span class="literal">de_DE</span>» для нямецкай). Калі задаць
+                        «<span class="literal">list</span>» замест <span class="parameter">кода</span>, то будзе
+                        выведзены спіс даступных перакладаў.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.abort_on_warnings"><span class="option">--abort-on-warnings</span></a><a class="headerlink" href="#mkvpropedit.description.abort_on_warnings" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Задае mkvmerge перапыненне пасля з'яўлення першага папярэджання. Код
+                        завяршэння праграмы будзе 1.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.debug"><span class="option">--debug</span> <span class="parameter">тэматыка</span></a><a class="headerlink" href="#mkvpropedit.description.debug" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Уключыць рэжым адладкі для зададзенай функцыі. Гэты параметр карысны толькі
+                        для распрацоўшчыкаў.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.engage"><span class="option">--engage</span> <span class="parameter">функцыя</span></a><a class="headerlink" href="#mkvpropedit.description.engage" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Уключае эксперыментальныя функцыі. Спіс даступных функцый можна запытаць
+                        праз <span class="command">mkvpropedit --engage list</span>. Гэтыя функцыі не
+                        прызначаныя для выкарыстання ў звычайных сітуацыях.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.gui_mode"><span class="option">--gui-mode</span></a><a class="headerlink" href="#mkvpropedit.description.gui_mode" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Уключае рэжым графічнага інтэрфейса. У гэтым рэжыме могуць выводзіцца
+                        спецыяльна адфармаціраваныя радкі для адпраўкі кантрольных паведамленняў
+                        інтэрфейсу. Фармат паведмленняў — '<span class="literal">#GUI#message</span>'. За
+                        паведамленнем могуць быць зададзеныя пары ключа і значэння, напрыклад
+                        '<span class="literal">#GUI#message#key1=value1#key2=value2…</span>'. Паведамленні і
+                        ключы не перакладаюцца і заўжды выводзяцца на англійскай.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.verbose"><span class="option">-v</span>, <span class="option">--verbose</span></a><a class="headerlink" href="#mkvpropedit.description.verbose" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Увесці пашыраны вывад і паказваць усе важныя элементы <span class="productname">Matroska</span><sup>(tm)</sup> па меры іх
+                        чытання.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.help"><span class="option">-h</span>, <span class="option">--help</span></a><a class="headerlink" href="#mkvpropedit.description.help" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Паказаць звесткі аб выкарыстанні і выйсці.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.version"><span class="option">-V</span>, <span class="option">--version</span></a><a class="headerlink" href="#mkvpropedit.description.version" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Паказаць звесткі аб версіі і выйсці.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.at_sign"><span class="option">@</span><span class="parameter">файл-параметраў.json</span></a><a class="headerlink" href="#mkvpropedit.description.at_sign" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Счытвае дадатковыя аргументы каманднага радка з файла
+                        <span class="parameter">options-file</span>. Поўнае апісанне падтрымліваных фарматаў
+                        для такіх файлаў глядзіце ў секцыі «Файлы параметраў» на старонцы
+                        дакументацыі <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a>.
+                        </p>
+                     </td>
+               </tr>
+            </tbody>
+         </table>
+         
+         <h1><a name="mkvpropedit.edit_selectors">3. Праўка селектараў</a><a class="headerlink" href="#mkvpropedit.edit_selectors" title="Link to this heading">#</a></h1>
+         
+         
+         <p>
+            Параметр <a href="#mkvpropedit.description.edit">--edit</a> задае
+            секцыю файла <span class="productname">Matroska</span><sup>(tm)</sup> (звесткі аб сегменце або загалоўках пэўнага трэка),
+            з якім выконваюцца ўсе далейшыя дзеянні <a href="#mkvpropedit.description.add">add</a>, <a href="#mkvpropedit.description.set">set</a> і <a href="#mkvpropedit.description.delete">delete</a>. Гэта застаецца
+            дзейным да тых часоў, пакуль не будзе знойдзены наступны параметр <a href="#mkvpropedit.description.edit">--edit</a>.
+            Аргумент гэтага параметра называецца селектарам праўкі.
+            </p>
+         
+         
+         <p>
+            Па змаўчанні <span class="productname">mkvpropedit</span>(1) будзе змяняць секцыю звестак аб сегменце.
+            </p>
+         
+         
+         <h2><a name="mkvpropedit.edit_selectors.segment_info">3.1. Звесткі аб сегментах</a><a class="headerlink" href="#mkvpropedit.edit_selectors.segment_info" title="Link to this heading">#</a></h2>
+         
+         
+         <p>
+            Звесткі аб сегменце можна выбраць адным з трох слоў:
+            «<span class="literal">info</span>», «<span class="literal">segment_info</span>» або
+            «<span class="literal">segmentinfo</span>». Ён змяшчае такія ўласцівасці, як загаловак
+            сегмента або <span class="abbrev">UID</span> сегмента.
+            </p>
+         
+         
+         
+         <h2><a name="mkvpropedit.edit_selectors.track_headers">3.2. Загаловак трэка</a><a class="headerlink" href="#mkvpropedit.edit_selectors.track_headers" title="Link to this heading">#</a></h2>
+         
+         
+         <p>
+            Загалоўкі трэкаў можна выбраць праз трохі больш складаны селектара. Усе
+            варыянты пачынаюцца з «<span class="literal">track:</span>». Уласцівасці загалоўка
+            трэка ўключаюць такія элементы, як код мовы, пазнака «трэка па змаўчанні»
+            або імя трэка.
+            </p>
+         
+         
+         <table class="variablelist">
+            <thead>
+               <tr>
+                  <th>Option</th>
+                  <th>Description</th>
+               </tr>
+            </thead>
+            <tbody>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.track_nth"><span class="option">track:</span><span class="parameter">n</span></a><a class="headerlink" href="#mkvpropedit.description.track_nth" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Калі параметр <span class="parameter">n</span> з'яўляецца лічбай, то будзе выбраны
+                        трэк з нумарам <span class="parameter">n</span>. Парадак трэкаў такі ж, як і пры
+                        вывадзе звестак камандай <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a> з параметрам
+                        <span class="option">--identify</span>.
+                        </p>
+                     
+                     
+                     <p>
+                        Нумарацыя пачынаецца з 1.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.track_type_nth"><span class="option">track:</span><span class="parameter">t</span><span class="parameter">n</span></a><a class="headerlink" href="#mkvpropedit.description.track_type_nth" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Калі параметр пачынаецца з аднаго сімвала <span class="parameter">t</span>, за якім
+                        ідзе <span class="parameter">n</span>, то будзе выбраны <span class="parameter">n</span>-ы
+                        трэк пэўнага тыпу трэкаў. Параметр тыпу трэка <span class="parameter">t</span>
+                        павінен быць адным з чатырох сімвалаў: '<span class="literal">a</span>' для
+                        аўдыятрэка, '<span class="literal">b</span>' для трэка кнопкі, '<span class="literal">s</span>'
+                        для трэка субцітраз і '<span class="literal">v</span>' для відэатрэка. Парадак
+                        адсочвання такі ж, як і параметр <span class="option">--identify</span> вываду
+                        <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a>.
+                        </p>
+                     
+                     
+                     <p>
+                        Нумарацыя пачынаецца з 1.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.track_uid"><span class="option">track:</span>=<span class="parameter">uid</span></a><a class="headerlink" href="#mkvpropedit.description.track_uid" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Калі параметр пачынаецца з «<span class="literal">=</span>», за якім ідзе лік
+                        <span class="parameter">uid</span>, будзе выбраны трэк, элемент трэка
+                        <span class="abbrev">UID</span> які роўны дадзенаму
+                        <span class="parameter">uid</span>. <span class="abbrev">UID</span> трэкаў можна атрымаць праз
+                        <a href="mkvinfo.html"><span class="productname">mkvinfo</span>(1)</a>.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.track_number"><span class="option">track:</span>@<span class="parameter">нумар</span></a><a class="headerlink" href="#mkvpropedit.description.track_number" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Калі параметр пачынаецца з «<span class="literal">@</span>», за якім ідзе лік
+                        <span class="parameter">number</span>, будзе выбраны трэк, элемент якога трэка роўны
+                        гэтаму <span class="parameter">number</span>. Нумары трэкаў можна атрымаць праз
+                        <a href="mkvinfo.html"><span class="productname">mkvinfo</span>(1)</a>.
+                        </p>
+                     </td>
+               </tr>
+            </tbody>
+         </table>
+         
+         
+         
+         <h2><a name="mkvpropedit.edit_selectors.notes">3.3. Заўвагі</a><a class="headerlink" href="#mkvpropedit.edit_selectors.notes" title="Link to this heading">#</a></h2>
+         
+         
+         <p>
+            Праз прыроду селектараў праўкі трэкаў магчыма, што некалькі селектараў
+            сапраўды адпавядаюць аднаму і таму ж загалоўку трэка. У такіх выпадках усе
+            дзеянні для гэтых селектараў праўкі будуць аб'яднаныя і выкананыя ў тым жа
+            парадку, у якім яны зададзеныя ў камандным радку.
+            </p>
+         
+         
+         <h1><a name="mkvpropedit.attachment_selectors">4. Селектары далучэнняў</a><a class="headerlink" href="#mkvpropedit.attachment_selectors" title="Link to this heading">#</a></h1>
+         
+         
+         
+         <p>
+            Селектар далучэнняў выкарыстоўваецца для двух дзеянняў: <a href="#mkvpropedit.description.replace_attachment">--replace-attachment</a>
+            і <a href="#mkvpropedit.description.delete_attachment">--delete-attachment</a>.
+            Ён можа прымаць адну з наступных чатырох форм:
+            </p>
+         
+         
+         <ol>
+            
+            <li>
+               
+               <p>
+                  Выбар па ідэнтыфікатары далучэння. У гэтай форме селектар уяўляе сабой лік,
+                  ідэнтыфікатар далучэння, які выводзіцца камандай ідэнтыфікацыі <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a>.
+                  </p>
+               </li>
+            
+            
+            <li>
+               
+               <p>
+                  Выбар па UID (унікальным ідэнтыфікатары) далучэння. У гэтай форме селектар
+                  уяўляе сабой сімвал <span class="literal">=</span> з наступным лікам, які з'яўляецца
+                  UID далучэння. Даведацца яго праз дэтальную каманду ідэнтыфікацыі
+                  <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a>.
+                  </p>
+               </li>
+            
+            
+            <li>
+               
+               <p>
+                  Выбар па назве далучэння. У гэтай форме селектарам з'яўляецца літарнае слова
+                  <span class="literal">name:</span>, за якім ідзе імя наяўнага далучэння. Калі гэты
+                  селектар выкарыстоўваецца з <span class="option">--replace-attachment</span>, то
+                  двухкроп'і ў назве для адпаведнасці павінны экранавацца праз
+                  <span class="literal">\c</span>.
+                  </p>
+               </li>
+            
+            
+            <li>
+               
+               <p>
+                  Выбар па тыпе MIME. У гэтай форме селектарам з'яўляецца літарнае слова
+                  <span class="literal">mime-type:</span>, за якім ідзе MIME-тып існуючага
+                  далучэння. Калі гэты селектар выкарыстоўваецца з
+                  <span class="option">--replace-attachment</span>, то двухкроп'і ў тыпе MIME для
+                  адпаведнасці павінны экранізавацца праз <span class="literal">\c</span>.
+                  </p>
+               </li>
+            </ol>
+         
+         <h1><a name="mkvpropedit.language_handling">5. Праца з мовамі</a><a class="headerlink" href="#mkvpropedit.language_handling" title="Link to this heading">#</a></h1>
+         
+         
+         
+         <p>
+            <span class="productname">mkvpropedit</span>(1) у асноўным стараецца рабіць правільныя рэчы па змаўчанні. Таму
+            змены ўласцівасці <span class="option">language</span> прымусяць <span class="productname">mkvpropedit</span>(1) ужыць
+            тую ж самую змену як да новага элемента «LanguageIETF», так і да старога
+            элемента «Language», накшталт таго, як <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a> ужывае мову да абодвух
+            элементаў. Напрыклад, пры выкарыстанні <span class="literal">mkvpropedit movie.mkv --edit
+               track:2 --set language=zh-TW</span> элемент «LanguageIETF» будзе
+            зададзены на <span class="literal">zh-TW</span>, а стары элемент «Language» на
+            <span class="literal">chi</span>.
+            </p>
+         
+         
+         <p>
+            Акрамя таго, ёсць новая ўласцівасць загалоўка трэка пад назвай
+            <span class="option">language-ietf</span>, якую можна задаць або выдаліць. Змены гэтай
+            уласцівасці ўжываюцца толькі да новага элемента загалоўка трэка
+            «LanguageIETF». Агаворка заключаецца ў тым, што стары элемент загалоўка
+            трэка «Language» з'яўляецца абавязковым элементам у Matroska — гэта азначае,
+            што нават калі ён адсутнічае ў файле, ён усё адно мае меркаванае
+            значэнне. Калі карыстальнік задае толькі ўласцівасць
+            <span class="option">language-ietf</span>, але не ўласцівасць
+            <span class="option">language</span>, <span class="productname">mkvpropedit</span>(1) будзе дадаваць стары элемент
+            «Language» у пэўных выпадках і задасць яго ў <span class="literal">und</span> (што
+            азначае «няпэўны»), бо карыстальнік не задаў для яго значэнне.
+            </p>
+         
+         
+         <p>Пры чытанні файлаў раздзелаў XML або тэгаў <span class="productname">mkvpropedit</span>(1) працуе гэтак жа, як
+            <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a>.</p>
+         
+         
+         <p>Стварэнне новых элементаў можа быць цалкам адключана праз параметр
+            каманднага радка «--disable-language-ietf», які дзейнічае на ўсе тры новыя
+            элементы.</p>
+         
+         
+         <p>Праз парамета <span class="option">--normalize-language-ietf</span> можна выбраць метад
+            нармалізацыі, які ўжываецца да пашыраных моўных падтэгах.</p>
+         
+         <h1><a name="mkvpropedit.examples">6. Прыклады</a><a class="headerlink" href="#mkvpropedit.examples" title="Link to this heading">#</a></h1>
+         
+         
+         <p>
+            Наступны прыклад рэдагуе файл пад назвай '<span class="literal">movie.mkv</span>'. Ён
+            задае назву сегмента і змяняе код мовы аўдыя і трэка субцітраў. Звярніце
+            ўвагу, што гэты прыклад можна скараціць, выключыўшы першы параметр <a href="#mkvpropedit.description.edit">--edit</a>,
+            паколькі рэдагаванне элемента звестак аб сегменце з'яўляецца стандартным для
+            ўсіх параметраў, знойдзеных перад параметрам <a href="#mkvpropedit.description.edit">--edit</a>.
+            </p>
+         
+         
+         <pre class="screen">$ mkvpropedit фільм.mkv --edit info --set "title=Фільм" --edit track:a1 --set language=fre --edit track:a2 --set language=ita</pre>
+         
+         
+         <p>
+            Другі прыклад выдаляе «пазнака трэка па змаўчанні» з першага трэка субцітраў
+            і задае яго для другога. Звярніце ўвагу, што <span class="productname">mkvpropedit</span>(1) у адрозненне ад
+            <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a>, не задае «пазнака трэка па змаўчанні» для іншых трэкаў на «0»,
+            калі для некаторага трэка аўтаматычна зададзенае значэнне «1».
+            </p>
+         
+         
+         <pre class="screen">$ mkvpropedit фільм.mkv --edit track:s1 --set flag-default=0 --edit track:s2 --set flag-default=1</pre>
+         
+         
+         <p>
+            Замена тэгаў у другім трэку субцітраў файла выглядае так:
+            </p>
+         
+         
+         <pre class="screen">$ mkvpropedit фільм.mkv --tags track:s2:new-subtitle-tags.xml</pre>
+         
+         
+         <p>
+            Выдаленне ўсіх тэгаў патрабуе задання імя файла:
+            </p>
+         
+         
+         <pre class="screen">$ mkvpropedit фільм.mkv --tags all:</pre>
+         
+         
+         <p>
+            Замена раздзелаў у файле выглядае так:
+            </p>
+         
+         
+         <pre class="screen">$ mkvpropedit фільм.mkv --chapters новыя-раздзелы.xml</pre>
+         
+         
+         <p>
+            Выдаленне ўсіх раздзелаў адбываецца без задання імя выхаднога файла:
+            </p>
+         
+         
+         <pre class="screen">$ mkvpropedit фільм.mkv --chapters ''</pre>
+         
+         
+         <p>
+            Даданне файла шрыфта (<span class="literal">Arial.ttf</span>) у выглядзе далучэння:
+            </p>
+         
+         
+         <pre class="screen">$ mkvpropedit фільм.mkv --add-attachment Arial.ttf</pre>
+         
+         
+         <p>
+            Даданне файла шрыфта (<span class="literal">89719823.ttf</span>) у выглядзе далучэння
+            і апісанне звесак, што гэта Arial:
+            </p>
+         
+         
+         <pre class="screen">$ mkvpropedit фільм.mkv --attachment-name Arial.ttf --attachment-description 'Шрыфт Arial у выглядзе шрыфта TrueType' --attachment-mime-type application/x-truetype-font --add-attachment 89719823.ttf</pre>
+         
+         
+         <p>
+            Замена далучанага файла шрыфта (<span class="literal">Comic.ttf</span>) іншым
+            (<span class="literal">Arial.ttf</span>):
+            </p>
+         
+         
+         <pre class="screen">$ mkvpropedit фільм.mkv --attachment-name Arial.ttf --attachment-description 'Шрыфт Arial у выглядзе шрыфта TrueType' --replace-attachment name:Comic.ttf:Arial.ttf</pre>
+         
+         
+         <p>
+            Выдаленне другога далучанага файла, няважна, якога іменна:
+            </p>
+         
+         
+         <pre class="screen">$ mkvpropedit фільм.mkv --delete-attachment 2</pre>
+         
+         
+         <p>
+            Выдаленне ўсіх далучаных шрыфтоў па тыпе MIME:
+            </p>
+         
+         
+         <pre class="screen">$ mkvpropedit фільм.mkv --delete-attachment mime-type:application/x-truetype-font</pre>
+         
+         <h1><a name="d4e1318">7. Коды завяршэння</a><a class="headerlink" href="#d4e1318" title="Link to this heading">#</a></h1>
+         
+         
+         
+         <p>
+            <span class="productname">mkvpropedit</span>(1) завяршаецца з адным з трох кодаў:
+            </p>
+         
+         
+         <ul>
+            
+            <li>
+               
+               <p>
+                  <span class="constant">0</span> -- Гэты код завяршэння азначае, што мадыфікацыя
+                  скончылася паспяхова.
+                  </p>
+               </li>
+            
+            
+            <li>
+               
+               <p>
+                  <span class="constant">1 </span>-- У гэтым выпадку <span class="productname">mkvpropedit</span>(1) выдаў хаця б адно
+                  папярэджанне, аднак мадыфікацыя працягнулася. Папярэджанню папярэднічае
+                  тэкст '<span class="literal">Warning:</span>'. У залежнасці ад узніклых памылак,
+                  выніковыя файлы могуць быць або цэлымі, або пашкоджанымі. Карыстальніку
+                  рэкамендуецца звярнуць увагу на само папярэджанне і праверыць выніковыя
+                  файлы.
+                  </p>
+               </li>
+            
+            
+            <li>
+               
+               <p>
+                  <span class="constant">2</span> -- Гэты код завяршэння выкарыстоўваецца ў выніку
+                  ўзнікнення памылкі. <span class="productname">mkvpropedit</span>(1) спыняе працу адразу пасля вываду
+                  паведамлення аб памылцы. Памылкі могуць узнікнуць праз памылковыя параметры
+                  каманднага радка, праз памылкі чытання/запісу або проста праз пашкоджаныя
+                  файлы.
+                  </p>
+               </li>
+            </ul>
+         
+         <h1><a name="mkvinfo.text_files_and_charsets">8. Канвертацыя тэкставых файлаў і кадзіровак</a><a class="headerlink" href="#mkvinfo.text_files_and_charsets" title="Link to this heading">#</a></h1>
+         
+         
+         
+         <p>
+            Падрабязнае абмеркаванне таго, як усе інструменты пакета MKVToolNix
+            апрацоўваюць канвертацыю набораў сімвалаў, кадзіроўку ўводу/вываду,
+            кадзіроўку каманднага радка і кадзіроўку кансолі, глядзіце ў секцыі з
+            ідэнтычнай назвай у даведкавай старонцы <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a>.
+            </p>
+         
+         <h1><a name="mkvpropedit.environment_variables">9. Пераменныя асяроддзя</a><a class="headerlink" href="#mkvpropedit.environment_variables" title="Link to this heading">#</a></h1>
+         
+         
+         
+         <p>
+            <span class="productname">mkvpropedit</span>(1)  выкарыстоўвае стандартныя пераменныя, якія вызначаюць
+            сістэмную мову (напрыклад: <span class="varname">LANG</span> і сямейства
+            <span class="varname">LC_*</span>). Дадатковыя пераменныя:
+            </p>
+         
+         
+         <table class="variablelist">
+            <thead>
+               <tr>
+                  <th>Option</th>
+                  <th>Description</th>
+               </tr>
+            </thead>
+            <tbody>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.environment_variables.debug"><span class="varname">MKVPROPEDIT_DEBUG</span>, <span class="varname">MKVTOOLNIX_DEBUG</span> і
+                        яго кароткая форма <span class="varname">MTX_DEBUG</span></a><a class="headerlink" href="#mkvpropedit.environment_variables.debug" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>Змесціва апрацоўваецца так, каб калі б яно было перададзенае праз параметр
+                        <a href="#mkvpropedit.description.debug">--debug</a>.</p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.environment_variables.engage"><span class="varname">MKVPROPEDIT_ENGAGE</span>, <span class="varname">MKVTOOLNIX_ENGAGE</span>
+                        і яго кароткая форма <span class="varname">MTX_ENGAGE</span></a><a class="headerlink" href="#mkvpropedit.environment_variables.engage" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>Змесціва апрацоўваецца так, каб калі б яно было перададзенае праз параметр
+                        <a href="#mkvpropedit.description.engage">--engage</a>.</p>
+                     </td>
+               </tr>
+            </tbody>
+         </table>
+         
+         <h1><a name="mkvpropedit.seealso">10. Глядзіце таксама</a><a class="headerlink" href="#mkvpropedit.seealso" title="Link to this heading">#</a></h1>
+         
+         
+         <p>
+            <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a>, <a href="mkvinfo.html"><span class="productname">mkvinfo</span>(1)</a>, <a href="mkvextract.html"><span class="productname">mkvextract</span>(1)</a>, <a href="mkvtoolnix-gui.html"><span class="productname">mkvtoolnix-gui</span>(1)</a>
+            </p>
+         
+         <h1><a name="mkvpropedit.www">11. Хатняя старонка</a><a class="headerlink" href="#mkvpropedit.www" title="Link to this heading">#</a></h1>
+         
+         
+         <p>
+            Апошняя версія праграмы заўсёды даступная на <a href="https://mkvtoolnix.download/">хатняй старонцы MKVToolNix</a>.
+            </p>
+         </div>
+   </body>
+</html>

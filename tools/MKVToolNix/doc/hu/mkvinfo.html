@@ -1,0 +1,448 @@
+<!DOCTYPE html
+  PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
+<html>
+   <head>
+      <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+      <title>mkvinfo -- Az Matroska fájlok elemeiről szóló információk nyomtatása</title>
+      <link rel="stylesheet" type="text/css" href="mkvtoolnix-doc.css">
+   </head>
+   <body>
+      <div class="heading">mkvinfo -- Az <span class="productname">Matroska</span><sup>(tm)</sup> fájlok elemeiről szóló információk nyomtatása</div>
+      <hr>
+      <div id="toc" class="toc">
+         <h1>Table of contents</h1>
+         <ul>
+            <li><a href="#mkvinfo.synopsis">1. Szinopszis</a></li>
+            <li><a href="#mkvinfo.description">2. Leírás</a></li>
+            <li><a href="#mkvinfo.verbosity_levels">3. Szóképességi szintek</a></li>
+            <li><a href="#mkvinfo.text_files_and_charsets">4. Szövegfájlok és karakterkészlet-átalakítások</a></li>
+            <li><a href="#d4e510">5. Kilépési kódok</a></li>
+            <li><a href="#mkvinfo.environment_variables">6. Környezeti változók</a></li>
+            <li><a href="#mkvinfo.seealso">7. Lásd még</a></li>
+            <li><a href="#mkvinfo.www">8. WWW</a></li>
+         </ul>
+      </div>
+      <div class="content">
+         <h1><a name="mkvinfo.synopsis">1. Szinopszis</a><a class="headerlink" href="#mkvinfo.synopsis" title="Link to this heading">#</a></h1>
+         
+         
+         <div class="cmdsynopsis"><span class="commandname">mkvinfo</span> options {source-filename}</div>
+         
+         <h1><a name="mkvinfo.description">2. Leírás</a><a class="headerlink" href="#mkvinfo.description" title="Link to this heading">#</a></h1>
+         
+         
+         <p>
+            Ez a program felsorolja az összes elemet, amely egy <span class="productname">Matroska</span><sup>(tm)</sup>. A kimenet
+            korlátozható a fájlban lévő zeneszámok listájára, beleértve a használt
+            codec-ek adatait is.
+            </p>
+         
+         
+         <table class="variablelist">
+            <thead>
+               <tr>
+                  <th>Option</th>
+                  <th>Description</th>
+               </tr>
+            </thead>
+            <tbody>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.all"><span class="option">-a</span>, <span class="option">--all</span></a><a class="headerlink" href="#mkvinfo.description.all" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Alapértelmezés szerint az <span class="productname">mkvinfo</span>(1) leáll, amikor az első fürttel
+                        találkozik.  Ezen kívül nem mutat meg bizonyos gyakran előforduló elemeket.
+                        Ezzel az opcióval az <span class="productname">mkvinfo</span>(1) folytatja a feldolgozást a szóbeliség
+                        szintjétől függetlenül, és minden elemet megjelenít.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.checksums"><span class="option">-c</span>, <span class="option">---checksumma</span></a><a class="headerlink" href="#mkvinfo.description.checksums" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Kiszámítja és megjeleníti az <span class="function">Adler-32</span> ellenőrző
+                        összeget minden egyes képkockához. Csak hibakereséshez hasznos.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.continue"><span class="option">-o</span>, <span class="option">----continue</span></a><a class="headerlink" href="#mkvinfo.description.continue" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Alapértelmezés szerint az <span class="productname">mkvinfo</span>(1) leáll, amikor az első fürttel
+                        találkozik.  Ezzel az opcióval az <span class="productname">mkvinfo</span>(1) folytatja a feldolgozást a
+                        szóbeliség szintjétől függetlenül.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.hex_positions"><span class="option">-p</span>, <span class="option">--hex-positions</span></a><a class="headerlink" href="#mkvinfo.description.hex_positions" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Az összes elem pozíciójának megjelenítése hexadecimális formában, a
+                        szóbeliség szintjétől függetlenül.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.positions"><span class="option">-P</span>, <span class="option">--pozíciók</span></a><a class="headerlink" href="#mkvinfo.description.positions" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Az összes elem pozíciójának megjelenítése tizedesjegyben, a szóbeliség
+                        szintjétől függetlenül.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.summary"><span class="option">-s</span>, <span class="option">--summary</span></a><a class="headerlink" href="#mkvinfo.description.summary" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Csak egy tömör összefoglalót mutat meg arról, amit az <span class="productname">mkvinfo</span>(1) talál, nem
+                        pedig az egyes elemeket.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.track_info"><span class="option">-t</span>, <span class="option">--track-info</span></a><a class="headerlink" href="#mkvinfo.description.track_info" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Statisztikák megjelenítése minden egyes sávra vonatkozóan bőbeszédű
+                        üzemmódban. A szóbeliséget is 1-re állítja, ha korábban 0-s szinten volt.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.hexdump"><span class="option">-x</span>, <span class="option">--hexdump</span></a><a class="headerlink" href="#mkvinfo.description.hexdump" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Minden egyes keret első 16 bájtjának megjelenítése hexdump formájában.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.full_hexdump"><span class="option">-X</span>, <span class="option">--full-hexdump</span></a><a class="headerlink" href="#mkvinfo.description.full_hexdump" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Minden egyes keret összes bájtjának megjelenítése hexdump formájában.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.size"><span class="option">-z</span>, <span class="option">--méret</span></a><a class="headerlink" href="#mkvinfo.description.size" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Mutassa meg az egyes elemek méretét, beleértve a fejlécet is.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.command_line_charset"><span class="option">--command-line-charset</span>
+                        <span class="parameter">karakterkészlet</span></a><a class="headerlink" href="#mkvinfo.description.command_line_charset" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Beállítja a karakterkészletet, amelyből a parancssorban megadott
+                        karakterláncokat konvertálni kell. Alapértelmezés szerint a rendszer
+                        aktuális területi beállítása által megadott karakterkészlet.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.output_charset"><span class="option">--output-charset</span> <span class="parameter">karakterkészlet</span></a><a class="headerlink" href="#mkvinfo.description.output_charset" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Beállítja azt a karakterkészletet, amelybe a kimeneti karakterláncokat
+                        konvertálja.  Alapértelmezés szerint a rendszer aktuális területi beállítása
+                        által megadott karakterkészlet.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.redirect_output"><span class="option">-r</span>, <span class="option">--redirect-output</span>
+                        <span class="parameter">file-name</span></a><a class="headerlink" href="#mkvinfo.description.redirect_output" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Az összes üzenetet a konzol helyett a <span class="parameter">fájlnév</span> fájlba
+                        írja.  Bár ez könnyen elvégezhető a kimenet átirányításával, vannak olyan
+                        esetek, amikor szükség van erre az opcióra: amikor a terminál újraértelmezi
+                        a kimenetet, mielőtt kiírná azt egy fájlba.  A <a href="#mkvinfo.description.output_charset">--output-charset</a>
+                        karakterkészletet tiszteletben tartja.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.ui_language"><span class="option">--ui-language</span> <span class="parameter">code</span></a><a class="headerlink" href="#mkvinfo.description.ui_language" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Kényszeríti a nyelv <span class="parameter">kód</span> fordításainak használatát
+                        (pl. '<span class="literal">de_DE</span>' a német fordításokhoz). A
+                        '<span class="literal">list</span>' mint <span class="parameter">kód</span> megadásával a
+                        program kiadja a rendelkezésre álló fordítások listáját.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.abort_on_warnings"><span class="option">--abort-on-warnings</span></a><a class="headerlink" href="#mkvinfo.description.abort_on_warnings" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        A program megszakítására utasítja a programot az első figyelmeztetés
+                        megjelenése után. A program kilépési kódja 1 lesz.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.debug"><span class="option">--debug</span> <span class="parameter">topic</span></a><a class="headerlink" href="#mkvinfo.description.debug" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        A hibakeresés bekapcsolása egy adott funkcióhoz. Ez az opció csak fejlesztők
+                        számára hasznos.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.engage"><span class="option">--engage</span> <span class="parameter">feature</span></a><a class="headerlink" href="#mkvinfo.description.engage" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Kapcsolja be a kísérleti funkciókat. Az elérhető funkciók listája a
+                        <span class="command">mkvinfo --engage list</span> paranccsal kérhető le. Ezek a
+                        funkciók nem használhatók normál helyzetekben.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.gui_mode"><span class="option">--gui-mode</span></a><a class="headerlink" href="#mkvinfo.description.gui_mode" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Bekapcsolja a GUI módot. Ebben az üzemmódban speciálisan formázott sorokat
+                        adhat ki, amelyekkel a vezérlő GUI-nak elmondhatja, hogy mi történik. Ezek
+                        az üzenetek a '<span class="literal">#GUI#message</span>' formátumot követik. Az
+                        üzenetet kulcs/érték párok követhetik, mint a
+                        '<span class="literal">#GUI#üzenet#key1=value1#key2=value2...</span>'. Sem az
+                        üzenetek, sem a kulcsok nem kerülnek lefordításra, és mindig angol nyelven
+                        kerülnek kiadásra.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.verbose"><span class="option">-v</span>, <span class="option">--verbose</span></a><a class="headerlink" href="#mkvinfo.description.verbose" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Legyen bőbeszédűbb. Lásd a <a href="#mkvinfo.verbosity_levels">szövegességi szintek</a> című részt,
+                        ahol leírást találsz arról, hogy melyik szinten milyen információk kerülnek
+                        kiadásra.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.help"><span class="option">-h</span>, <span class="option">--help</span></a><a class="headerlink" href="#mkvinfo.description.help" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Használati információk megjelenítése és kilépés.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.version"><span class="option">-V</span>, <span class="option">--version</span></a><a class="headerlink" href="#mkvinfo.description.version" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Verzióinformációk megjelenítése és kilépés.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.options_file"><span class="option">@</span><span class="parameter">options-file.json</span></a><a class="headerlink" href="#mkvinfo.description.options_file" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        További parancssori argumentumokat olvas be a
+                        <span class="parameter">options-file</span> fájlból. Az ilyen fájlok támogatott
+                        formátumainak teljes magyarázatát lásd az <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a> man oldal "Opciós
+                        fájlok" című szakaszában.
+                        </p>
+                     </td>
+               </tr>
+            </tbody>
+         </table>
+         
+         <h1><a name="mkvinfo.verbosity_levels">3. Szóképességi szintek</a><a class="headerlink" href="#mkvinfo.verbosity_levels" title="Link to this heading">#</a></h1>
+         
+         
+         
+         <p>
+            A <a href="#mkvinfo.description.verbose">-v</a>
+            opcióval növelhető az <span class="productname">mkvinfo</span>(1) szóbeliségének szintje, és több információt
+            nyomtathat ki az aktuális fájlról.
+            </p>
+         
+         
+         <p>
+            A 0. szinten az <span class="productname">mkvinfo</span>(1) csak a talált pályafejeket és azok típusait fogja
+            kiírni. Az <span class="productname">mkvinfo</span>(1) kilép, amint a fejléceket teljesen elemezte (technikai
+            értelemben: amint az első fürtöt találja). Ezen a szinten a keresőfej
+            bejegyzések és a cue-ok nem jelennek meg -- még akkor sem, ha a
+            sávinformációk előtt helyezkednek el.
+            </p>
+         
+         
+         <p>
+            Az 1. szinten az <span class="productname">mkvinfo</span>(1) kiírja a teljes fájl összes <span class="productname">Matroska</span><sup>(tm)</sup> elemét,
+            kivéve a keresőfej bejegyzéseket és a cue bejegyzéseket. Ha az összefoglaló
+            mód engedélyezve van, akkor az <span class="productname">mkvinfo</span>(1) a képkocka pozícióját is kiírja.
+            </p>
+         
+         
+         <p>
+            Ugyanez a hatás érhető el a <span class="option">--continue</span> opcióval.
+            </p>
+         
+         
+         <p>
+            A 2. szinten az <span class="productname">mkvinfo</span>(1) kiírja a keresőfej bejegyzéseket, a cue
+            bejegyzéseket és a fájl pozícióját, ahol az egyes <span class="productname">Matroska</span><sup>(tm)</sup> elemek
+            találhatók.
+            </p>
+         
+         
+         <p>
+            Ugyanez a hatás érhető el a <span class="option">--all --positions</span> opcióval.
+            </p>
+         
+         
+         <p>
+            A 3. és magasabb szinten az <span class="productname">mkvinfo</span>(1) kiír néhány olyan információt, amely
+            nem kapcsolódik közvetlenül egy <span class="productname">Matroska</span><sup>(tm)</sup> elemhez. Az összes többi elem
+            csak az éppen talált elemekről ír ki dolgokat. A 3. szint metainformációkat
+            ad hozzá a hibakeresés megkönnyítése érdekében (értsd: csak fejlesztőknek
+            szánták). A 3. szint által írt összes sor szögletes zárójelbe van zárva,
+            hogy könnyebb legyen kiszűrni őket.
+            </p>
+         
+         <h1><a name="mkvinfo.text_files_and_charsets">4. Szövegfájlok és karakterkészlet-átalakítások</a><a class="headerlink" href="#mkvinfo.text_files_and_charsets" title="Link to this heading">#</a></h1>
+         
+         
+         
+         <p>
+            Az MKVToolNix csomagban található összes eszköz
+            karakterkészlet-konverziójának, a be- és kimeneti kódolásnak, a parancssori
+            kódolásnak és a konzol kódolásnak a kezeléséről részletesebben az <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a>
+            man oldal azonos nevű szakaszában olvashat.
+            </p>
+         
+         <h1><a name="d4e510">5. Kilépési kódok</a><a class="headerlink" href="#d4e510" title="Link to this heading">#</a></h1>
+         
+         
+         
+         <p>
+            <span class="productname">mkvinfo</span>(1) három kilépési kód egyikével lép ki:
+            </p>
+         
+         
+         <ul>
+            
+            <li>
+               
+               <p>
+                  0 -- Ez a kilépési kód azt jelenti, hogy a futtatás
+                  sikeresen befejeződött.
+                  </p>
+               </li>
+            
+            
+            <li>
+               
+               <p>
+                  1 -- Ebben az esetben az <span class="productname">mkvinfo</span>(1) legalább egy
+                  figyelmeztetést adott ki, de a futás folytatódott.  A figyelmeztetés előtt a
+                  '<span class="literal">Figyelmeztetés:</span>' szöveg áll.
+                  </p>
+               </li>
+            
+            
+            <li>
+               
+               <p>
+                  2 -- Ezt a kilépési kódot hiba esetén
+                  használjuk. <span class="productname">mkvinfo</span>(1) a hibaüzenet kiadása után azonnal megszakad.  A
+                  hibaüzenetek a hibás parancssori argumentumoktól kezdve az olvasási/írási
+                  hibákon át a törött fájlokig terjednek.
+                  </p>
+               </li>
+            </ul>
+         
+         <h1><a name="mkvinfo.environment_variables">6. Környezeti változók</a><a class="headerlink" href="#mkvinfo.environment_variables" title="Link to this heading">#</a></h1>
+         
+         
+         
+         <p>
+            <span class="productname">mkvinfo</span>(1) az alapértelmezett változókat használja, amelyek meghatározzák a
+            rendszer nyelvjárását (pl. <span class="varname">LANG</span> és a
+            <span class="varname">LC_*</span> család). További változók:
+            </p>
+         
+         
+         <table class="variablelist">
+            <thead>
+               <tr>
+                  <th>Option</th>
+                  <th>Description</th>
+               </tr>
+            </thead>
+            <tbody>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.environment_variables.debug"><span class="varname">MKVINFO_DEBUG</span>, <span class="varname">MKVTOOLNIX_DEBUG</span> és
+                        annak rövidített formája <span class="varname">MTX_DEBUG</span>.</a><a class="headerlink" href="#mkvinfo.environment_variables.debug" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>A tartalmat úgy kezeljük, mintha a <a href="#mkvinfo.description.debug">--debug</a> opcióval
+                        adtuk volna át.</p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.environment_variables.engage"><span class="varname">MKVINFO_ENGAGE</span>, <span class="varname">MKVTOOLNIX_ENGAGE</span> és
+                        annak rövidített formája <span class="varname">MTX_ENGAGE</span>.</a><a class="headerlink" href="#mkvinfo.environment_variables.engage" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>A tartalmat úgy kezeljük, mintha a <a href="#mkvinfo.description.engage">--engage</a>
+                        opcióval adtuk volna át.</p>
+                     </td>
+               </tr>
+            </tbody>
+         </table>
+         
+         <h1><a name="mkvinfo.seealso">7. Lásd még</a><a class="headerlink" href="#mkvinfo.seealso" title="Link to this heading">#</a></h1>
+         
+         
+         <p>
+            <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a>, <a href="mkvextract.html"><span class="productname">mkvextract</span>(1)</a>, <a href="mkvpropedit.html"><span class="productname">mkvpropedit</span>(1)</a>, <a href="mkvtoolnix-gui.html"><span class="productname">mkvtoolnix-gui</span>(1)</a>
+            </p>
+         
+         <h1><a name="mkvinfo.www">8. WWW</a><a class="headerlink" href="#mkvinfo.www" title="Link to this heading">#</a></h1>
+         
+         
+         <p>
+            A legfrissebb verzió mindig megtalálható a <a href="https://mkvtoolnix.download/">az MKVToolNix honlapon</a>.
+            </p>
+         </div>
+   </body>
+</html>

@@ -1,0 +1,65 @@
+from __future__ import annotations
+
+from pathlib import Path
+from typing import TYPE_CHECKING
+from vssource import BestSource
+from vstools import set_output
+
+if __name__ != "__vspreview__":
+    from vspreview.plugins import (
+        FileResolvePluginConfig,
+        FileResolverPlugin,
+        ResolvedScript,
+    )
+
+    __all__ = ["FileResolveWithVSSource"]
+
+    class FileResolveWithVSSource(FileResolverPlugin):
+        _config = FileResolvePluginConfig(
+            "dev.setsugen.vssource_load", "VSSource Loader"
+        )
+
+        def can_run_file(self, filepath: Path) -> bool:
+            if filepath.is_dir():
+                return True
+
+            if filepath.suffix in (".py", ".vpy"):
+                return False
+
+            try:
+
+                BestSource.source(filepath, bits=0).get_frame(0).close()
+
+                return True
+            except Exception:
+                ...
+
+            return False
+
+        def resolve_path(self, filepath: Path) -> ResolvedScript:
+            return ResolvedScript(
+                Path(__file__), str(filepath), dict(filepath=filepath), False
+            )
+else:
+
+
+    if TYPE_CHECKING:
+        filepath: Path = Path()
+        pattern: str = ""
+        additional_files: list[Path] | None = None
+    else:
+        if "pattern" not in locals():
+            pattern = "*"
+
+    if filepath.is_dir():
+        for file in filepath.glob(pattern):
+            try:
+                set_output(BestSource.source(file, bits=0), file.name)
+            except Exception:
+                ...
+    else:
+        set_output(BestSource.source(filepath, bits=0), filepath.name)
+
+    if "additional_files" in locals():
+        for file in additional_files:
+            set_output(BestSource.source(file, bits=0), file.name)

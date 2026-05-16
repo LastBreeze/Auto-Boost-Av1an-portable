@@ -1,0 +1,5 @@
+Metadata-Version: 2.1
+Name: Neo_f3kdb
+Version: 10
+Summary: Basically like f3kdb but with legacy format support removed (in Avisynth) and with new sample modes.
+Platform: All

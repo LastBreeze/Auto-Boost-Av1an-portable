@@ -1,0 +1,175 @@
+[1;4mUsage[0m: SvtAv1EncApp <options> <-b dst_filename> -i src_filename
+
+[1;4mExamples[0m:
+Multi-pass encode (VBR):
+    SvtAv1EncApp <--stats svtav1_2pass.log> --passes 2 --rc 1 --tbr 1000 -b dst_filename -i src_filename
+Multi-pass encode (CRF):
+    SvtAv1EncApp <--stats svtav1_2pass.log> --passes 2 --rc 0 --crf 43 -b dst_filename -i src_filename
+Single-pass encode (VBR):
+    SvtAv1EncApp --passes 1 --rc 1 --tbr 1000 -b dst_filename -i src_filename
+
+[1;4mOptions[0m:
+      --help                       Shows the command line options currently available
+      --color-help                 Extra help for adding AV1 metadata to the bitstream
+      --version                    Shows the version of the library that's linked to the library
+  -i, --input                      Input raw video (y4m and yuv) file path, use `stdin` or `-` to read from pipe
+      --allow-mmap-file            Allow memory mapping for regular input file. Performance is platform dependent
+  -b, --output                     Output compressed (ivf) file path, use `stdout` or `-` to write to pipe
+  -c, --config                     Configuration file path  
+      --errlog                     Error file path, defaults to stderr
+  -o, --recon                      Reconstructed yuv file path
+      --stat-file                  PSNR / SSIM per picture stat output file path, requires `--enable-stat-report 1`
+      --progress                   Verbosity of the output, default is 1 [0: no progress is printed, 2: detailed progress]
+      --no-progress                Do not print out progress, default is 0 [1: `--progress 0`, 0: `--progress 1`]
+      --preset                     Encoder preset, presets < 0 are for research purposes. Higher presets means faster encodes, but with a quality tradeoff, default is 4 [-3-13]
+      --svtav1-params              colon separated list of key=value pairs of parameters with keys based on config file options
+
+[1;4mEncoder Global Options[0m:
+  -w, --width                      Frame width in pixels, inferred if y4m, default is 0 [4-16384]
+  -h, --height                     Frame height in pixels, inferred if y4m, default is 0 [4-8704]
+      --forced-max-frame-width     Maximum frame width value to force, default is 0 [4-16384]
+      --forced-max-frame-height    Maximum frame height value to force, default is 0 [4-8704]
+  -n, --frames                     Number of frames to encode. If `n` is larger than the input, the encoder will loop back and continue encoding, default is 0 [0: until EOF, 1-`(2^63)-1`]
+      --skip                       Number of frames to skip. Default is 0 [0: don`t skip, 1-`(2^63)-1`]
+      --nb                         Buffer `n` input frames into memory and use them to encode, default is -1 [-1: no frames buffered, 1-`(2^31)-1`]
+      --color-format               Color format, only yuv420 is supported at this time, default is 1 [0: yuv400, 1: yuv420, 2: yuv422, 3: yuv444]
+      --profile                    Bitstream profile, default is 0 [0: main, 1: high, 2: professional]
+      --level                      Bitstream level, defined in A.3 of the av1 spec, default is 0 [0: autodetect from input, 2.0-7.3]
+      --fps-num                    Input video frame rate numerator, default is 60000 [0-2^32-1]
+      --fps-denom                  Input video frame rate denominator, default is 1000 [0-2^32-1]
+      --input-depth                Input video file and output bitstream bit-depth, default is 10 [8, 10]
+      --inj                        Inject pictures to the library at defined frame rate, default is 0 [0-1]
+      --inj-frm-rt                 Set injector frame rate, only applicable with `--inj 1`, default is 60 [0-240]
+      --enable-stat-report         Calculates and outputs PSNR SSIM metrics at the end of encoding, default is 0 [0-1]
+      --asm                        Limit assembly instruction set, only applicable to x86, default is max [c, mmx, sse, sse2, sse3, ssse3, sse4_1, sse4_2, avx, avx2, avx512, max]
+      --lp                         Amount of parallelism to use. 0 means choose the level based on machine core count. Refer to Appendix A.1 of the user guide, default is 0 [0, 6]
+
+[1;4mRate Control Options[0m:
+      --rc                         Rate control mode, default is 0 [0: CRF or CQP (if `--aq-mode` is 0), 1: VBR, 2: CBR]
+  -q, --qp                         Initial QP level value, default is 35 [1-63]
+      --crf                        Constant Rate Factor value, setting this value is similar to `--rc 0 --aq-mode 2 --qp x`.  Compared to `--qp`, `--crf` can take a value up to 70, and can be set in 0.25 increments, default is 35 [1-70]
+      --tbr                        Target Bitrate (kbps), only applicable for VBR and CBR encoding, default is 7000 [1-100000]
+      --mbr                        Maximum Bitrate (kbps) only applicable for CRF encoding, default is 0 [1-100000]
+      --use-q-file                 Overwrite the encoder default picture based QP assignments and use QP values from `--qp-file`, default is 0 [0-1]
+      --qpfile                     Path to a file containing per picture QP value separated by newlines
+      --max-qp                     Maximum (highest) quantizer, only applicable for VBR and CBR, default is 63 [1-63]
+      --min-qp                     Minimum (lowest) quantizer, only applicable for VBR and CBR, default is 1 [1-63]
+      --aq-mode                    Set adaptive QP level, default is 2 [0: off, 1: variance base using AV1 segments, 2: deltaq pred efficiency]
+      --use-fixed-qindex-offsets    Overwrite the encoder default hierarchical layer based QP assignment and use fixed Q index offsets, default is 0 [0-2]
+      --key-frame-qindex-offset    Overwrite the encoder default keyframe Q index assignment, default is 0 [-256-255]
+      --key-frame-chroma-qindex-offset    Overwrite the encoder default chroma keyframe Q index assignment, default is 0 [-256-255]
+      --qindex-offsets             list of luma Q index offsets per hierarchical layer, separated by `,` with each offset in the range of [-256-255], default is `0,0,..,0`
+      --chroma-qindex-offsets      list of chroma Q index offsets per hierarchical layer, separated by `,` with each offset in the range of [-256-255], default is `0,0,..,0`
+      --luma-y-dc-qindex-offset    Luma Y DC Qindex Offset  
+      --chroma-u-dc-qindex-offset    Chroma U DC Qindex Offset
+      --chroma-u-ac-qindex-offset    Chroma U AC Qindex Offset
+      --chroma-v-dc-qindex-offset    Chroma V DC Qindex Offset
+      --chroma-v-ac-qindex-offset    Chroma V AC Qindex Offset
+      --lambda-scale-factors       list of scale factor for lambda values used for different frame types defined by SvtAv1FrameUpdateType, separated by `,`       with each scale factor as integer.       value divided by 128 is the actual scale factor in float, default is `128,128,..,128`
+      --undershoot-pct             Only for VBR and CBR, allowable datarate undershoot (min) target (percentage), default is 25, but can change based on rate control [0-100]
+      --overshoot-pct              Only for VBR and CBR, allowable datarate overshoot (max) target (percentage), default is 25, but can change based on rate control [0-100]
+      --mbr-overshoot-pct          Only for Capped CRF, allowable datarate overshoot (max) target (percentage), default is 50, but can change based on rate control [0-100]
+      --gop-constraint-rc          Enable GoP constraint rc.  When enabled, the rate control matches the target rate for each GoP, default is 0 [0-1]
+      --buf-sz                     Client buffer size (ms), only applicable for CBR, default is 6000 [0-10000]
+      --buf-initial-sz             Client initial buffer size (ms), only applicable for CBR, default is 4000 [0-10000]
+      --buf-optimal-sz             Client optimal buffer size (ms), only applicable for CBR, default is 5000 [0-10000]
+      --recode-loop                Recode loop level, refer to "Recode loop level table" in the user guide for more info [0: off, 4: preset based]
+      --minsection-pct             GOP min bitrate (expressed as a percentage of the target rate), default is 0 [0-100]
+      --maxsection-pct             GOP max bitrate (expressed as a percentage of the target rate), default is 2000 [0-10000]
+      --enable-qm                  Enable quantisation matrices, default is 1 [0-1]
+      --qm-min                     Min quant matrix flatness, default is 6 [0-15]
+      --qm-max                     Max quant matrix flatness, default is 10 [0-15]
+      --chroma-qm-min              Min chroma quant matrix flatness, default is 8 [0-15]
+      --chroma-qm-max              Max chroma quant matrix flatness, default is 15 [0-15]
+      --roi-map-file               Enable Region Of Interest and specify a picture based QP Offset map file, default is off
+      --tf-strength                Adjust temporal filtering strength, default is 1 [0-4]
+      --luminance-qp-bias          Adjusts a frame's QP based on its average luma value, default is 0 [0-100]
+      --sharpness                  Bias towards decreased/increased sharpness, default is 1 [-7 to 7]
+
+[1;4mMulti-pass Options[0m:
+      --pass                       Multi-pass selection, pass 2 is only available for VBR, default is 0 [0: single pass encode, 1: first pass, 2: second pass]
+      --stats                      Filename for multi-pass encoding, default is "svtav1_2pass.log"
+      --passes                     Number of encoding passes, default is preset dependent but generally 1 [1: one pass encode, 2: multi-pass encode]
+
+[1;4mGOP size and type Options[0m:
+      --keyint                     GOP size (frames), default is -2 [-2: ~10 seconds - up to 305 frames), -1: "infinite" and only applicable for CRF, 0: same as -1]
+      --irefresh-type              Intra refresh type, default is 2 [1: FWD Frame (Open GOP), 2: KEY Frame (Closed GOP)]
+      --scd                        Scene change detection control, default is 0 [0-1]
+      --lookahead                  Number of frames in the future to look ahead, not including minigop, temporal filtering, and rate control, default is -1 [-1: auto, 0-120]
+      --hierarchical-levels        Set hierarchical levels beyond the base layer, default is <=M12: 5, else: 4 [2: 3 temporal layers, 3: 4 temporal layers, 4: 5 layers, 5: 6 layers]
+      --pred-struct                Set prediction structure, default is 2 [1: low delay frames, 2: random access]
+      --rtc                        Enables fast settings for rtc when using low-delay mode. Forces low-delay pred struct to be used, default is 0, [0-1]]
+      --force-key-frames           Force key frames at the comma separated specifiers. `#f` for frames, `#.#s` for seconds
+      --startup-mg-size            Specify another mini-gop configuration for the first mini-gop after the key-frame, default is 0 [0: OFF, 2: 3 temporal layers, 3: 4 temporal layers, 4: 5 temporal layers]
+      --startup-qp-offset          Specify an offset to the input-qp of the startup GOP prior to the picture-qp derivation, default is 0 [-63,63]
+
+[1;4mAV1 Specific Options[0m:
+      --tile-rows                  Number of tile rows to use, `TileRow == log2(x)`, default changes per resolution but is 1 [0-6]
+      --tile-columns               Number of tile columns to use, `TileCol == log2(x)`, default changes per resolution but is 1 [0-4]
+      --enable-dlf                 Deblocking loop filter control, default is 1 [0-2]
+      --enable-cdef                Enable Constrained Directional Enhancement Filter, default is 1 [0-1]
+      --enable-restoration         Enable loop restoration filter, default is 1 [0-1]
+      --enable-mfmv                Motion Field Motion Vector control, default is -1 [-1: auto, 0-1]
+      --enable-dg                  Dynamic GoP control, default is 1 [0-1]
+      --fast-decode                Fast Decoder levels, default is 0 [0-2]
+      --enable-tf                  Enable ALT-REF (temporally filtered) frames, default is 1 [0-2]
+      --enable-overlays            Enable the insertion of overlayer pictures which will be used as an additional reference frame for the base layer picture, default is 0 [0-1]
+      --tune                       Optimize the encoding process for different desired outcomes [0 = VQ, 1 = PSNR, 2 = SSIM, 3 = IQ (Image Quality), 4 = MS_SSIM (MS_SSIM and SSIMULACRA2 optimized mode), 5 = Film Grain], default is 1 [0-5]
+      --scm                        Set screen content detection level, default is 2 [0: off, 1: on, 2: content adaptive, 3: content adaptive (anti-alias aware)]
+      --film-grain                 Enable film grain, default is 0 [0: off, 1-50: level of denoising for film grain]
+      --film-grain-denoise         Apply denoising when film grain is ON, default is 0 [0: no denoising, film grain data is still in frame header, 1: level of denoising is set by the film-grain parameter]
+      --fgs-table                  Set the film grain model table path
+      --noise                      Generate noise table for film grain. 50 is roughly equivalent to `--film-grain 50`, default is 0 [0: off, 1-200: strength value]
+      --noise-chroma               Chroma noise with strength based on `--noise` setting (-1) or set its strength independently (0-200), default is -1 [-1: ~60% of luma, 0: off, 1-200: strength value]
+      --noise-chroma-from-luma     Apply noise to chroma planes based on the luma plane, default is 0 [0: off, 1: on]
+      --noise-size                 Set size of noise grain. Higher value results in a larger-looking noise, default is -1 [-1: auto, 0-13: set grain size]
+      --superres-mode              Enable super-resolution mode, refer to the super-resolution section in the user guide, default is 0 [0: off, 1-3, 4: auto-select mode]
+      --superres-denom             Super-resolution denominator, only applicable for mode == 1, default is 8 [8: no scaling, 9-15, 16: half-scaling]
+      --superres-kf-denom          Super-resolution denominator for key frames, only applicable for mode == 1, default is 8 [8: no scaling, 9-15, 16: half-scaling]
+      --superres-qthres            Super-resolution q-threshold, only applicable for mode == 3, default is 43 [0-63]
+      --superres-kf-qthres         Super-resolution q-threshold for key frames, only applicable for mode == 3, default is 43 [0-63]
+      --sframe-dist                S-Frame interval (frames) (0: OFF[default], > 0: ON)
+      --sframe-mode                S-Frame insertion mode ([1-3], 1: the considered frame will be made into an S-Frame only if it is an altref frame, 2: the next altref frame will be made into an S-Frame[default], 3: adjust minigop size to make an S-Frame at specific position, 4: adjust minigop size to make an S-Frame inserting at specific position in decode order)
+      --sframe-posi                S-Frame insertion positions, a list separated by ',', S-Frame process inserts by the specified frame numbers (0 based), only applicable for mode 3
+      --sframe-qp                  S-Frame setup qp, a list separated by ',', QP value(s) set with S-Frame insertion
+      --sframe-qp-offset           S-Frame setup qp offset, a list separated by ',', QP offset value(s) set with S-Frame insertion
+      --resize-mode                Enable resize mode [0: none, 1: fixed scale, 2: random scale, 3: dynamic scale, 4: random access]
+      --resize-denom               Resize denominator, only applicable for mode == 1 [8-16]
+      --resize-kf-denom            Resize denominator for key frames, only applicable for mode == 1 [8-16]
+      --frame-resz-events          Resize frame events, in a list separated by ',', a reference scaling process starts from the given frame number with new denominators, only applicable for mode == 4
+      --frame-resz-kf-denoms       Resize denominator for key frames in event, in a list separated by ',', only applicable for mode == 4
+      --frame-resz-denoms          Resize denominator in event, in a list separated by ',', only applicable for mode == 4
+      --lossless                   Enable lossless coding, default is 0 [0-1]
+      --avif                       Enable still-picture coding, default is 0 [0-1]
+
+[1;4mColor Description Options[0m:
+      --color-help                 Metadata help from user guide Appendix A.2
+      --color-primaries            Color primaries, refer to --color-help. Default is 2 [0-12, 22]
+      --transfer-characteristics    Transfer characteristics, refer to --color-help. Default is 2 [0-22]
+      --matrix-coefficients        Matrix coefficients, refer to --color-help. Default is 2 [0-14]
+      --color-range                Color range, default is 0 [0: Studio, 1: Full]
+      --chroma-sample-position     Chroma sample position, default is 'unknown' ['unknown', 'vertical'/'left', 'colocated'/'topleft']
+      --mastering-display          Mastering display metadata in the format of "G(x,y)B(x,y)R(x,y)WP(x,y)L(max,min)", refer to the user guide Appendix A.2
+      --content-light              Set content light level in the format of "max_cll,max_fall", refer to the user guide Appendix A.2
+      --dolby-vision-rpu           Set the Dolby Vision RPU path
+      --hdr10plus-json             Set the HDR10+ JSON file path
+
+[1;4mPsychovisual Options[0m:
+      --enable-variance-boost      Enable Variance Boost, default is 1 [0-1]
+      --variance-boost-strength    Variance Boost strength, default is 2 [1-4]
+      --variance-octile            Octile for Variance Boost, default is 5 [1-8]
+      --variance-boost-curve       Curve for Variance Boost, default is 0 [0-3]
+      --qp-scale-compress-strength    QP scale compress strength, default is 1.0 [0.0-8.0]
+      --adaptive-film-grain        Adapts film grain blocksize based on video resolution, default is 1 [0-1]
+      --max-tx-size                Limits the allowed transform sizes to the specified, default is 64 [32,64]
+      --ac-bias                    Strength of AC bias in rate distortion, default is 1.0 [0.0-8.0]
+      --noise-norm-strength        Noise normalization strength, default is 1 [0-4]
+      --kf-tf-strength             Adjust TF strength on keyframes, default is 1 (4x weaker than mainline) [0-4]
+      --alt-lambda-factors         Use alternative RDO lambda factors (from SVT-AV1 3.0.2), default is 1 [0-1]
+      --sharp-tx                   Sharp transform optimization, default is 1 [0-1]
+      --alt-ssim-tuning            Alternative SSIM tuning methods for tune 2, default is 0 [0-1]
+      --hbd-mds                    High Bit-Depth Mode Decision, default is 0 [0: preset-determined, 1 = 10-bit, 2 = hybrid 8/10-bit]
+      --tx-bias                    Transform size/type bias type, default is 0 [0-3]; 1 = full, 2, transform size only, 3 = interpolation only
+      --complex-hvs                Enable highest complexity HVS model, default is 0 [0-1]
+      --noise-adaptive-filtering    Control noise detection for CDEF/restoration filtering, default is 2 [0: off, 1: both CDEF and restoration are on 2: default tune behavior, 3: CDEF only, 4: restoration only)]
+      --cdef-scaling               Controls scaling of the CDEF strength computation, default is 15 (1x scaling) [1: minimum, 8: ~0.5x, 30: 2x]

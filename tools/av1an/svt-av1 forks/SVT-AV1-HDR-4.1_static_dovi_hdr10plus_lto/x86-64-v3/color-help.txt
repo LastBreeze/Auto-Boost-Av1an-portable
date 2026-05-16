@@ -1,0 +1,80 @@
+This command line flag reproduces information provided by Appendix A.2 of the SVT-AV1 User Guide.
+
+The available options for --color-primaries are:
+
+	1: bt709, BT.709
+	2: unspecified, default
+	4: bt470m, BT.470 System M (historical)
+	5: bt470bg, BT.470 System B, G (historical)
+	6: bt601, BT.601
+	7: smpte240, SMPTE 240
+	8: film, Generic film (color filters using illuminant C)
+	9: bt2020, BT.2020, BT.2100
+	10: xyz, SMPTE 428 (CIE 1921 XYZ)
+	11: smpte431, SMPTE RP 431-2
+	12: smpte432, SMPTE EG 432-1
+	22: ebu3213, EBU Tech. 3213-E
+
+The available options for --transfer-characteristics are:
+
+	1: bt709, BT.709
+	2: unspecified, default
+	4: bt470m, BT.470 System M (historical)
+	5: bt470bg, BT.470 System B, G (historical)
+	6: bt601, BT.601
+	7: smpte240, SMPTE 240 M
+	8: linear, Linear
+	9: log100, Logarithmic (100 : 1 range)
+	10: log100-sqrt10, Logarithmic (100 * Sqrt(10) : 1 range)
+	11: iec61966, IEC 61966-2-4
+	12: bt1361, BT.1361
+	13: srgb, sRGB or sYCC
+	14: bt2020-10, BT.2020 10-bit systems
+	15: bt2020-12, BT.2020 12-bit systems
+	16: smpte2084, SMPTE ST 2084, ITU BT.2100 PQ
+	17: smpte428, SMPTE ST 428
+	18: hlg, BT.2100 HLG, ARIB STD-B67
+
+The available options for --matrix-coefficients are:
+
+	0: identity, Identity matrix
+	1: bt709, BT.709
+	2: unspecified, default
+	4: fcc, US FCC 73.628
+	5: bt470bg, BT.470 System B, G (historical)
+	6: bt601, BT.601
+	7: smpte240, SMPTE 240 M
+	8: ycgco, YCgCo
+	9: bt2020-ncl, BT.2020 non-constant luminance, BT.2100 YCbCr
+	10: bt2020-cl, BT.2020 constant luminance
+	11: smpte2085, SMPTE ST 2085 YDzDx
+	12: chroma-ncl, Chromaticity-derived non-constant luminance
+	13: chroma-cl, Chromaticity-derived constant luminance
+	14: ictcp, BT.2100 ICtCp
+
+The available options for --color-range are:
+
+	0: studio (default)
+	1: full
+
+The available options for --chroma-sample-position are:
+
+	0: unknown, default
+	1: vertical/left, horizontally co-located with luma samples, vertical position in the middle between two luma samples
+	2: colocated/topleft, co-located with luma samples
+
+The --mastering-display and --content-light parameters are used to set the mastering display and content light level in the AV1 bitstream.
+
+--mastering-display takes the format of G(x,y)B(x,y)R(x,y)WP(x,y)L(max,min) where
+
+	- G(x,y) is the green channel of the mastering display
+	- B(x,y) is the blue channel of the mastering display
+	- R(x,y) is the red channel of the mastering display
+	- WP(x,y) is the white point of the mastering display
+	- L(max,min) is the light level of the mastering display
+
+The x & y values can be coordinates from 0.0 to 1.0, as specified in CIE 1931 while the min,max values can be floating point values representing candelas per square meter, or nits.
+The max,min values are generally specified in the range of 0.0 to 1.0 but there are no constraints on the provided values.
+Invalid values will be clipped accordingly.
+
+--content-light takes the format of max_cll,max_fall where both values are integers clipped into a range of 0 to 65535.

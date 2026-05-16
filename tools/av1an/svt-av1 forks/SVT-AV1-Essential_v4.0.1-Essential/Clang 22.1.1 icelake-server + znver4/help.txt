@@ -1,0 +1,73 @@
+Usage: SvtAv1EncApp <options> -i src_filename -b dst_filename
+
+Options:
+      --help                       Shows the important command line options currently available
+      --full-help                  Shows all the command line options currently available
+      --color-help                 Extra help for adding AV1 metadata to the bitstream
+      --version                    Shows the version of the library that's linked to the library
+  -i, --input                      Input raw video (y4m and yuv) file path, use `stdin` or `-` to read from pipe
+      --webm                       Output WebM instead of IVF (default when WebM IO is enabled)
+  -b, --output                     Output compressed (ivf) file path, use `stdout` or `-` to write to pipe
+      --progress                   Verbosity of the output, default is 2 [0: no progress is printed, 1: basic progress, 2: detailed progress]
+      --hide-banner                Do not print out encoder parameters [0: params are printed (Default), 1: no param is printed]
+      --speed                      Encoder speed. Overrides the preset parameter. Available speeds are: slower, slow, medium, fast, faster. Default is slow.
+
+Encoder Global Options:
+  -w, --width                      Frame width in pixels, inferred if y4m, default is 0 [4-16384]
+  -h, --height                     Frame height in pixels, inferred if y4m, default is 0 [4-8704]
+      --frames                     Number of frames to encode. If `n` is larger than the input, the encoder will loop back and continue encoding, default is 0 [0: until EOF, 1-`(2^63)-1`]
+      --skip                       Number of frames to skip. Default is 0 [0: don`t skip, 1-`(2^63)-1`]
+      --fps-num                    Input video frame rate numerator, default is 60000 [0-2^32-1]
+      --fps-denom                  Input video frame rate denominator, default is 1000 [0-2^32-1]
+      --lp                         Amount of parallelism to use. 0 means choose the level based on machine core count. Refer to Appendix A.1 of the user guide, default is 0 [0, 6]
+
+Rate Control Options:
+      --quality                    Quality preset. Overrides CRF/CQP. Available qualities are: higher, high, medium, low, lower. Default is medium.
+      --mbr                        Maximum Bitrate (kbps) only applicable for CRF encoding, default is 0 [1-100000]
+      --mbr-overshoot-pct          Only for Capped CRF, allowable datarate overshoot (max) target (percentage), default is 0, but can change based on rate control [0-100]
+      --enable-qm                  Enable quantisation matrices, default is 1 [0-1]
+      --qm-min                     Min quant matrix flatness, default is 2 [0-15]
+      --qm-max                     Max quant matrix flatness, default is 15 [0-15]
+      --chroma-qm-min              Min chroma quant matrix flatness, default is 4 [0-15]
+      --chroma-qm-max              Max chroma quant matrix flatness, default is 15 [0-15]
+      --tf-strength                Adjust temporal filtering strength, default is 1 [0-4]
+      --luminance-qp-bias          Adjusts a frame's QP based on its average luma value, default is 10 [0-100]
+      --sharpness                  Bias towards decreased/increased sharpness, default is 1 [-7 to 7]
+      --qp-scale-compress-strength    QP scale compress strength, default is 1 [0-8]
+      --zones                      CRF/CQP zones, format: start,end,quality;start,end,quality;..., default is no zones
+
+GOP size and type Options:
+      --keyint                     Max GOP size (frames), default is -2 [-2: ~5 seconds, -1: "infinite" and only applicable for CRF, 0: same as -1]
+      --min-keyint                 Min GOP size (frames), default is -1 [-1: multiple of the mini-gop length (automatic), 0: no minimum]
+      --scd                        Scene change detection control, default is 1 [0-1]
+      --hierarchical-levels        Set hierarchical levels beyond the base layer, default is <=M12: 5, else: 4 [2: 3 temporal layers, 3: 4 temporal layers, 4: 5 layers, 5: 6 layers]
+      --startup-mg-size            Specify another mini-gop configuration for the first mini-gop after the key-frame, default is 0 [0: OFF, 2: 3 temporal layers, 3: 4 temporal layers, 4: 5 temporal layers]
+
+AV1 Specific Options:
+      --auto-tiling                Auto tiling, default is 1 [0-1]
+      --tile-rows                  Number of tile rows to use, `TileRow == log2(x)`, default is 0 [0-6]
+      --tile-columns               Number of tile columns to use, `TileCol == log2(x)`, default is 0 [0-4]
+      --enable-dlf                 Deblocking loop filter control, default is 2 [0-3]
+      --enable-cdef                Enable Constrained Directional Enhancement Filter, default is 1 [0-1]
+      --enable-restoration         Enable loop restoration filter, default is 1 [0-1]
+      --fast-decode                Fast Decoder levels, default is 0 [0-2]
+      --enable-tf                  Enable ALT-REF (temporally filtered) frames, default is 1 [0-3]
+      --enable-overlays            Enable the insertion of overlayer pictures which will be used as an additional reference frame for the base layer picture, default is 0 [0-1]
+      --tune                       Specifies whether to use PSNR or VQ as the tuning metric [0 = VQ, 1 = PSNR, 2 = SSIM], default is 1 [0-2]
+      --low-memory                 Specifies whether to use params which reduce RAM usage with potential efficiency and speed trade-offs, most effective in CRF/CQP RA mode, default is 0 [0-1]
+      --scm                        Set screen content detection level, default is 2 [0: off, 1: on, 2: content adaptive]
+      --film-grain                 Enable film grain, default is 0 [0: off, 1-50: level of graining* for film grain (*and denoising if on)]
+      --film-grain-denoise         Apply denoising when film grain is ON, default is 0 [0: no denoising, film grain data is still in frame header, 1: level of denoising is set by the film-grain parameter]
+      --fgs-table                  Set the film grain model table path
+      --photon-noise               Generate photon noise table for film grain, default is 0 [0: off, 1-100000: ISO value]
+      --photon-noise-chroma        Enable chroma noise, default is 0 [0: off, 1: on]
+      --lossless                   Enable lossless coding, default is 0 [0-1]
+      --avif                       Enable still-picture coding, default is 0 [0-1]
+
+Psychovisual Options:
+      --variance-boost-strength    Variance boost strength, default is 1 [1-4]
+      --variance-octile            Octile for variance boost, default is 4 [1-8]
+      --ac-bias                    Strength of AC bias in rate distortion, default is 0.25 [0.0-8.0]
+      --enable-alt-cdef            Enable alternative CDEF biases.Default is 0 [0-3].
+      --enable-alt-dlf             Enable alternative DLF biases.Default is 0 [0-3].
+      --distortion-bias-preset     Enable presets that automatically set settings that biases towards higher distortion levels for greater fidelity potential. Default is 0 [0-4].

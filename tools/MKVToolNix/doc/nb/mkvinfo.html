@@ -1,0 +1,446 @@
+<!DOCTYPE html
+  PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
+<html>
+   <head>
+      <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+      <title>mkvinfo -- Skriv ut informasjon om elementer i Matroska filer</title>
+      <link rel="stylesheet" type="text/css" href="mkvtoolnix-doc.css">
+   </head>
+   <body>
+      <div class="heading">mkvinfo -- Skriv ut informasjon om elementer i <span class="productname">Matroska</span><sup>(tm)</sup> filer</div>
+      <hr>
+      <div id="toc" class="toc">
+         <h1>Table of contents</h1>
+         <ul>
+            <li><a href="#mkvinfo.synopsis">1. Sammendrag</a></li>
+            <li><a href="#mkvinfo.description">2. Beskrivelse</a></li>
+            <li><a href="#mkvinfo.verbosity_levels">3. Detaljnivåer</a></li>
+            <li><a href="#mkvinfo.text_files_and_charsets">4. Tekstfiler og tegnsettkonverteringer</a></li>
+            <li><a href="#d4e510">5. Avslutningskoder</a></li>
+            <li><a href="#mkvinfo.environment_variables">6. Miljøvariabler</a></li>
+            <li><a href="#mkvinfo.seealso">7. Se også</a></li>
+            <li><a href="#mkvinfo.www">8. WWW</a></li>
+         </ul>
+      </div>
+      <div class="content">
+         <h1><a name="mkvinfo.synopsis">1. Sammendrag</a><a class="headerlink" href="#mkvinfo.synopsis" title="Link to this heading">#</a></h1>
+         
+         
+         <div class="cmdsynopsis"><span class="commandname">mkvinfo</span> alternativer {kildefilnavn}</div>
+         
+         <h1><a name="mkvinfo.description">2. Beskrivelse</a><a class="headerlink" href="#mkvinfo.description" title="Link to this heading">#</a></h1>
+         
+         
+         <p>
+            Dette programmet viser alle elementene i en <span class="productname">Matroska</span><sup>(tm)</sup>. Utdataene kan
+            begrenses til en liste over spor i filen, inkludert informasjon om kodekene
+            som brukes.
+            </p>
+         
+         
+         <table class="variablelist">
+            <thead>
+               <tr>
+                  <th>Option</th>
+                  <th>Description</th>
+               </tr>
+            </thead>
+            <tbody>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.all"><span class="option">-a</span>, <span class="option">--all</span></a><a class="headerlink" href="#mkvinfo.description.all" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Som standard stopper <span class="productname">mkvinfo</span>(1)  når den møter den første klyngen. I tillegg
+                        viser den ikke visse ofte forekommende elementer. Med dette alternativet vil
+                        <span class="productname">mkvinfo</span>(1)  fortsette behandlingen uavhengig av detaljnivået og vise alle
+                        elementene.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.checksums"><span class="option">-c</span>, <span class="option">--checksums</span></a><a class="headerlink" href="#mkvinfo.description.checksums" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Beregner og viser <span class="function">Adler-32</span> sjekksummen for hver
+                        ramme. Nyttig bare for feilsøking.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.continue"><span class="option">-o</span>, <span class="option">--continue</span></a><a class="headerlink" href="#mkvinfo.description.continue" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Som standard stopper <span class="productname">mkvinfo</span>(1)  når den møter den første klyngen. Med dette
+                        alternativet vil <span class="productname">mkvinfo</span>(1)  fortsette behandlingen uavhengig av
+                        detaljnivået.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.hex_positions"><span class="option">-p</span>, <span class="option">--hex-positions</span></a><a class="headerlink" href="#mkvinfo.description.hex_positions" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Viser posisjonene til alle elementene i heksadesimal uavhengig av
+                        omfangsnivået.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.positions"><span class="option">-P</span>, <span class="option">--positions</span></a><a class="headerlink" href="#mkvinfo.description.positions" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Viser posisjonene til alle elementene i desimal uavhengig av omfangsnivået.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.summary"><span class="option">-s</span>, <span class="option">--summary</span></a><a class="headerlink" href="#mkvinfo.description.summary" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Vis bare en kortfattet oppsummering av hva <span class="productname">mkvinfo</span>(1) finner og ikke hvert
+                        element.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.track_info"><span class="option">-t</span>, <span class="option">--track-info</span></a><a class="headerlink" href="#mkvinfo.description.track_info" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Vis statistikk for hvert spor i detaljert modus. Setter også detaljrikdom
+                        til 1 hvis det var på nivå 0 før.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.hexdump"><span class="option">-x</span>, <span class="option">--hexdump</span></a><a class="headerlink" href="#mkvinfo.description.hexdump" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Vis de første 16 bytene av hver ramme som en hex-dump.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.full_hexdump"><span class="option">-X</span>, <span class="option">--full-hexdump</span></a><a class="headerlink" href="#mkvinfo.description.full_hexdump" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Vis alle byte i hver ramme som en hex-dump.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.size"><span class="option">-z</span>, <span class="option">--size</span></a><a class="headerlink" href="#mkvinfo.description.size" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Vis størrelsen på hvert element, inkludert datahodet.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.command_line_charset"><span class="option">--command-line-charset</span> <span class="parameter">character-set</span></a><a class="headerlink" href="#mkvinfo.description.command_line_charset" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Angir tegnsettet for å konvertere strenger fra gitt på kommandolinjen. Den
+                        er standard til tegnsettet gitt av systemets gjeldende lokalitet.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.output_charset"><span class="option">--output-charset</span> <span class="parameter">character-set</span></a><a class="headerlink" href="#mkvinfo.description.output_charset" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Angir tegnsettet som strenger konverteres til som skal sendes ut. Den er
+                        standard til tegnsettet gitt av systemets gjeldende lokalitet.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.redirect_output"><span class="option">-r</span>, <span class="option">--redirect-output</span>
+                        <span class="parameter">filnavn</span></a><a class="headerlink" href="#mkvinfo.description.redirect_output" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Skriver alle meldinger til filen <span class="parameter">filnavn</span> i stedet for
+                        til konsollen.  Selv om dette kan gjøres enkelt med omdirigering av utdata,
+                        er det tilfeller der dette alternativet er nødvendig: når terminalen tolker
+                        utdataene på nytt før du skriver den til en fil.  Tegnsettet angitt med
+                        <a href="#mkvinfo.description.output_charset">--output-charset</a>
+                        er hedret.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.ui_language"><span class="option">--ui-language</span> <span class="parameter">kode</span></a><a class="headerlink" href="#mkvinfo.description.ui_language" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Tvinger oversettelsene for språk- <span class="parameter">koden</span> som skal
+                        brukes (eks.  '<span class="literal">de_DE</span>' for tyske oversettelser). Ved å
+                        skrive inn '<span class="literal">list</span>' som <span class="parameter">koden</span> vil
+                        føre til at programmet sender ut en liste over tilgjengelige oversettelser.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.abort_on_warnings"><span class="option">--abort-on-warnings</span></a><a class="headerlink" href="#mkvinfo.description.abort_on_warnings" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Ber programmet om å avbryte etter at den første advarselen er sendt
+                        ut. Programmets avslutningskode vil være 1.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.debug"><span class="option">--debug</span> <span class="parameter">emne</span></a><a class="headerlink" href="#mkvinfo.description.debug" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Slå på feilsøking for en bestemt funksjon. Dette alternativet er bare nyttig
+                        for utviklere.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.engage"><span class="option">--engage</span> <span class="parameter">funksjon</span></a><a class="headerlink" href="#mkvinfo.description.engage" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Slå på eksperimentelle funksjoner. En liste over tilgjengelige funksjoner
+                        kan bes om med <span class="command">mkvinfo --engage list</span>. Disse funksjonene
+                        er ikke ment å brukes i normale situasjoner.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.gui_mode"><span class="option">--gui-mode</span></a><a class="headerlink" href="#mkvinfo.description.gui_mode" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Slår på det grafiske grensesnittet. I denne modusen kan spesialformaterte
+                        linjer være utdata som kan fortelle et kontrollerende grafisk grensesnitt
+                        hva som skjer. Disse meldingene følger formatet
+                        '<span class="literal">#GUI#melding</span>'. Meldingen kan etterfølges av
+                        nøkkel/verdipar som i
+                        '<span class="literal">#GUI#melding#nøkkel1=verdi1#nøkkel2=verdi2…</span>'. Verken
+                        meldingene eller nøklene blir noen gang oversatt og sendes alltid ut på
+                        engelsk.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.verbose"><span class="option">-v</span>, <span class="option">--verbose</span></a><a class="headerlink" href="#mkvinfo.description.verbose" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Vær mer omfangsrik. Se delen om <a href="#mkvinfo.verbosity_levels">detaljnivåer</a> for en beskrivelse av
+                        hvilken informasjon som sendes ut på hvilket nivå.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.help"><span class="option">-h</span>, <span class="option">--help</span></a><a class="headerlink" href="#mkvinfo.description.help" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Vis bruksinformasjon og avslutt.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.version"><span class="option">-V</span>, <span class="option">--version</span></a><a class="headerlink" href="#mkvinfo.description.version" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Vis versjonsinformasjon og avslutt.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.options_file"><span class="option">@</span><span class="parameter">alternativer-fil.json</span></a><a class="headerlink" href="#mkvinfo.description.options_file" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Leser flere kommandolinjeargumenter fra filen
+                        <span class="parameter">alternativer-fil</span>. Hvis du vil ha en fullstendig
+                        forklaring på hvilke formater som støttes for slike filer, kan du se
+                        avsnittet "Alternativfiler" i <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a> manualside.
+                        </p>
+                     </td>
+               </tr>
+            </tbody>
+         </table>
+         
+         <h1><a name="mkvinfo.verbosity_levels">3. Detaljnivåer</a><a class="headerlink" href="#mkvinfo.verbosity_levels" title="Link to this heading">#</a></h1>
+         
+         
+         
+         <p>
+            <a href="#mkvinfo.description.verbose">-v</a>
+            alternativet kan brukes til å øke <span class="productname">mkvinfo</span>(1)s omfangsnivå og skrive ut mer
+            informasjon om gjeldende fil.
+            </p>
+         
+         
+         <p>
+            På nivå 0 vil <span class="productname">mkvinfo</span>(1) bare skrive ut spordatahodene den finner og deres
+            typer. <span class="productname">mkvinfo</span>(1) avsluttes så snart datahodene analyseres fullstendig (mer
+            teknisk: så snart den første klyngen oppstår). På dette nivået vises ikke
+            søkehodeoppføringene og signalene - selv om de er plassert foran
+            sporinformasjonen.
+            </p>
+         
+         
+         <p>
+            På nivå 1 vil <span class="productname">mkvinfo</span>(1) også skrive ut alle <span class="productname">Matroska</span><sup>(tm)</sup> elementer som oppstår
+            for hele filen, men ikke søkehodeoppføringer og signaloppføringer. Hvis
+            sammendragsmodus er aktivert, vil <span class="productname">mkvinfo</span>(1) også sende ut rammeposisjonen.
+            </p>
+         
+         
+         <p>
+            Den samme effekten kan oppnås med alternativet <span class="option">--continue</span>.
+            </p>
+         
+         
+         <p>
+            På nivå 2 vil <span class="productname">mkvinfo</span>(1) også skrive ut søkehodeoppføringene,
+            signaloppføringene og filposisjonen der hvert <span class="productname">Matroska</span><sup>(tm)</sup> element kan bli
+            funnet på.
+            </p>
+         
+         
+         <p>
+            Den samme effekten kan oppnås med alternativene <span class="option">--all
+               --positions</span>.
+            </p>
+         
+         
+         <p>
+            På nivå 3 og over vil <span class="productname">mkvinfo</span>(1) skrive ut noe informasjon som ikke er
+            direkte koblet til et <span class="productname">Matroska</span><sup>(tm)</sup> element. Alle andre elementer skriver bare
+            ut ting om elementene som nettopp ble funnet. Nivå 3 legger til
+            metainformasjon for å lette feilsøking (les: det er kun ment for
+            utviklere). Alle linjer skrevet av nivå 3 er omsluttet av firkantede
+            parenteser for å gjøre det enkelt å filtrere dem.
+            </p>
+         
+         <h1><a name="mkvinfo.text_files_and_charsets">4. Tekstfiler og tegnsettkonverteringer</a><a class="headerlink" href="#mkvinfo.text_files_and_charsets" title="Link to this heading">#</a></h1>
+         
+         
+         
+         <p>
+            For en grundig diskusjon om hvordan alle verktøyene i MKVToolNix-pakken
+            håndterer tegnsettkonverteringer, inndata- / utdatakoding,
+            kommandolinjekoding og konsollkoding, se delen med identisk navn i
+            <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a> manualsiden.
+            </p>
+         
+         <h1><a name="d4e510">5. Avslutningskoder</a><a class="headerlink" href="#d4e510" title="Link to this heading">#</a></h1>
+         
+         
+         
+         <p>
+            <span class="productname">mkvinfo</span>(1) avsluttes med en av tre avslutningskoder:
+            </p>
+         
+         
+         <ul>
+            
+            <li>
+               
+               <p>
+                  <span class="constant">0</span> -- Denne avslutningskoden betyr at kjøringen er
+                  fullført.
+                  </p>
+               </li>
+            
+            
+            <li>
+               
+               <p>
+                  <span class="constant">1</span> -- I dette tilfellet har <span class="productname">mkvinfo</span>(1) sendt ut minst en
+                  advarsel, men kjøringen fortsatte. En advarsel er prefikset med teksten
+                  '<span class="literal">Advarsel:</span>'.
+                  </p>
+               </li>
+            
+            
+            <li>
+               
+               <p>
+                  <span class="constant">2</span> -- Denne avslutningskoden brukes etter at det oppstod
+                  en feil. <span class="productname">mkvinfo</span>(1) avbryter rett etter at feilmeldingen er sendt
+                  ut. Feilmeldinger varierer fra feil kommandolinjeargumenter over
+                  lese-/skrivefeil til ødelagte filer.
+                  </p>
+               </li>
+            </ul>
+         
+         <h1><a name="mkvinfo.environment_variables">6. Miljøvariabler</a><a class="headerlink" href="#mkvinfo.environment_variables" title="Link to this heading">#</a></h1>
+         
+         
+         
+         <p>
+            <span class="productname">mkvinfo</span>(1) bruker standardvariablene som bestemmer systemets lokalitet (for
+            eksempel <span class="varname">LANG</span> og
+            <span class="varname">LC_*</span>-familien). Ytterligere variabler:
+            </p>
+         
+         
+         <table class="variablelist">
+            <thead>
+               <tr>
+                  <th>Option</th>
+                  <th>Description</th>
+               </tr>
+            </thead>
+            <tbody>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.environment_variables.debug"><span class="varname">MKVINFO_DEBUG</span>, <span class="varname">MKVTOOLNIX_DEBUG</span> og
+                        dens korte form <span class="varname">MTX_DEBUG</span></a><a class="headerlink" href="#mkvinfo.environment_variables.debug" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>Innholdet behandles som om det hadde blitt sendt via <a href="#mkvinfo.description.debug">--debug</a>
+                        alternativet.</p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.environment_variables.engage"><span class="varname">MKVINFO_ENGAGE</span>, <span class="varname">MKVTOOLNIX_ENGAGE</span> og
+                        dens korte form <span class="varname">MTX_ENGAGE</span></a><a class="headerlink" href="#mkvinfo.environment_variables.engage" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>Innholdet behandles som om det hadde blitt sendt via <a href="#mkvinfo.description.engage">--engage</a>
+                        alternativet.</p>
+                     </td>
+               </tr>
+            </tbody>
+         </table>
+         
+         <h1><a name="mkvinfo.seealso">7. Se også</a><a class="headerlink" href="#mkvinfo.seealso" title="Link to this heading">#</a></h1>
+         
+         
+         <p>
+            <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a>, <a href="mkvextract.html"><span class="productname">mkvextract</span>(1)</a>, <a href="mkvpropedit.html"><span class="productname">mkvpropedit</span>(1)</a>, <a href="mkvtoolnix-gui.html"><span class="productname">mkvtoolnix-gui</span>(1)</a>
+            </p>
+         
+         <h1><a name="mkvinfo.www">8. WWW</a><a class="headerlink" href="#mkvinfo.www" title="Link to this heading">#</a></h1>
+         
+         
+         <p>
+            Den nyeste versjonen finner du alltid på <a href="https://mkvtoolnix.download/">MKVToolNixs hjemmeside</a>.
+            </p>
+         </div>
+   </body>
+</html>

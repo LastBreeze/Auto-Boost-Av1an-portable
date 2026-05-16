@@ -1,0 +1,2 @@
+[console_scripts]
+vspreview = vspreview.init:main

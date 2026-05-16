@@ -1,0 +1,139 @@
+<!DOCTYPE html
+  PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
+<html>
+   <head>
+      <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+      <title>mkvtoolnix-gui -- графическая оболочка mkvmerge1 с редактором глав и заголовков</title>
+      <link rel="stylesheet" type="text/css" href="mkvtoolnix-doc.css">
+   </head>
+   <body>
+      <div class="heading">mkvtoolnix-gui -- графическая оболочка <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a> с редактором глав и заголовков</div>
+      <hr>
+      <div id="toc" class="toc">
+         <h1>Table of contents</h1>
+         <ul>
+            <li><a href="#mkvtoolnix-gui.synopsis">1. Краткое содержание</a></li>
+            <li><a href="#mkvtoolnix-gui.description">2. Описание</a></li>
+            <li><a href="#mkvtoolnix-gui.seealso">3. Смотрите также</a></li>
+            <li><a href="#mkvtoolnix-gui.www">4. Домашняя страница</a></li>
+         </ul>
+      </div>
+      <div class="content">
+         <h1><a name="mkvtoolnix-gui.synopsis">1. Краткое содержание</a><a class="headerlink" href="#mkvtoolnix-gui.synopsis" title="Link to this heading">#</a></h1>
+         
+         
+         <div class="cmdsynopsis"><span class="commandname">mkvtoolnix-gui</span> [[имя-файла-настроек.mtxcfg] | [исходный-файл.ext] | [файл-matroska.mkv] | [файл-глав.ext] | [файл-matroska.mkv]]</div>
+         
+         <h1><a name="mkvtoolnix-gui.description">2. Описание</a><a class="headerlink" href="#mkvtoolnix-gui.description" title="Link to this heading">#</a></h1>
+         
+         
+         <p>
+            <span class="productname">mkvtoolnix-gui</span>(1) — это <span class="abbrev">графическая оболочка</span> на основе
+            <span class="productname">Qt</span><sup>(tm)</sup> для <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a>. Он также реализует функции
+            <a href="mkvinfo.html"><span class="productname">mkvinfo</span>(1)</a> и <a href="mkvpropedit.html"><span class="productname">mkvpropedit</span>(1)</a> и будет развиваться, чтобы охватить также
+            <a href="mkvextract.html"><span class="productname">mkvextract</span>(1)</a>. Все настройки (например, исходные файлы, параметры дорожки и
+            т. п.) можно сохранить и восстановить.
+            </p>
+         
+         
+         <p>
+            Перечисление имён файлов конфигурации с расширением
+            <span class="literal">.mtxcfg</span> заставляет графическую оболочку загружать эти
+            файлы конфигурации в соответствующий инструмент. Любое другое имя файла
+            добавляется в качестве входного файла для паковки, открывается в инструменте
+            информации, редакторе глав или в редакторе заголовков в зависимости от
+            текущего режима. Текущий режим можно изменить с помощью
+            <span class="option">--merge</span>, <span class="option">--info</span>,
+            <span class="option">--edit-chapters</span> или
+            <span class="option">--edit-headers</span>. Стандартный режим — добавление файлов для
+            паковки.
+            </p>
+         
+         
+         <p>
+            Обратите внимание, что если экземпляр приложения уже запущен при повторном
+            запуске приложения, все имена файлов, указанные в командной строке,
+            обрабатываются первоначально запущенным экземпляром.
+            </p>
+         
+         
+         <table class="variablelist">
+            <thead>
+               <tr>
+                  <th>Option</th>
+                  <th>Description</th>
+               </tr>
+            </thead>
+            <tbody>
+               <tr>
+                  <td class="varlistoption"><span class="option">--merge</span></td>
+                  <td>
+                     
+                     <p>Все следующие имена файлов будут добавлены как исходные файлы в текущее
+                        задание слияния. Это стандартный режим.</p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><span class="option">--info</span></td>
+                  <td>
+                     
+                     <p>Все последующие файлы будут открыты в информационном инструменте.</p>
+                     
+                     <p>Кроме того, при запуске будет выбран инструмент информации вместо паковщика.</p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><span class="option">--edit-chapters</span></td>
+                  <td>
+                     
+                     <p>Все последующие файлы будут открыты в редакторе заголовков.</p>
+                     
+                     <p>Кроме того, при запуске будет выбран редактор глав вместо паковщика.</p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><span class="option">--edit-headers</span></td>
+                  <td>
+                     
+                     <p>Все следующие имена файлов будут открыты в редакторе заголовков.</p>
+                     
+                     <p>Кроме того, при запуске будет выбран редактор заголовков вместо паковщика.</p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><span class="option">-h</span>, <span class="option">--help</span></td>
+                  <td>
+                     
+                     <p>
+                        Показать сведения об использовании и выйти.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><span class="option">-V</span>, <span class="option">--version</span></td>
+                  <td>
+                     
+                     <p>
+                        Показать сведения о версии и выйти.
+                        </p>
+                     </td>
+               </tr>
+            </tbody>
+         </table>
+         
+         <h1><a name="mkvtoolnix-gui.seealso">3. Смотрите также</a><a class="headerlink" href="#mkvtoolnix-gui.seealso" title="Link to this heading">#</a></h1>
+         
+         
+         <p>
+            <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a>, <a href="mkvextract.html"><span class="productname">mkvextract</span>(1)</a>, <a href="mkvinfo.html"><span class="productname">mkvinfo</span>(1)</a>, <a href="mkvpropedit.html"><span class="productname">mkvpropedit</span>(1)</a>
+            </p>
+         
+         <h1><a name="mkvtoolnix-gui.www">4. Домашняя страница</a><a class="headerlink" href="#mkvtoolnix-gui.www" title="Link to this heading">#</a></h1>
+         
+         
+         <p>
+            Последняя версия программы всегда доступна на <a href="https://mkvtoolnix.download/">домашней странице MKVToolNix</a>.
+            </p>
+         </div>
+   </body>
+</html>

@@ -1,0 +1,5 @@
+Metadata-Version: 2.1
+Name: LSMASHSource
+Version: 1266.0.0.0
+Summary: A general source plugin based on FFmpeg. Can open MP4, MOV, ISO base media without having to create an index file.
+Platform: All

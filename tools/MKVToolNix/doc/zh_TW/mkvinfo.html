@@ -1,0 +1,402 @@
+<!DOCTYPE html
+  PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
+<html>
+   <head>
+      <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+      <title>mkvinfo -- 输出关于 Matroska 文件中各轨的信息</title>
+      <link rel="stylesheet" type="text/css" href="mkvtoolnix-doc.css">
+   </head>
+   <body>
+      <div class="heading">mkvinfo -- 输出关于 <span class="productname">Matroska</span><sup>(tm)</sup> 文件中各轨的信息</div>
+      <hr>
+      <div id="toc" class="toc">
+         <h1>Table of contents</h1>
+         <ul>
+            <li><a href="#mkvinfo.synopsis">1. 概要</a></li>
+            <li><a href="#mkvinfo.description">2. 摘要說明</a></li>
+            <li><a href="#mkvinfo.verbosity_levels">3. 詳細資訊層級</a></li>
+            <li><a href="#mkvinfo.text_files_and_charsets">4. 文字檔案與字元集轉換</a></li>
+            <li><a href="#d4e510">5. 結束代碼</a></li>
+            <li><a href="#mkvinfo.environment_variables">6. 環境變數</a></li>
+            <li><a href="#mkvinfo.seealso">7. 參閱</a></li>
+            <li><a href="#mkvinfo.www">8. 網路</a></li>
+         </ul>
+      </div>
+      <div class="content">
+         <h1><a name="mkvinfo.synopsis">1. 概要</a><a class="headerlink" href="#mkvinfo.synopsis" title="Link to this heading">#</a></h1>
+         
+         
+         <div class="cmdsynopsis"><span class="commandname">mkvinfo</span> 選項 {輸入檔名}</div>
+         
+         <h1><a name="mkvinfo.description">2. 摘要說明</a><a class="headerlink" href="#mkvinfo.description" title="Link to this heading">#</a></h1>
+         
+         
+         <p>
+            本程序可列出 <span class="productname">Matroska</span><sup>(tm)</sup>文件中包含的所有轨道，输出信息可以限定为文件的轨道列表以及所用编解码器的信息。
+            </p>
+         
+         
+         <table class="variablelist">
+            <thead>
+               <tr>
+                  <th>Option</th>
+                  <th>Description</th>
+               </tr>
+            </thead>
+            <tbody>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.all"><span class="option">-a</span>, <span class="option">--all</span></a><a class="headerlink" href="#mkvinfo.description.all" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        默认情况下，<span class="productname">mkvinfo</span>(1) 会在读取到首个簇时停下来。它也不会显示某些元素（通常是反复出现的元素）。通过此选项可以让 <span class="productname">mkvinfo</span>(1)
+                        忽略冗余级别继续处理，并显示所有元素。
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.checksums"><span class="option">-c</span>, <span class="option">--checksums</span></a><a class="headerlink" href="#mkvinfo.description.checksums" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        计算并显示各帧的 <span class="function">Adler-32</span> 校验码。仅当调试时有用处。
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.continue"><span class="option">-o</span>, <span class="option">--continue</span></a><a class="headerlink" href="#mkvinfo.description.continue" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        默认情况下，<span class="productname">mkvinfo</span>(1) 会在读取到首个簇时停下来。通过此选项可以让 <span class="productname">mkvinfo</span>(1) 忽略冗余级别继续处理。
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.hex_positions"><span class="option">-p</span>, <span class="option">--hex-positions</span></a><a class="headerlink" href="#mkvinfo.description.hex_positions" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        忽略冗余级别，以十六进制显示所有元素的位置。
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.positions"><span class="option">-P</span>, <span class="option">--positions</span></a><a class="headerlink" href="#mkvinfo.description.positions" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        忽略冗余级别，以十进制显示所有元素的位置。
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.summary"><span class="option">-s</span>, <span class="option">--summary</span></a><a class="headerlink" href="#mkvinfo.description.summary" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        仅显示 <span class="productname">mkvinfo</span>(1) 所获取信息的简要概述，而非各元素。
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.track_info"><span class="option">-t</span>, <span class="option">--track-info</span></a><a class="headerlink" href="#mkvinfo.description.track_info" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        在“详细”模式下为各轨道显示统计信息。如果“详细”程度为 0 级，则将同时将级别设为 1。
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.hexdump"><span class="option">-x</span>, <span class="option">--hexdump</span></a><a class="headerlink" href="#mkvinfo.description.hexdump" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        以十六進位轉儲形式顯示每影格的前 16 位元組。
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.full_hexdump"><span class="option">-X</span>, <span class="option">--full-hexdump</span></a><a class="headerlink" href="#mkvinfo.description.full_hexdump" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        以十六進位轉儲形式顯示每影格的全部位元組。
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.size"><span class="option">-z</span>, <span class="option">--size</span></a><a class="headerlink" href="#mkvinfo.description.size" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        顯示每個元件包含表頭的大小。
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.command_line_charset"><span class="option">--command-line-charset</span> <span class="parameter">字元集</span></a><a class="headerlink" href="#mkvinfo.description.command_line_charset" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        設定在命令列顯示的字串字元集，以轉換為其他字元集。預設為目前系統所在位置指定的字元集。
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.output_charset"><span class="option">--output-charset</span> <span class="parameter">字元集</span></a><a class="headerlink" href="#mkvinfo.description.output_charset" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        設定要轉換為輸出字串的字元集。預設為目前系統所在位置指定的字元集。
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.redirect_output"><span class="option">-r</span>, <span class="option">--redirect-output</span>
+                        <span class="parameter">檔名</span></a><a class="headerlink" href="#mkvinfo.description.redirect_output" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        將所有訊息寫入到檔案 <span class="parameter">檔名</span>
+                        而不是命令列。儘管使用輸出重新導向可以輕鬆完成此操作，但在某些情況下需要使用此選項: 當終端在將輸出寫入文件之前重新解釋（覆蓋）輸出時。  優先使用通過
+                        <a href="#mkvinfo.description.output_charset">--output-charset</a>
+                        設定字元集。
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.ui_language"><span class="option">--ui-language</span> <span class="parameter">語言碼</span></a><a class="headerlink" href="#mkvinfo.description.ui_language" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        強制使用語言 <span class="parameter">編碼</span> 對應的的翻譯(例如  '<span class="literal">zh_TW</span>'
+                        為臺灣正體中文翻譯)。 在<span class="parameter">編碼</span>欄位中輸入'<span class="literal">list</span>'
+                        讓程式輸出時使用可用的對應翻譯清單。
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.abort_on_warnings"><span class="option">--abort-on-warnings</span></a><a class="headerlink" href="#mkvinfo.description.abort_on_warnings" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        發出第一個警告後，終止程式。程式的結束碼為 1 。
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.debug"><span class="option">--debug</span> <span class="parameter">主題</span></a><a class="headerlink" href="#mkvinfo.description.debug" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        針對特定功能開啟除錯。此選項適用於開發者。
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.engage"><span class="option">--engage</span> <span class="parameter">功能</span></a><a class="headerlink" href="#mkvinfo.description.engage" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        開啟實驗中功能。 透過<span class="command">mkvinfo --engage list</span>啟用可用的列表。這些功能不會在正常情況下使用。
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.gui_mode"><span class="option">--gui-mode</span></a><a class="headerlink" href="#mkvinfo.description.gui_mode" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        開啟 GUI 模式。在這種模式中，可能會輸出特殊格式的行數，可以呈現控制的 GUI 發生什麼事。這些訊息會以
+                        '<span class="literal">#GUI#訊息</span>'呈現。訊息可能包含機碼/值，例如
+                        '<span class="literal">#GUI#訊息#機碼1=值1#機碼2=值2…</span>'。 無論是訊息或是機碼都不會轉為譯文，而且永遠使用 *英語*
+                        輸出。
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.verbose"><span class="option">-v</span>, <span class="option">--verbose</span></a><a class="headerlink" href="#mkvinfo.description.verbose" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        使输出更详尽。请参阅关于 <a href="#mkvinfo.verbosity_levels">“详细”程度</a>
+                        的段落获取在哪些层级将输出哪些信息的描述。
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.help"><span class="option">-h</span>, <span class="option">--help</span></a><a class="headerlink" href="#mkvinfo.description.help" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        顯示使用方式並退出。
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.version"><span class="option">-V</span>, <span class="option">--version</span></a><a class="headerlink" href="#mkvinfo.description.version" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        顯示版本資訊並離開。
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.options_file"><span class="option">@</span><span class="parameter">options-file.json</span></a><a class="headerlink" href="#mkvinfo.description.options_file" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        從<span class="parameter">檔案選項</span>檔讀取其他命令列引數。有關此類檔案支援格式的完整說明，請參閱 <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a> 文件中的
+                        "選項檔案" 章節。
+                        </p>
+                     </td>
+               </tr>
+            </tbody>
+         </table>
+         
+         <h1><a name="mkvinfo.verbosity_levels">3. 詳細資訊層級</a><a class="headerlink" href="#mkvinfo.verbosity_levels" title="Link to this heading">#</a></h1>
+         
+         
+         
+         <p>
+            <a href="#mkvinfo.description.verbose">-v</a> 选项可以使
+            <span class="productname">mkvinfo</span>(1) 增强其“详细”程度并输出关于当前文件的更多信息。
+            </p>
+         
+         
+         <p>
+            在 level 0 <span class="productname">mkvinfo</span>(1) 仅输出它发现的轨道头及其类型。头部解析完毕后（更专业地：遇到首个簇时），<span class="productname">mkvinfo</span>(1)
+            将退出执行。在此层级，定位头项与 cue 索引不会显示出来——即使它们位于轨道信息之前。
+            </p>
+         
+         
+         <p>
+            在 level 1 <span class="productname">mkvinfo</span>(1) 同样将输出在整个文件中遇到的所有 <span class="productname">Matroska</span><sup>(tm)</sup> 元素，此外还将输出定位头项与 cue
+            索引项。如果启用了简要模式，<span class="productname">mkvinfo</span>(1) 还将输出各帧位置。
+            </p>
+         
+         
+         <p>
+            通过选项「<span class="option">--continue</span>」可以实现相同的效果。
+            </p>
+         
+         
+         <p>
+            在 level 2 <span class="productname">mkvinfo</span>(1) 同样将输出定位头项与 cue 索引项，以及文件中各 <span class="productname">Matroska</span><sup>(tm)</sup> 元素被发现的位置。
+            </p>
+         
+         
+         <p>
+            通过选项「<span class="option">--all --positions</span>」可以实现相同的结果。
+            </p>
+         
+         
+         <p>
+            在 level 3 及更高层级 <span class="productname">mkvinfo</span>(1) 将输出一些与 <span class="productname">Matroska</span><sup>(tm)</sup>
+            元素不直接相连的信息。对于其他元素，将只输出发现的基本信息。Level 3 增加了元信息以便调试（换句话说：它是为开发人员设计的）。Level 3
+            输出的所有行都以方括号嵌套以便过滤。
+            </p>
+         
+         <h1><a name="mkvinfo.text_files_and_charsets">4. 文字檔案與字元集轉換</a><a class="headerlink" href="#mkvinfo.text_files_and_charsets" title="Link to this heading">#</a></h1>
+         
+         
+         
+         <p>
+            关于 MKVToolNix 套件中所有工具如何处理字符集转换、输入/输出编码、命令行编码及控制台编码的深入讨论，请参见 <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a>
+            手册中相对应名称的段落。
+            </p>
+         
+         <h1><a name="d4e510">5. 結束代碼</a><a class="headerlink" href="#d4e510" title="Link to this heading">#</a></h1>
+         
+         
+         
+         <p>
+            使用三個之一的結束代碼結束 <span class="productname">mkvinfo</span>(1) ：
+            </p>
+         
+         
+         <ul>
+            
+            <li>
+               
+               <p>
+                  <span class="constant">0</span> -- 此結束代碼表示執行已成功完成。
+                  </p>
+               </li>
+            
+            
+            <li>
+               
+               <p>
+                  <span class="constant">1</span> -- 在此情況下 <span class="productname">mkvinfo</span>(1) 輸出時至少有一則警告，但動作仍然進行。警告訊息會在前端出現
+                  '<span class="literal">警告:</span>' 字樣。
+                  </p>
+               </li>
+            
+            
+            <li>
+               
+               <p>
+                  <span class="constant">2</span> -- 此結束代碼用於發生錯誤後。 <span class="productname">mkvinfo</span>(1)
+                  在輸出錯誤訊息後立即中止動作。錯誤訊息的範圍包含從錯誤命令列參數的讀/寫至檔案損壞。
+                  </p>
+               </li>
+            </ul>
+         
+         <h1><a name="mkvinfo.environment_variables">6. 環境變數</a><a class="headerlink" href="#mkvinfo.environment_variables" title="Link to this heading">#</a></h1>
+         
+         
+         
+         <p>
+            <span class="productname">mkvinfo</span>(1) 使用決定系統的地區設定的變數 (例如： <span class="varname">LANG</span> 與
+            <span class="varname">LC_*</span> 系列)。 附加變數：
+            </p>
+         
+         
+         <table class="variablelist">
+            <thead>
+               <tr>
+                  <th>Option</th>
+                  <th>Description</th>
+               </tr>
+            </thead>
+            <tbody>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.environment_variables.debug"><span class="varname">MKVINFO_DEBUG</span>, <span class="varname">MKVTOOLNIX_DEBUG</span>
+                        與其的簡短形式 <span class="varname">MTX_DEBUG</span></a><a class="headerlink" href="#mkvinfo.environment_variables.debug" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>視為通過 <a href="#mkvinfo.description.debug">--debug</a> 選項傳遞的內容。</p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.environment_variables.engage"><span class="varname">MKVINFO_ENGAGE</span>, <span class="varname">MKVTOOLNIX_ENGAGE</span>
+                        與其的簡短形式 <span class="varname">MTX_ENGAGE</span></a><a class="headerlink" href="#mkvinfo.environment_variables.engage" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>視為通過 <a href="#mkvinfo.description.engage">--engage</a>
+                        選項傳遞的內容。</p>
+                     </td>
+               </tr>
+            </tbody>
+         </table>
+         
+         <h1><a name="mkvinfo.seealso">7. 參閱</a><a class="headerlink" href="#mkvinfo.seealso" title="Link to this heading">#</a></h1>
+         
+         
+         <p>
+            <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a>, <a href="mkvextract.html"><span class="productname">mkvextract</span>(1)</a>, <a href="mkvpropedit.html"><span class="productname">mkvpropedit</span>(1)</a>, <a href="mkvtoolnix-gui.html"><span class="productname">mkvtoolnix-gui</span>(1)</a>
+            </p>
+         
+         <h1><a name="mkvinfo.www">8. 網路</a><a class="headerlink" href="#mkvinfo.www" title="Link to this heading">#</a></h1>
+         
+         
+         <p>
+            永遠可在 <a href="https://mkvtoolnix.download/">MKVToolNix 首頁</a> 找到最新版。 
+            </p>
+         </div>
+   </body>
+</html>

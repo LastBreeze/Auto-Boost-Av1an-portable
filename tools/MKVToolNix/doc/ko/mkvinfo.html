@@ -1,0 +1,406 @@
+<!DOCTYPE html
+  PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
+<html>
+   <head>
+      <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+      <title>mkvinfo -- Matroska 파일의 요소에 대한 정보 인쇄</title>
+      <link rel="stylesheet" type="text/css" href="mkvtoolnix-doc.css">
+   </head>
+   <body>
+      <div class="heading">mkvinfo -- <span class="productname">Matroska</span><sup>(tm)</sup> 파일의 요소에 대한 정보 인쇄</div>
+      <hr>
+      <div id="toc" class="toc">
+         <h1>Table of contents</h1>
+         <ul>
+            <li><a href="#mkvinfo.synopsis">1. 개요</a></li>
+            <li><a href="#mkvinfo.description">2. 설명</a></li>
+            <li><a href="#mkvinfo.verbosity_levels">3. 동사성 수준</a></li>
+            <li><a href="#mkvinfo.text_files_and_charsets">4. 텍스트 파일과 문자셋 변환</a></li>
+            <li><a href="#d4e513">5. 종료 코드</a></li>
+            <li><a href="#mkvinfo.environment_variables">6. 환경 변수</a></li>
+            <li><a href="#mkvinfo.seealso">7. 더 보기</a></li>
+            <li><a href="#mkvinfo.www">8. WWW</a></li>
+         </ul>
+      </div>
+      <div class="content">
+         <h1><a name="mkvinfo.synopsis">1. 개요</a><a class="headerlink" href="#mkvinfo.synopsis" title="Link to this heading">#</a></h1>
+         
+         
+         <div class="cmdsynopsis"><span class="commandname">mkvinfo</span> options {source-filename}</div>
+         
+         <h1><a name="mkvinfo.description">2. 설명</a><a class="headerlink" href="#mkvinfo.description" title="Link to this heading">#</a></h1>
+         
+         
+         <p>
+            이 프로그램은 <span class="productname">Matroska</span><sup>(tm)</sup>에 포함된 모든 요소를 나열합니다. 출력은 사용된 코덱에 대한 정보를 포함하는 파일의 트랙 목록으로
+            제한될 수 있습니다.
+            </p>
+         
+         
+         <table class="variablelist">
+            <thead>
+               <tr>
+                  <th>Option</th>
+                  <th>Description</th>
+               </tr>
+            </thead>
+            <tbody>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.all"><span class="option">-a</span>, <span class="option">--all</span></a><a class="headerlink" href="#mkvinfo.description.all" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        기본적으로 <span class="productname">mkvinfo</span>(1)는 첫 번째 클러스터가 발견되면 중지됩니다. 또한 자주 발생하는 특정 요소를 보여주지 않습니다. 이 옵션을
+                        사용하면 <span class="productname">mkvinfo</span>(1)는 만유도 레벨에 관계없이 처리를 계속하고 모든 요소를 표시합니다.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.checksums"><span class="option">-c</span>, <span class="option">--checksums</span></a><a class="headerlink" href="#mkvinfo.description.checksums" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        각 프레임에 대한 <span class="function">Adler-32</span> 체크섬을 계산하고 표시합니다. 디버깅에만 유용합니다.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.continue"><span class="option">-o</span>, <span class="option">--continue</span></a><a class="headerlink" href="#mkvinfo.description.continue" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        기본적으로 <span class="productname">mkvinfo</span>(1)는 첫 번째 클러스터가 발견되면 중지됩니다. 이 옵션을 사용하면 <span class="productname">mkvinfo</span>(1)는 verbosity 레벨에
+                        관계없이 처리를 계속합니다.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.hex_positions"><span class="option">-p</span>, <span class="option">--hex-positions</span></a><a class="headerlink" href="#mkvinfo.description.hex_positions" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        동사성 수준에 관계없이 모든 요소의 위치를 16진수로 표시합니다.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.positions"><span class="option">-P</span>, <span class="option">--positions</span></a><a class="headerlink" href="#mkvinfo.description.positions" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        동사성 수준에 관계없이 모든 요소의 위치를 10진수로 표시합니다.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.summary"><span class="option">-s</span>, <span class="option">--summary</span></a><a class="headerlink" href="#mkvinfo.description.summary" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        <span class="productname">mkvinfo</span>(1)가 발견한 내용에 대한 간단한 요약만 표시하고 각 요소는 표시하지 않습니다.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.track_info"><span class="option">-t</span>, <span class="option">--track-info</span></a><a class="headerlink" href="#mkvinfo.description.track_info" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        상세 모드에서 각 트랙에 대한 통계를 표시합니다. 또한 이전 레벨 0인 경우 verboy를 1로 설정합니다.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.hexdump"><span class="option">-x</span>, <span class="option">--hexdump</span></a><a class="headerlink" href="#mkvinfo.description.hexdump" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        각 프레임의 처음 16바이트를 16진수 덤프로 표시합니다.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.full_hexdump"><span class="option">-X</span>, <span class="option">--full-hexdump</span></a><a class="headerlink" href="#mkvinfo.description.full_hexdump" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        각 프레임의 모든 바이트를 16진수 덤프로 표시합니다.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.size"><span class="option">-z</span>, <span class="option">--size</span></a><a class="headerlink" href="#mkvinfo.description.size" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        헤더를 포함한 각 요소의 크기를 표시합니다.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.command_line_charset"><span class="option">--command-line-charset</span> <span class="parameter">문자셋</span></a><a class="headerlink" href="#mkvinfo.description.command_line_charset" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        명령행에 주어진 문자열을 변환할 문자셋을 정합니다. 기본값은 현재 시스템 로케일에 따른 문자셋입니다.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.output_charset"><span class="option">--output-charset</span> <span class="parameter">문자셋</span></a><a class="headerlink" href="#mkvinfo.description.output_charset" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        출력할 문자열을 변환할 문자셋을 정합니다. 기본값은 현재 시스템 로케일에 따른 문자셋입니다.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.redirect_output"><span class="option">-r</span>, <span class="option">--redirect-output</span>
+                        <span class="parameter">파일명</span></a><a class="headerlink" href="#mkvinfo.description.redirect_output" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        모든 메시지를 콘솔 화면 대신 <span class="parameter">파일명</span> 파일에 기록합니다. 이것은 출력 방향 전환으로 쉽게 할 수
+                        있지만 이 옵션이 필요한 경우가 있습니다: 터미널이 파일에 출력하기 전에 출력을 재해석할 때. 문자셋 설정은 <a href="#mkvinfo.description.output_charset">--output-charset</a>
+                        을 준수합니다.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.ui_language"><span class="option">--ui-language</span> <span class="parameter">코드</span></a><a class="headerlink" href="#mkvinfo.description.ui_language" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        언어 <span class="parameter">코드</span>의 번역을 강제로 사용합니다 (예: 강제 사용할 독일어 번역 코드는
+                        '<span class="literal">de_DE</span>'). '<span class="literal">list</span>'를
+                        <span class="parameter">코드</span>로 입력하면 <a href="mkvextract.html"><span class="productname">mkvextract</span>(1)</a> 에서 이용 가능한 번역 목록을 출력할 것입니다.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.abort_on_warnings"><span class="option">--abort-on-warnings</span></a><a class="headerlink" href="#mkvinfo.description.abort_on_warnings" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        첫 번째 경고가 발생한 후 프로그램을 중단하도록 지시합니다. 프로그램의 종료 코드는 1입니다.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.debug"><span class="option">--debug</span> <span class="parameter">토픽</span></a><a class="headerlink" href="#mkvinfo.description.debug" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        특정 기능에 대해 디버깅을 켭니다. 이 기능은 개발자에게만 유용합니다.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.engage"><span class="option">--engage</span> <span class="parameter">기능</span></a><a class="headerlink" href="#mkvinfo.description.engage" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        실험적인 기능을 켭니다. 이용 가능한 기능 목록은 <span class="command">mkvinfo --engage list</span>로 요청할 수
+                        있습니다. 이 기능들은 보통 상황에서는 사용하면 안 됩니다.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.gui_mode"><span class="option">--gui-mode</span></a><a class="headerlink" href="#mkvinfo.description.gui_mode" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        GUI 모드를 켭니다. 이 모드에서는 GUI 동작시 무슨 일이 일어나는지 알려줄 수 있는 특별하게 형식화된 줄을 출력할 것입니다. 이
+                        메시지들은 '<span class="literal">#GUI#message</span>' 형식을 따릅니다.  이 메시지 뒤에
+                        '<span class="literal">#GUI#message#key1=value1#key2=value2…</span>' 형태의 키/값 쌍이 붙을 수
+                        있습니다. 메시지나 키값들은 결코 번역되지 않고 항상 영어로 출력됩니다.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.verbose"><span class="option">-v</span>, <span class="option">--verbose</span></a><a class="headerlink" href="#mkvinfo.description.verbose" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        좀 더 상세해집니다. 어느 수준에서 어떤 정보가 출력될지에 대한 설명은 <a href="#mkvinfo.verbosity_levels">동사성 수준</a>에 대한 절을 참조하십시오.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.help"><span class="option">-h</span>, <span class="option">--help</span></a><a class="headerlink" href="#mkvinfo.description.help" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        사용법에 관한 정보를 표시하고 종료합니다.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.version"><span class="option">-V</span>, <span class="option">--version</span></a><a class="headerlink" href="#mkvinfo.description.version" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        버전 정보를 표시하고 종료합니다.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.options_file"><span class="option">@</span><span class="parameter">옵션 파일.json</span></a><a class="headerlink" href="#mkvinfo.description.options_file" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        추가 명령행 인수는 <span class="parameter">옵션-파일</span> 파일에서 읽어보세요. 이러한 파일용 지원 형식에 대한 자세한
+                        설명은 <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a> man page에서 "옵션 파일"이라는 섹션을 참고하세요.
+                        </p>
+                     </td>
+               </tr>
+            </tbody>
+         </table>
+         
+         <h1><a name="mkvinfo.verbosity_levels">3. 동사성 수준</a><a class="headerlink" href="#mkvinfo.verbosity_levels" title="Link to this heading">#</a></h1>
+         
+         
+         
+         <p>
+            <a href="#mkvinfo.description.verbose">v</a> 옵션은
+            <span class="productname">mkvinfo</span>(1)의 동사성 수준을 높이고 현재 파일에 대한 추가 정보를 인쇄하는 데 사용할 수 있습니다.
+            </p>
+         
+         
+         <p>
+            레벨 0에서 <span class="productname">mkvinfo</span>(1)는 찾은 트랙 헤더와 해당 유형만 인쇄합니다. <span class="productname">mkvinfo</span>(1)는 헤더가 완전히 구문 분석되는
+            즉시(기술적으로는 첫 번째 클러스터가 발견되는 즉시) 종료됩니다. 이 수준에서는 트랙 정보 앞에 있는 경우에도 검색 헤드 항목과 큐가
+            표시되지 않습니다.
+            </p>
+         
+         
+         <p>
+            레벨 1에서 <span class="productname">mkvinfo</span>(1)는 검색 헤드 항목과 큐 항목을 제외한 전체 파일에 대해 발견된 모든 <span class="productname">Matroska</span><sup>(tm)</sup> 요소도
+            인쇄합니다. 요약 모드가 활성화된 경우 <span class="productname">mkvinfo</span>(1)도 프레임 위치를 출력합니다.
+            </p>
+         
+         
+         <p>
+            <span class="option">--continue</span> 옵션을 사용해도 동일한 효과를 얻을 수 있습니다.
+            </p>
+         
+         
+         <p>
+            레벨 2에서도 <span class="productname">mkvinfo</span>(1)는 탐색 헤드 항목, 큐 항목 및 각 <span class="productname">Matroska</span><sup>(tm)</sup> 요소를 찾을 수 있는 파일 위치를 인쇄합니다.
+            </p>
+         
+         
+         <p>
+            <span class="option">--all --positions</span> 옵션을 사용해도 동일한 효과를 얻을 수 있습니다.
+            </p>
+         
+         
+         <p>
+            레벨 3 이상에서 <span class="productname">mkvinfo</span>(1)는 <span class="productname">Matroska</span><sup>(tm)</sup> 요소에 직접 연결되지 않은 일부 정보를 인쇄합니다. 다른 모든 요소는 방금
+            발견된 요소에 대한 내용만 인쇄합니다. 레벨 3은 디버깅을 쉽게 하기 위해 메타 정보를 추가합니다(읽기: 개발자 전용). 레벨 3으로
+            작성된 모든 줄은 쉽게 필터링할 수 있도록 대괄호로 묶습니다.
+            </p>
+         
+         <h1><a name="mkvinfo.text_files_and_charsets">4. 텍스트 파일과 문자셋 변환</a><a class="headerlink" href="#mkvinfo.text_files_and_charsets" title="Link to this heading">#</a></h1>
+         
+         
+         
+         <p>
+            MKVToolNix 제품군의 모든 도구가 문자 집합 변환, 입력/출력 인코딩, 명령줄 인코딩 및 콘솔 인코딩을 처리하는 방법에 대한
+            자세한 내용은 <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a> 매뉴얼 페이지에서 동일한 이름의 섹션을 참조하십시오.
+            </p>
+         
+         <h1><a name="d4e513">5. 종료 코드</a><a class="headerlink" href="#d4e513" title="Link to this heading">#</a></h1>
+         
+         
+         
+         <p>
+            <span class="productname">mkvinfo</span>(1) 종료 코드 세 개 중 하나로 종료:
+            </p>
+         
+         
+         <ul>
+            
+            <li>
+               
+               <p>
+                  <span class="constant">0</span> -- 이 종료 코드는 실행이 성공적으로 완료되었음을 의미합니다.
+                  </p>
+               </li>
+            
+            
+            <li>
+               
+               <p>
+                  <span class="constant">1</span> -- 이 경우 <span class="productname">mkvinfo</span>(1)에서 경고를 하나 이상 출력했지만 실행은 계속되었습니다. 경고
+                  앞에 '<span class="literal">Warning:</span>'이라는 텍스트가 붙습니다.
+                  </p>
+               </li>
+            
+            
+            <li>
+               
+               <p>
+                  <span class="constant">2</span> -- 오류가 발생한 후 이 종료 코드가 사용됩니다. 오류 메시지를 출력한 후 <span class="productname">mkvinfo</span>(1)가
+                  바로 중단됩니다. 오류 메시지는 읽기/쓰기 오류에 대한 잘못된 명령줄 인수에서 손상된 파일에 이르기까지 다양합니다.
+                  </p>
+               </li>
+            </ul>
+         
+         <h1><a name="mkvinfo.environment_variables">6. 환경 변수</a><a class="headerlink" href="#mkvinfo.environment_variables" title="Link to this heading">#</a></h1>
+         
+         
+         
+         <p>
+            <span class="productname">mkvinfo</span>(1)는 시스템의 로케일을 결정하는 기본 변수(예: <span class="varname">LANG</span> 및
+            <span class="varname">LC_*</span> 제품군)를 사용합니다. 추가 변수:
+            </p>
+         
+         
+         <table class="variablelist">
+            <thead>
+               <tr>
+                  <th>Option</th>
+                  <th>Description</th>
+               </tr>
+            </thead>
+            <tbody>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.environment_variables.debug"><span class="varname">MKVINFO_DEBUG</span>, <span class="varname">MKVTOOLNIX_DEBUG</span> 와 그
+                        간략한 형태인<span class="varname">MTX_DEBUG</span></a><a class="headerlink" href="#mkvinfo.environment_variables.debug" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>내용은 <a href="#mkvinfo.description.debug">--debug</a> 옵션을 통해
+                        전달된 것으로 간주됩니다.</p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.environment_variables.engage"><span class="varname">MKVINFO_ENGAGE</span>, <span class="varname">MKVTOOLNIX_ENGAGE</span> 와 그
+                        간략한 형태인 <span class="varname">MTX_ENGAGE</span></a><a class="headerlink" href="#mkvinfo.environment_variables.engage" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>내용은 <a href="#mkvinfo.description.engage">--engage</a> 옵션을 통해
+                        전달된 것으로 간주됩니다.</p>
+                     </td>
+               </tr>
+            </tbody>
+         </table>
+         
+         <h1><a name="mkvinfo.seealso">7. 더 보기</a><a class="headerlink" href="#mkvinfo.seealso" title="Link to this heading">#</a></h1>
+         
+         
+         <p>
+            <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a>, <a href="mkvextract.html"><span class="productname">mkvextract</span>(1)</a>, <a href="mkvpropedit.html"><span class="productname">mkvpropedit</span>(1)</a>, <a href="mkvtoolnix-gui.html"><span class="productname">mkvtoolnix-gui</span>(1)</a>
+            </p>
+         
+         <h1><a name="mkvinfo.www">8. WWW</a><a class="headerlink" href="#mkvinfo.www" title="Link to this heading">#</a></h1>
+         
+         
+         <p>
+            이전 버전은 언제나 <a href="https://mkvtoolnix.download/">MKVToolNix
+               홈페이지</a>에서 찾을 수 있습니다.
+            </p>
+         </div>
+   </body>
+</html>

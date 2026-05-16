@@ -1,0 +1,389 @@
+<!DOCTYPE html
+  PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
+<html>
+   <head>
+      <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+      <title>mkvinfo -- Matroskaファイル中の要素についての情報を表示します。</title>
+      <link rel="stylesheet" type="text/css" href="mkvtoolnix-doc.css">
+   </head>
+   <body>
+      <div class="heading">mkvinfo -- <span class="productname">Matroska</span><sup>(tm)</sup>ファイル中の要素についての情報を表示します。</div>
+      <hr>
+      <div id="toc" class="toc">
+         <h1>Table of contents</h1>
+         <ul>
+            <li><a href="#mkvinfo.synopsis">1. 書式</a></li>
+            <li><a href="#mkvinfo.description">2. 説明</a></li>
+            <li><a href="#mkvinfo.verbosity_levels">3. 冗長度</a></li>
+            <li><a href="#mkvinfo.text_files_and_charsets">4. 文章ファイルと文字集合変換</a></li>
+            <li><a href="#d4e496">5. 終了番号</a></li>
+            <li><a href="#mkvinfo.environment_variables">6. 環境変数</a></li>
+            <li><a href="#mkvinfo.seealso">7. 関連項目</a></li>
+            <li><a href="#mkvinfo.www">8. ウェブ</a></li>
+         </ul>
+      </div>
+      <div class="content">
+         <h1><a name="mkvinfo.synopsis">1. 書式</a><a class="headerlink" href="#mkvinfo.synopsis" title="Link to this heading">#</a></h1>
+         
+         
+         <div class="cmdsynopsis"><span class="commandname">mkvinfo</span> オプション {原ファイル名}</div>
+         
+         <h1><a name="mkvinfo.description">2. 説明</a><a class="headerlink" href="#mkvinfo.description" title="Link to this heading">#</a></h1>
+         
+         
+         <p>
+            このプログラムは、<span class="productname">Matroska</span><sup>(tm)</sup>ファイルに格納されている全ての要素の一覧を表示します。出力を制限して、使用している符号器についての情報を含むファイル中のトラックを一覧することもできます。
+            </p>
+         
+         
+         <table class="variablelist">
+            <thead>
+               <tr>
+                  <th>Option</th>
+                  <th>Description</th>
+               </tr>
+            </thead>
+            <tbody>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.all"><span class="option">-a</span>, <span class="option">--all</span></a><a class="headerlink" href="#mkvinfo.description.all" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        既定では<span class="productname">mkvinfo</span>(1)は最初の群団を読み取ると停止します。加えて、<span class="productname">mkvinfo</span>(1)は要素の出現をしばしば明示しません。このオプションを指定すると、<span class="productname">mkvinfo</span>(1)は冗長度に拘わらず処理を続行し、全ての要素を表示します。
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.checksums"><span class="option">-c</span>, <span class="option">--checksums</span></a><a class="headerlink" href="#mkvinfo.description.checksums" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        各齣毎に<span class="function">Adler-32</span>検査合計を計算して表示します。不具合の調査目的のみに有用です。
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.continue"><span class="option">-o</span>, <span class="option">--continue</span></a><a class="headerlink" href="#mkvinfo.description.continue" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        既定では<span class="productname">mkvinfo</span>(1)は最初の群団を読み取ると停止します。このオプションを指定すると、<span class="productname">mkvinfo</span>(1)は冗長度に拘わらず処理を続行し、全ての要素を表示します。
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.hex_positions"><span class="option">-p</span>, <span class="option">--hex-positions</span></a><a class="headerlink" href="#mkvinfo.description.hex_positions" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        冗長度に拘わらず全ての要素の位置を16進数で表示します。
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.positions"><span class="option">-P</span>, <span class="option">--positions</span></a><a class="headerlink" href="#mkvinfo.description.positions" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        冗長度に拘わらず全ての要素の位置を10進数で表示します。
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.summary"><span class="option">-s</span>, <span class="option">--summary</span></a><a class="headerlink" href="#mkvinfo.description.summary" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        各要素ではなく<span class="productname">mkvinfo</span>(1)の見つけたものの簡潔な要約だけを表示します。
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.track_info"><span class="option">-t</span>, <span class="option">--track-info</span></a><a class="headerlink" href="#mkvinfo.description.track_info" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        各トラックの統計情報を冗長モードで表示します。また、冗長度が以前に0だった場合は1に設定します。
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.hexdump"><span class="option">-x</span>, <span class="option">--hexdump</span></a><a class="headerlink" href="#mkvinfo.description.hexdump" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        各齣の最初の16バイトを16進数で表示します。
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.full_hexdump"><span class="option">-X</span>, <span class="option">--full-hexdump</span></a><a class="headerlink" href="#mkvinfo.description.full_hexdump" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        各齣全バイトを16進数で表示します。
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.size"><span class="option">-z</span>, <span class="option">--size</span></a><a class="headerlink" href="#mkvinfo.description.size" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        頭部も含めた各要素の寸法を表示します。
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.command_line_charset"><span class="option">--command-line-charset</span> <span class="parameter">文字集合</span></a><a class="headerlink" href="#mkvinfo.description.command_line_charset" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        命令行から与えた文字列を変換するのに用いる文字集合を設定します。既定では機構の現行地域特性で指定している文字集合になります。
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.output_charset"><span class="option">--output-charset</span> <span class="parameter">文字集合</span></a><a class="headerlink" href="#mkvinfo.description.output_charset" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        出力される文字列を変換するのに用いる文字集合を設定します。既定では機構の現行地域特性で指定している文字集合になります。
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.redirect_output"><span class="option">-r</span>,
+                        <span class="option">--redirect-output</span><span class="parameter">ファイル名</span></a><a class="headerlink" href="#mkvinfo.description.redirect_output" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        全ての通報を操作卓にではなく<span class="parameter">ファイル名</span>のファイルに書き出します。出力を転送することで同じことが簡単にできるものの、このオプションが必要な場合は存在します:ファイルに転送する前に端末が出力を再解釈してしまう場合です。<a href="#mkvinfo.description.output_charset">--output-charset</a>で設定した文字集合を優先します。
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.ui_language"><span class="option">--ui-language</span> <span class="parameter">符号</span></a><a class="headerlink" href="#mkvinfo.description.ui_language" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        用いる翻訳を指定した言語<span class="parameter">符号</span>のものに強制します（例えば「<span class="literal">de_DE</span>」ならドイツ語翻訳です）。<span class="parameter">符号</span>に「<span class="literal">list</span>」を指定すると利用可能な翻訳の一覧を出力します。
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.abort_on_warnings"><span class="option">--abort-on-warnings</span></a><a class="headerlink" href="#mkvinfo.description.abort_on_warnings" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        警告が発された後、プログラムが停止するようにします。プログラムの終了番号は1になります。
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.debug"><span class="option">--debug</span> <span class="parameter">機能</span></a><a class="headerlink" href="#mkvinfo.description.debug" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        指定した機能の診断出力を有効にします。このオプションは開発者にとってのみ有用です。
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.engage"><span class="option">--engage</span> <span class="parameter">機能</span></a><a class="headerlink" href="#mkvinfo.description.engage" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        実験的機能を有効にします。<span class="command">mkvinfo --engage
+                           list</span>とすると利用可能な機能の一覧が得られます。これらの機能は通常状況での使用を意図されていません。
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.gui_mode"><span class="option">--gui-mode</span></a><a class="headerlink" href="#mkvinfo.description.gui_mode" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        GUIモードに切り替えます。このモードではGUI操作の状況を伝える特殊な形式の行が出力されます。これらの通報は
+                        '<span class="literal">#GUI#通報内容</span>'
+                        という形式の後に続きます。'<span class="literal">#GUI#通報内容#予約語1=値1#予約語2=値2...</span>'
+                        というように予約語・値の組が通報内容に続くことがあります。通知内容や予約語は翻訳されることなく常に英語で出力されます。
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.verbose"><span class="option">-v</span>, <span class="option">--verbose</span></a><a class="headerlink" href="#mkvinfo.description.verbose" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        冗長モードになります。各冗長度で出力される情報の説明については、<a href="#mkvinfo.verbosity_levels">冗長度</a>節をご覧ください。
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.help"><span class="option">-h</span>, <span class="option">--help</span></a><a class="headerlink" href="#mkvinfo.description.help" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        使用法情報を出力して終了します。
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.version"><span class="option">-V</span>, <span class="option">--version</span></a><a class="headerlink" href="#mkvinfo.description.version" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        版次情報を出力して終了します。
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.options_file"><span class="option">@</span><span class="parameter">オプションファイル.json</span></a><a class="headerlink" href="#mkvinfo.description.options_file" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        <span class="parameter">オプションファイル</span>から追加の命令行引数を読み込みます。こうしたファイルの対応形式についての詳細は、<a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a>便覧中の「オプションファイル」という節をご覧ください。
+                        </p>
+                     </td>
+               </tr>
+            </tbody>
+         </table>
+         
+         <h1><a name="mkvinfo.verbosity_levels">3. 冗長度</a><a class="headerlink" href="#mkvinfo.verbosity_levels" title="Link to this heading">#</a></h1>
+         
+         
+         
+         <p>
+            <a href="#mkvinfo.description.verbose">-v</a>オプションで<span class="productname">mkvinfo</span>(1)の冗長度を引き上げ、現行ファイルについてのより詳しい情報を表示させることができます。
+            </p>
+         
+         
+         <p>
+            水準0では、見付けたトラック頭部とその種類のみを出力します。<span class="productname">mkvinfo</span>(1)は、頭部を完全に解析し終るとすぐ（技術的詳細:
+            最初の群団を検出した直後）に終了します。この水準では送り出し要素頭部項目および演奏指令は、たとえトラック情報の前に位置していても表示されません。
+            </p>
+         
+         
+         <p>
+            水準1では、ファイル全体に渡って<span class="productname">Matroska</span><sup>(tm)</sup>要素を全て表示しますが、送り出し要素頭部項目および演奏指令項目は表示しません。要約モードが有効であった場合は、<span class="productname">mkvinfo</span>(1)は齣位置も同様に出力します。
+            </p>
+         
+         
+         <p>
+            --continueオプションを指定することでも同じ効果を及ぼせます。
+            </p>
+         
+         
+         <p>
+            水準2では、送り出し頭部項目、演奏指令項目、および見付けた各<span class="productname">Matroska</span><sup>(tm)</sup>要素のファイル位置もまた表示します。
+            </p>
+         
+         
+         <p>
+            --positionsオプションを指定することでも同じ効果を及ぼせます。
+            </p>
+         
+         
+         <p>
+            水準3以上では、<span class="productname">Matroska</span><sup>(tm)</sup>要素に直接関係しない情報もいくつか表示します。その他の要素については、見付けたもののみ表示します。水準3では不具合調査をしやすいように高次情報を附加します（必読:
+            これはもっぱら開発者向けです）。水準3で書き出された全ての行は、篩に掛けやすいように角括弧で囲まれています。
+            </p>
+         
+         <h1><a name="mkvinfo.text_files_and_charsets">4. 文章ファイルと文字集合変換</a><a class="headerlink" href="#mkvinfo.text_files_and_charsets" title="Link to this heading">#</a></h1>
+         
+         
+         
+         <p>
+            MKVToolNix一式の全ての操作機が文字集合変換、入出力、命令行、操作卓上の文字集合をどのように処理するかについての詳細な議論については、<a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a>の便覧にある同名の節をご覧ください。
+            </p>
+         
+         <h1><a name="d4e496">5. 終了番号</a><a class="headerlink" href="#d4e496" title="Link to this heading">#</a></h1>
+         
+         
+         
+         <p>
+            <span class="productname">mkvinfo</span>(1)が返す終了番号には3種類あります:
+            </p>
+         
+         
+         <ul>
+            
+            <li>
+               
+               <p>
+                  <span class="constant">0</span> -- この終了番号は動作が完了したことを意味します。
+                  </p>
+               </li>
+            
+            
+            <li>
+               
+               <p>
+                  <span class="constant">1</span> -- この返り値は、一つ以上の警告が出力されたが動作が続行されたことを意味します。警告は
+                  '<span class="literal">Warning:</span>'
+                  という文字列を先頭にして出力されます。結果ファイルが無事かどうかは状況によります。出力ファイルを確認することを強く推奨します。
+                  </p>
+               </li>
+            
+            
+            <li>
+               
+               <p>
+                  <span class="constant">2</span> --
+                  この返り値は、誤りが発生し、誤り通報を出力した直後に<span class="productname">mkvinfo</span>(1)が終了したことを示します。誤り通報の原因は命令行の間違いやファイル読み/書き誤り、壊れたファイルなど多岐に渡ります。
+                  </p>
+               </li>
+            </ul>
+         
+         <h1><a name="mkvinfo.environment_variables">6. 環境変数</a><a class="headerlink" href="#mkvinfo.environment_variables" title="Link to this heading">#</a></h1>
+         
+         
+         
+         <p>
+            <span class="productname">mkvinfo</span>(1)は機構の地域特性を決める既定変数（例：<span class="varname">LANG</span>や<span class="varname">LC_*</span>系列）を使用します。追加の変数:
+            </p>
+         
+         
+         <table class="variablelist">
+            <thead>
+               <tr>
+                  <th>Option</th>
+                  <th>Description</th>
+               </tr>
+            </thead>
+            <tbody>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.environment_variables.debug"><span class="varname">MKVINFO_DEBUG</span>、<span class="varname">MKVTOOLNIX_DEBUG</span>とその省略形<span class="varname">MTX_DEBUG</span></a><a class="headerlink" href="#mkvinfo.environment_variables.debug" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>その内容を、あたかも<a href="#mkvinfo.description.debug">--debug</a>オプション経由で渡されたかのように扱います。</p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.environment_variables.engage"><span class="varname">MKVINFO_ENGAGE</span>,
+                        <span class="varname">MKVTOOLNIX_ENGAGE</span>とその短縮形<span class="varname">MTX_ENGAGE</span></a><a class="headerlink" href="#mkvinfo.environment_variables.engage" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>その内容を、あたかも<a href="#mkvinfo.description.engage">--engage</a>オプション経由で渡されたかのように扱います。</p>
+                     </td>
+               </tr>
+            </tbody>
+         </table>
+         
+         <h1><a name="mkvinfo.seealso">7. 関連項目</a><a class="headerlink" href="#mkvinfo.seealso" title="Link to this heading">#</a></h1>
+         
+         
+         <p>
+            <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a>, <a href="mkvextract.html"><span class="productname">mkvextract</span>(1)</a>, <a href="mkvpropedit.html"><span class="productname">mkvpropedit</span>(1)</a>, <a href="mkvtoolnix-gui.html"><span class="productname">mkvtoolnix-gui</span>(1)</a>
+            </p>
+         
+         <h1><a name="mkvinfo.www">8. ウェブ</a><a class="headerlink" href="#mkvinfo.www" title="Link to this heading">#</a></h1>
+         
+         
+         <p>
+            最新版は常に<a href="https://mkvtoolnix.download/">MKVToolNixの拠点</a>で入手できます。
+            </p>
+         </div>
+   </body>
+</html>

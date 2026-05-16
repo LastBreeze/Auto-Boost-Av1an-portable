@@ -1,0 +1,496 @@
+Cross-platform command-line AV1 / VP9 / HEVC / H264 encoding framework with per-scene quality encoding
+
+Usage: av1an [OPTIONS] -i <INPUT>
+
+Options:
+  -i <INPUT>
+          Input file to encode
+          
+          Can be a video or VapourSynth (.py, .vpy) script.
+
+      --proxy <PROXY>
+          Input proxy file for Scene Detection and Target Quality
+          
+          Can be a video or VapourSynth (.py, .vpy) script.
+          
+          The proxy should be an input that decodes or computes a simpler approximation of the input. It must have the same number of frames as the input.
+
+  -o <OUTPUT_FILE>
+          Video output file
+
+      --temp <TEMP>
+          Temporary directory to use
+          
+          If not specified, the temporary directory name is a hash of the input file name.
+
+  -q, --quiet
+          Disable printing progress to the terminal
+
+      --verbose
+          Print extra progress info and stats to terminal
+
+  -l, --log-file <LOG_FILE>
+          Log file location
+          
+          If not specified, the log file location will be `./logs/av1an.log` and the current day will be appended.
+
+      --log-level <LOG_LEVEL>
+          Set log level for log file (does not affect command-line log level)
+          
+          error: Designates very serious errors.
+          
+          warn: Designates hazardous situations.
+          
+          info: Designates useful information.
+          
+          debug: Designates lower priority information.
+          
+          trace: Designates very low priority, often extremely verbose, information. Includes rav1e scenechange decision info.
+          
+          [default: debug]
+
+      --completions <SHELL>
+          Generate shell completions for the specified shell and exit
+          
+          [possible values: bash, elvish, fish, powershell, zsh]
+
+  -r, --resume
+          Resume previous session from temporary directory
+
+  -k, --keep
+          Do not delete the temporary folder after encoding has finished
+
+      --force
+          Do not check if the encoder arguments specified by -v/--video-params are valid
+
+      --no-defaults
+          Do not include Av1an's default set of encoder parameters
+
+  -y
+          Overwrite output file, without confirmation
+
+  -n
+          Never overwrite output file, without confirmation
+
+      --max-tries <MAX_TRIES>
+          Maximum number of chunk restarts for an encode
+          
+          [default: 3]
+
+  -w, --workers <WORKERS>
+          Number of workers to spawn [0 = automatic]
+          
+          [default: 0]
+
+      --set-thread-affinity <SET_THREAD_AFFINITY>
+          Pin each worker to a specific set of threads of this size (disabled by default)
+          
+          This is currently only supported on Linux and Windows, and does nothing on unsupported platforms. Leaving this option unspecified allows the OS to schedule all processes spawned.
+
+      --scaler <SCALER>
+          Scaler used for scene detection (if --sc-downscale-height XXXX is used) and VMAF calculation
+          
+          Valid scalers are based on the scalers available in ffmpeg, including lanczos[1-9] with [1-9] defining the width of the lanczos scaler.
+          
+          [default: bicubic]
+
+      --vspipe-args [<VSPIPE_ARGS>...]
+          Pass python argument(s) to the script environment --vspipe-args "message=fluffy kittens" "head=empty"
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+  -V, --version
+          Print version
+
+Scene Detection:
+  -s, --scenes <SCENES>
+          File location for scenes
+
+      --sc-only
+          Run the scene detection only before exiting
+          
+          Requires a scene file with --scenes.
+
+      --split-method <SPLIT_METHOD>
+          Method used to determine chunk boundaries
+          
+          "av-scenechange" uses an algorithm to analyze which frames of the video are the start of new scenes, while "none" disables scene detection entirely (and only relies on -x/--extra-split to add extra scenecuts).
+          
+          [default: av-scenechange]
+
+      --sc-method <SC_METHOD>
+          Scene detection algorithm to use for av-scenechange
+          
+          Standard: Most accurate, still reasonably fast. Uses a cost-based algorithm to determine keyframes.
+          
+          Fast: Very fast, but less accurate. Determines keyframes based on the raw difference between pixels.
+          
+          [default: standard]
+
+      --sc-downscale-height <SC_DOWNSCALE_HEIGHT>
+          Optional downscaling for scene detection
+          
+          Specify as the desired maximum height to scale to (e.g. "720" to downscale to 720p — this will leave lower resolution content untouched). Downscaling improves scene detection speed but lowers accuracy, especially when scaling to very low resolutions.
+          
+          By default, no downscaling is performed.
+
+      --sc-pix-format <SC_PIX_FORMAT>
+          Perform scene detection with this pixel format
+
+  -x, --extra-split <EXTRA_SPLIT>
+          Maximum scene length
+          
+          When a scenecut is found whose distance to the previous scenecut is greater than the value specified by this option, one or more extra splits (scenecuts) are added. Set this option to 0 to disable adding extra splits.
+
+      --extra-split-sec <EXTRA_SPLIT_SEC>
+          Maximum scene length, in seconds
+          
+          If both frames and seconds are specified, then the number of frames will take priority.
+          
+          [default: 10]
+
+      --min-scene-len <MIN_SCENE_LEN>
+          Minimum number of frames for a scenecut
+          
+          [default: 24]
+
+      --force-keyframes <FORCE_KEYFRAMES>
+          Comma-separated list of frames to force as keyframes
+          
+          Can be useful for improving seeking with chapters, etc. Frame 0 will always be a keyframe and does not need to be specified here.
+
+Encoding:
+  -e, --encoder <ENCODER>
+          Video encoder to use
+          
+          [default: svt-av1]
+
+  -v, --video-params <VIDEO_PARAMS>
+          Parameters for video encoder
+          
+          These parameters are for the encoder binary directly, so the ffmpeg syntax cannot be used. For example, CRF is specified in ffmpeg via "-crf <CRF>", but the x264 binary takes this value with double dashes, as in "--crf <CRF>". See the --help output of each encoder for a list of valid options. This list of parameters will be merged into Av1an's default set of encoder parameters.
+
+  -p, --passes <PASSES>
+          Number of encoder passes
+          
+          Since aom and vpx benefit from two-pass mode even with constant quality mode (unlike other encoders in which two-pass mode is used for more accurate VBR rate control), two-pass mode is used by default for these encoders.
+          
+          When using aom or vpx with RT mode (--rt), one-pass mode is always used regardless of the value specified by this flag (as RT mode in aom and vpx only supports one-pass encoding).
+
+      --tile-auto
+          Estimate tile count from source
+          
+          Worker estimation will consider tile count accordingly.
+
+  -f, --ffmpeg <FFMPEG_FILTER_ARGS>
+          FFmpeg filter options
+
+  -a, --audio-params <AUDIO_PARAMS>
+          Audio encoding parameters (ffmpeg syntax)
+          
+          If not specified, "-c:a copy" is used.
+          
+          Do not use ffmpeg's -map syntax with this option. Instead, use the colon syntax with each parameter you specify.
+          
+          Subtitles are always copied by default.
+          
+          Example to encode all audio tracks with libopus at 128k:
+          
+          -a="-c:a libopus -b:a 128k"
+          
+          Example to encode the first audio track with libopus at 128k, and the second audio track with aac at 24k, where only the second track is downmixed to a single channel:
+          
+          -a="-c:a:0 libopus -b:a:0 128k -c:a:1 aac -ac:a:1 1 -b:a:1 24k"
+
+      --ignore-frame-mismatch
+          Ignore any detected mismatch between scene frame count and encoder frame count
+
+  -m, --chunk-method <CHUNK_METHOD>
+          Method used for piping exact ranges of frames to the encoder
+          
+          Methods that require an external vapoursynth plugin:
+          
+          bestsource - Require a slow indexing pass once per file, but is the most accurate. Does not require intermediate files, requires the BestSource vapoursynth plugin to be installed.
+          
+          lsmash - Generally accurate and fast. Does not require intermediate files. Errors generally only occur if the input file itself is broken (for example, if the video bitstream is invalid in some way, video players usually try to recover from the errors as much as possible even if it results in visible artifacts, while lsmash will instead throw an error). Requires the lsmashsource vapoursynth plugin to be installed.
+          
+          ffms2 - Generally accurate and does not require intermediate files. Can sometimes have bizarre bugs that are not present in lsmash (that can cause artifacts in the piped output). Slightly faster than lsmash for y4m input. Requires the ffms2 vapoursynth plugin to be installed.
+          
+          dgdecnv - Very fast, but only decodes AVC, HEVC, MPEG-2, and VC1. Does not require intermediate files. Requires dgindexnv to be present in system path, NVIDIA GPU that support CUDA video decoding, and dgdecnv vapoursynth plugin to be installed.
+          
+          Methods that only require ffmpeg:
+          
+          hybrid - Uses a combination of segment and select. Usually accurate but requires intermediate files (which can be large). Avoids decoding irrelevant frames by seeking to the first keyframe before the requested frame and decoding only a (usually very small) number of irrelevant frames until relevant frames are decoded and piped to the encoder.
+          
+          select - Extremely slow, but accurate. Does not require intermediate files. Decodes from the first frame to the requested frame, without skipping irrelevant frames (causing quadratic decoding complexity).
+          
+          segment - Create chunks based on keyframes in the source. Not frame exact, as it can only split on keyframes in the source. Requires intermediate files (which can be large).
+          
+          Default: bestsource (if available), otherwise lsmash (if available), otherwise ffms2 (if available), otherwise DGDecNV (if available), otherwise hybrid.
+
+      --chunk-order <CHUNK_ORDER>
+          The order in which av1an will encode chunks
+          
+          Available methods:
+          
+          long-to-short - The longest chunks will be encoded first. This method results in the smallest amount of time with idle cores, as the encode will not be waiting on a very long chunk to finish at the end of the encode after all other chunks have finished.
+          
+          short-to-long - The shortest chunks will be encoded first.
+          
+          sequential - The chunks will be encoded in the order they appear in the video.
+          
+          random - The chunks will be encoded in a random order. This will provide a more accurate estimated filesize sooner in the encode.
+          
+          [default: long-to-short]
+
+      --photon-noise <PHOTON_NOISE>
+          Generates a photon noise table and applies it using grain synthesis [strength: 0-64] (disabled by default)
+          
+          Photon noise tables are more visually pleasing than the film grain generated by aomenc, and provide a consistent level of grain regardless of the level of grain in the source. Strength values correlate to ISO values, e.g. 1 = ISO 100, and 64 = ISO 6400. This option currently only supports aomenc and rav1e.
+          
+          An encoder's grain synthesis will still work without using this option, by specifying the correct parameter to the encoder. However, the two should not be used together, and specifying this option will disable the encoder's internal grain synthesis.
+
+      --chroma-noise
+          Adds chroma grain synthesis to the grain table generated by `--photon-noise`. (Default: false)
+
+      --photon-noise-width <PHOTON_NOISE_WIDTH>
+          Manually set the width for the photon noise table
+
+      --photon-noise-height <PHOTON_NOISE_HEIGHT>
+          Manually set the height for the photon noise table
+
+  -c, --concat <CONCAT>
+          Determines method used for concatenating encoded chunks and audio into output file
+          
+          ffmpeg - Uses ffmpeg for concatenation. Unfortunately, ffmpeg sometimes produces files with partially broken audio seeking, so mkvmerge should generally be preferred if available. ffmpeg concatenation also produces broken files with the --enable-keyframe-filtering=2 option in aomenc, so it is disabled if that option is used. However, ffmpeg can mux into formats other than matroska (.mkv), such as WebM. To output WebM, use a .webm extension in the output file.
+          
+          mkvmerge - Generally the best concatenation method (as it does not have either of the aforementioned issues that ffmpeg has), but can only produce matroska (.mkv) files. Requires mkvmerge to be installed.
+          
+          ivf - Experimental concatenation method implemented in av1an itself to concatenate to an ivf file (which only supports VP8, VP9, and AV1, and does not support audio).
+          
+          [default: mkvmerge]
+
+      --pix-format <PIX_FORMAT>
+          FFmpeg pixel format
+          
+          [default: yuv420p10le]
+
+      --zones <ZONES>
+          Path to a file specifying zones within the video with differing encoder
+          settings.
+          
+          The zones file should include one zone per line,
+          with each arg within a zone space-separated.
+          No quotes or escaping are needed around the encoder args,
+          as these are assumed to be the last argument.
+          
+          The zone args on each line should be in this order:
+          
+          ```
+          start_frame end_frame encoder reset(opt) video_params
+          ```
+          
+          For example:
+          
+          ```
+          136 169 aom --photon-noise 4 --cq-level=32
+          169 1330 rav1e reset -s 3 -q 42
+          ```
+          
+          Example line 1 will encode frames 136-168 using aomenc
+          with the argument `--cq-level=32` and enable av1an's `--photon-noise`
+          option. Note that the end frame number is *exclusive*.
+          The start and end frame will both be forced to be scenecuts.
+          Additional scene detection will still be applied within the zones.
+          `-1` can be used to refer to the last frame in the video.
+          
+          The default behavior as shown on line 1 is to preserve
+          any options passed to `--video-params` or `--photon-noise`
+          in av1an, and append or overwrite the additional zone settings.
+          
+          Example line 2 will encode frames 169-1329 using rav1e.
+          The `reset` keyword instructs av1an to ignore any settings
+          which affect the encoder, and use only the parameters from this zone.
+          
+          For segments where no zone is specified,
+          the settings passed to av1an itself will be used.
+          
+          The video params which may be specified include any parameters
+          that are allowed by the encoder, as well as the following av1an options:
+          
+          - `-x`/`--extra-split`
+          - `--min-scene-len`
+          - `--passes`
+          - `--photon-noise` (aomenc/rav1e only)
+
+      --cache-mode <CACHE_MODE>
+          Set chunk cache index mode
+          
+          source - Place source cache next to video.
+          
+          temp - Place source cache in temp directory.
+          
+          [default: source]
+
+VMAF:
+      --vmaf
+          Plot an SVG of the VMAF for the encode
+          
+          This option is independent of --target-quality, i.e. it can be used with or without it. The SVG plot is created in the same directory as the output file.
+
+      --vmaf-path <VMAF_PATH>
+          Path to VMAF model (used by --vmaf and --target-quality)
+          
+          If not specified, ffmpeg's default is used.
+
+      --vmaf-res <VMAF_RES>
+          Resolution used for VMAF calculation
+          
+          If set to inputres, the output video will be scaled to the resolution of the input video.
+          
+          [default: 1920x1080]
+
+      --vmaf-threads <VMAF_THREADS>
+          Number of threads to use for target quality VMAF calculation
+
+      --vmaf-filter <VMAF_FILTER>
+          Filter applied to source at VMAF calcualation
+          
+          This option should be specified if the source is cropped, for example.
+
+Target Quality:
+      --probe-res <PROBE_RES>
+          Resolution used for Target Quality metric calculation in the form of `widthxheight` where width and height are positive integers
+          
+          If not specified, the output video will be scaled to the resolution of the input video.
+
+      --target-quality <TARGET_QUALITY>
+          Target a metric score range for encoding (disabled by default)
+          
+          For each chunk, target quality uses an algorithm to find the quantizer/crf needed to achieve a metric score within the specified range. Target quality mode is much slower than normal encoding, but can improve the consistency of quality in some cases.
+          
+          The VMAF and SSIMULACRA2 score ranges are 0-100 (where 0 is the worst quality, and 100 is the best).
+          
+          The butteraugli score minimum is 0 as the best quality and increases as quality decreases towards infinity.
+          
+          The XPSNR score minimum is 0 as the worst quality and increases as quality increases towards infinity.
+          
+          Specify as a range: --target-quality 75-85 for VMAF/SSIMULACRA2 or --target-quality 1.0-1.5 for butteraugli metrics. Floating-point values are allowed for all metrics.
+
+      --qp-range <QP_RANGE>
+          Quantizer range bounds for target quality search (disabled by default)
+          
+          Specifies the minimum and maximum quantizer/CRF/qp values to use during target quality search. This constrains the search space and can prevent the algorithm from using extremely high or low quality settings.
+          
+          Specify as a range: --qp-range 10-50 If not specified, encoder defaults are used.
+
+      --interp-method <INTERP_METHOD>
+          Interpolation methods for target quality probing
+          
+          Controls which interpolation algorithms are used for the 4th and 5th probe rounds during target quality search.
+          Higher-order interpolation methods can provide more accurate quantizer predictions but may be less stable with noisy data.
+          
+          Format: --interp-method <method4>-<method5>
+          
+          4th round methods (3 known points):
+            linear    - Simple linear interpolation using the 2 closest points. Fast and stable, good for monotonic data.
+            quadratic - Quadratic interpolation using all 3 points. Better curve fitting than linear, moderate accuracy.
+            natural   - Natural cubic spline interpolation. Smooth curves with natural boundary conditions. (default)
+          
+          5th round methods (4 known points):
+            linear                  - Simple linear interpolation using 2 closest points. Most stable for narrow ranges.
+            quadratic               - Quadratic interpolation (Lagrange method) using 3 best points. Good balance of accuracy and stability.
+            natural                 - Natural cubic spline interpolation. Smooth curves, good for well-behaved data.
+            pchip                   - Piecewise Cubic Hermite Interpolation. Preserves monotonicity, prevents overshooting. (default)
+            catmull                 - Catmull-Rom spline interpolation. Smooth curves that pass through all points.
+            akima                   - Akima spline interpolation. Reduces oscillations. Beware: Designed for 5 data points originally.
+            cubic | cubicpolynomial - Cubic polynomial through all 4 points. High accuracy but can overshoot dramatically.
+          
+          Recommendations:
+            - For most content:      natural-pchip      - Good balance of accuracy and stability (tested)
+            - For difficult content: quadratic-natural  - More conservative, less prone to overshooting
+            - For fine-tuning:       linear-linear      - Most predictable behavior, good for testing
+          
+          Examples:
+            --interp-method natural-pchip      # Default: balanced accuracy and stability
+            --interp-method quadratic-akima    # Experimental
+            --interp-method linear-catmull     # Simple start, smooth finish
+
+      --target-metric <TARGET_METRIC>
+          The metric used for Target Quality mode
+          
+          vmaf - Requires FFmpeg with VMAF enabled.
+          
+          ssimulacra2 - Requires Vapoursynth-HIP or VapourSynth-Zig Image Process plugin. Also requires Chunk method to be set to "lsmash", "ffms2", "bestsource", or "dgdecnv".
+          
+          butteraugli-inf - Uses the Infinite-Norm value of butteraugli with a target intensity of 203 nits. Requires Vapoursynth-HIP or Julek plugin. Also requires Chunk method to be set to "lsmash", "ffms2", "bestsource", or "dgdecnv".
+          
+          butteraugli-3  - Uses the 3-Norm value of butteraugli with a target intensity of 203 nits. Requires Vapoursynth-HIP plugin. Also requires Chunk method to be set to "lsmash", "ffms2", "bestsource", or "dgdecnv".
+          
+          xpsnr -  Uses the minimum of Y, U, and V. Requires FFmpeg with XPSNR enabled when Probing Rate is unspecified or set to 1. When Probing Rate is specified higher than 1, the VapourSynth-Zig Image Process plugin version R7 or newer is required and the Chunk method must be set to "lsmash", "ffms2", "bestsource", or "dgdecnv".
+          
+          xpsnr-weighted - Uses weighted XPSNR based on this formula: `((4 * Y) + U + V) / 6`. Requires FFmpeg with XPSNR enabled when Probing Rate is unspecified or set to 1. When Probing Rate is specified higher than 1, the VapourSynth-Zig Image Process plugin version R7 or newer is required and the Chunk method must be set to "lsmash", "ffms2", "bestsource", or "dgdecnv".
+          
+          [default: vmaf]
+
+      --probes <PROBES>
+          Maximum number of probes allowed for target quality
+          
+          [default: 4]
+
+      --probing-rate <PROBING_RATE>
+          Only use every nth frame for VMAF calculation, while probing.
+          
+          WARNING: The resulting VMAF score might differ from if all the frames were used; usually it should be lower, which means to get the same quality you must also usually lower the --target-quality. Going higher than n=4 usually results in unusable scores, so this is disabled.
+          
+          [default: 1]
+
+      --probe-video-params <PROBE_VIDEO_PARAMS>
+          Parameters for video encoder during Target Quality probing
+          
+          It is recommended to specify a faster speed/preset/cpu-used and omit options that reduce probe accuracy such as "--film-grain"
+          
+          To use the same parameters as "--video-params", specify "copy"
+          
+          These parameters are for the encoder binary directly, so the ffmpeg syntax cannot be used. For example, CRF is specified in ffmpeg via "-crf <CRF>", but the x264 binary takes this value with double dashes, as in "--crf <CRF>". See the --help output of each encoder for a list of valid options. This list of parameters will be merged into Av1an's default set of encoder parameters.
+          
+          If no parameters are specified, Av1an will use its default set of encoder parameters
+
+      --probing-vmaf-features [<PROBING_VMAF_FEATURES>...]
+          VMAF calculation features for target quality probing
+          
+          Available features:
+            default     - Standard VMAF calculation (baseline)
+            weighted    - Perceptual weighting using (4Y+1U+1V)/6 formula
+            neg         - No Enhancement Gain: isolates compression artifacts by subtracting enhancement gains (e.g., sharpening)
+            motionless  - Disable motion compensation (prevents score inflation)
+            uhd         - Use 4K optimized VMAF model: Overrides 'DEFAULT' but can be combined with 'NEG'.
+          
+          Multiple features can be combined:
+            --probing-vmaf-features weighted neg motionless
+            --probing-vmaf-features default motionless
+          
+          'NEG' overrides 'DEFAULT' because it is a different model.
+
+      --probing-stat <PROBING_STAT>
+          Statistical method for calculating target quality from sorted probe
+          scores
+          
+          Available methods:
+            auto                       - Automatically choose the best method based on the target metric, the probing speed, and the quantizer
+            mean                       - Arithmetic mean (average)
+            median                     - Middle value
+            harmonic                   - Harmonic mean (emphasizes lower quality scores)
+            percentile=<FLOAT>         - Percentile of a specified value. Must be between 0.0 and 100.0
+            standard-deviation=<FLOAT> - Standard deviation distance from mean (σ) clamped by the minimum and maximum probe scores
+            mode                       - Most common integer-rounded value
+            minimum                    - Lowest quality value
+            maximum                    - Highest quality value
+            root-mean-square           - Root Mean Square (quadratic mean)
+          
+          Warning:
+            "root-mean-square" should only be used with inverse target metrics such as "butteraugli".
+            "harmonic" works as expected when there are no negative scores. Use with caution with target metrics such as "ssimulacra2".
+          
+          [default: auto]

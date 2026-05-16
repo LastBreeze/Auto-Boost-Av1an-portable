@@ -1,0 +1,141 @@
+<!DOCTYPE html
+  PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
+<html>
+   <head>
+      <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+      <title>mkvtoolnix-gui -- GUI az mkvmerge1 beleértve egy fejezet és egy fejléc szerkesztőt is</title>
+      <link rel="stylesheet" type="text/css" href="mkvtoolnix-doc.css">
+   </head>
+   <body>
+      <div class="heading">mkvtoolnix-gui -- GUI az <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a> beleértve egy fejezet és egy fejléc szerkesztőt is</div>
+      <hr>
+      <div id="toc" class="toc">
+         <h1>Table of contents</h1>
+         <ul>
+            <li><a href="#mkvtoolnix-gui.synopsis">1. Szinopszis</a></li>
+            <li><a href="#mkvtoolnix-gui.description">2. Leírás</a></li>
+            <li><a href="#mkvtoolnix-gui.seealso">3. Lásd még</a></li>
+            <li><a href="#mkvtoolnix-gui.www">4. WWW</a></li>
+         </ul>
+      </div>
+      <div class="content">
+         <h1><a name="mkvtoolnix-gui.synopsis">1. Szinopszis</a><a class="headerlink" href="#mkvtoolnix-gui.synopsis" title="Link to this heading">#</a></h1>
+         
+         
+         <div class="cmdsynopsis"><span class="commandname">mkvtoolnix-gui</span> [[configuration-file-name.mtxcfg] | [source-file.ext] | [matroska-file.mkv] | [chapter-file.ext] | [matroska-file.mkv]]</div>
+         
+         <h1><a name="mkvtoolnix-gui.description">2. Leírás</a><a class="headerlink" href="#mkvtoolnix-gui.description" title="Link to this heading">#</a></h1>
+         
+         
+         <p>
+            <span class="productname">mkvtoolnix-gui</span>(1) is a <span class="productname">Qt</span><sup>(tm)</sup> based
+            <span class="abbrev">GUI</span> for <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a>. It also implements <a href="mkvinfo.html"><span class="productname">mkvinfo</span>(1)</a>'s and
+            <a href="mkvpropedit.html"><span class="productname">mkvpropedit</span>(1)</a>'s functionality and will evolve to cover <a href="mkvextract.html"><span class="productname">mkvextract</span>(1)</a> as
+            well. All settings (e.g. source files, track options etc) can be saved and
+            restored.
+            </p>
+         
+         
+         <p>
+            A <span class="literal">.mtxcfg</span> kiterjesztésű konfigurációs fájlnevek
+            felsorolása azt eredményezi, hogy a GUI a megfelelő eszközbe tölti be ezeket
+            a konfigurációs fájlokat. Bármely más fájlnév hozzáadódik a multiplexelés
+            forrásfájljaként, amelyet az aktuális üzemmódtól függően az információs
+            eszközben, a fejezetszerkesztőben vagy a fejlécszerkesztőben nyit meg. Az
+            aktuális módot a <span class="option">--merge</span>, <span class="option">--info</span>,
+            <span class="option">--edit-chapters</span> vagy <span class="option">--edit-headers</span>
+            parancsokkal lehet megváltoztatni. Az alapértelmezett mód a fájlok
+            hozzáadása a multiplexeléshez.
+            </p>
+         
+         
+         <p>
+            Vegye figyelembe, hogy ha az alkalmazás egy példánya már fut, amikor az
+            alkalmazás másodszor is elindul, a parancssorban megadott összes fájlnevet a
+            már futó példány kezeli.
+            </p>
+         
+         
+         <table class="variablelist">
+            <thead>
+               <tr>
+                  <th>Option</th>
+                  <th>Description</th>
+               </tr>
+            </thead>
+            <tbody>
+               <tr>
+                  <td class="varlistoption"><span class="option">--merge</span></td>
+                  <td>
+                     
+                     <p>A következő fájlnevek forrásfájlként hozzáadódnak az aktuális multiplex
+                        feladathoz. Ez az alapértelmezett mód.</p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><span class="option">--info</span></td>
+                  <td>
+                     
+                     <p>A következő fájlnevek mindegyike megnyílik az információs eszközben.</p>
+                     
+                     <p>Ezen kívül az indításkor az információs eszköz lesz kiválasztva a
+                        multiplexer eszköz helyett.</p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><span class="option">---edit-chapters</span></td>
+                  <td>
+                     
+                     <p>A következő fájlnevek mindegyike megnyílik a fejezetszerkesztőben.</p>
+                     
+                     <p>Ezenkívül a fejezetszerkesztő lesz kiválasztva indításkor a multiplexer
+                        eszköz helyett.</p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><span class="option">--edit-headers</span></td>
+                  <td>
+                     
+                     <p>A következő fájlnevek mindegyike a fejlécszerkesztőben fog megnyílni.</p>
+                     
+                     <p>Ezen kívül indításkor a fejlécszerkesztő lesz kiválasztva a multiplexer
+                        eszköz helyett.</p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><span class="option">-h</span>, <span class="option">--help</span></td>
+                  <td>
+                     
+                     <p>
+                        Használati információk megjelenítése és kilépés.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><span class="option">-V</span>, <span class="option">--version</span></td>
+                  <td>
+                     
+                     <p>
+                        Verzióinformációk megjelenítése és kilépés.
+                        </p>
+                     </td>
+               </tr>
+            </tbody>
+         </table>
+         
+         <h1><a name="mkvtoolnix-gui.seealso">3. Lásd még</a><a class="headerlink" href="#mkvtoolnix-gui.seealso" title="Link to this heading">#</a></h1>
+         
+         
+         <p>
+            <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a>, <a href="mkvextract.html"><span class="productname">mkvextract</span>(1)</a>, <a href="mkvinfo.html"><span class="productname">mkvinfo</span>(1)</a>, <a href="mkvpropedit.html"><span class="productname">mkvpropedit</span>(1)</a>
+            </p>
+         
+         <h1><a name="mkvtoolnix-gui.www">4. WWW</a><a class="headerlink" href="#mkvtoolnix-gui.www" title="Link to this heading">#</a></h1>
+         
+         
+         <p>
+            A legfrissebb verzió mindig megtalálható a <a href="https://mkvtoolnix.download/">az MKVToolNix honlapon</a>.
+            </p>
+         </div>
+   </body>
+</html>

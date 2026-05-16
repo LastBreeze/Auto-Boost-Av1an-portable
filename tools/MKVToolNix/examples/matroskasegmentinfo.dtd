@@ -1,0 +1,31 @@
+<!ENTITY % format "(ascii|base64|hex)">
+<!ELEMENT Info (
+          SegmentUID?,
+          NextSegmentUID?,
+          PreviousSegmentUID?,
+          SegmentFamily?,
+          SegmentFilename?,
+          NextSegmentFilename?,
+          PreviousSegmentFilename?,
+          ChapterTranslate*)>
+
+<!ELEMENT SegmentUID (#PCDATA)>
+<!ATTLIST SegmentUID format %format; "ascii">
+<!ELEMENT NextSegmentUID (#PCDATA)>
+<!ATTLIST NextSegmentUID format %format; "ascii">
+<!ELEMENT PreviousSegmentUID (#PCDATA)>
+<!ATTLIST PreviousSegmentUID format %format; "ascii">
+<!ELEMENT SegmentFamily (#PCDATA)>
+<!ATTLIST SegmentFamily format %format; "ascii">
+<!ELEMENT SegmentFilename (#PCDATA)>
+<!ELEMENT NextSegmentFilename (#PCDATA)>
+<!ELEMENT PreviousSegmentFilename (#PCDATA)>
+
+<!ELEMENT ChapterTranslate (
+          ChapterTranslateEditionUID,
+          ChapterTranslateCodec,
+          ChapterTranslateID)>
+
+<!ELEMENT ChapterTranslateEditionUID (#PCDATA)>
+<!ELEMENT ChapterTranslateCodec (#PCDATA)>
+<!ELEMENT ChapterTranslateID (#PCDATA)>

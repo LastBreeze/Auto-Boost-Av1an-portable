@@ -1,0 +1,1200 @@
+<!DOCTYPE html
+  PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
+<html>
+   <head>
+      <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+      <title>mkvextract -- выманне трэка з файлаў Matroska у іншыя файлы</title>
+      <link rel="stylesheet" type="text/css" href="mkvtoolnix-doc.css">
+   </head>
+   <body>
+      <div class="heading">mkvextract -- выманне трэка з файлаў <span class="productname">Matroska</span><sup>(tm)</sup> у іншыя файлы</div>
+      <hr>
+      <div id="toc" class="toc">
+         <h1>Table of contents</h1>
+         <ul>
+            <li><a href="#mkvextract.synopsis">1. Кароткі змест</a></li>
+            <li><a href="#mkvextract.description">2. Апісанне</a></li>
+            <li><a href="#mkvextract.examples">3. Прыклады</a></li>
+            <li><a href="#mkvextract.text_files_and_charsets">4. Канвертацыя тэкставых файлаў і кадзіровак</a></li>
+            <li><a href="#mkvextract.output_file_formats">5. Фарматы файлаў на выхадзе</a></li>
+            <li><a href="#d4e1476">6. Коды завяршэння</a></li>
+            <li><a href="#mkvextract.environment_variables">7. Пераменныя асяроддзя</a></li>
+            <li><a href="#mkvextract.seealso">8. Глядзіце таксама</a></li>
+            <li><a href="#mkvextract.www">9. Хатняя старонка</a></li>
+         </ul>
+      </div>
+      <div class="content">
+         <h1><a name="mkvextract.synopsis">1. Кароткі змест</a><a class="headerlink" href="#mkvextract.synopsis" title="Link to this heading">#</a></h1>
+         
+         
+         <div class="cmdsynopsis"><span class="commandname">mkvextract</span> {імя-файла-крыніцы} {рэжым1} параметры уласцівасці-вымання1 рэжым2 параметры уласцівасці-вымання2 …</div>
+         
+         <h1><a name="mkvextract.description">2. Апісанне</a><a class="headerlink" href="#mkvextract.description" title="Link to this heading">#</a></h1>
+         
+         
+         <p>
+            Гэтая праграма вымае зададзеныя фрагменты з файла <span class="productname">Matroska</span><sup>(tm)</sup> у іншыя
+            неабходныя фарматы. Першы аргумент — імя зыходнага файла, які павінен быць
+            файлам <span class="productname">Matroska</span><sup>(tm)</sup>.
+            </p>
+         
+         
+         <p>
+            Усе астатнія аргументы або пераключаюць у пэўны рэжым вымання, змяняюць
+            параметры бягучага актыўнага рэжыма, або задаюць, у які файл трэба
+            выняцт. Пры выкліку mkvextract могуць выкарыстоўвацца некалькі рэжымаў, што
+            дазваляе вымаць некалькі элементаў за адзін праход. Большасць параметраў
+            могуць выкарыстоўвацца толькі ў пэўных рэжымах з некалькімі параметрамі,
+            якія ўжываюцца да ўсіх рэжымаў.
+            </p>
+         
+         
+         <p>
+            У дадзены час падтрымліваецца выманне <a href="#mkvextract.description.tracks">трэкаў</a>, <a href="#mkvextract.description.tags">тэгаў</a>, <a href="#mkvextract.description.attachments">далучэнняў</a>, <a href="#mkvextract.description.chapters">раздзелаў</a>, <a href="#mkvextract.description.cuesheets">файлаў разметкі CUE</a>, <a href="#mkvextract.description.timestamps_v2">метак часу</a> і <a href="#mkvextract.description.cues">Сue</a>.
+            </p>
+         
+         
+         <h2><a name="mkvextract.description.common">2.1. Агульныя параметры</a><a class="headerlink" href="#mkvextract.description.common" title="Link to this heading">#</a></h2>
+         
+         
+         
+         <p>
+            Наступныя параметры даступныя ва ўсіх рэжымах і апісваюцца ў гэтай секцыі
+            аднойчы.
+            </p>
+         
+         
+         <table class="variablelist">
+            <thead>
+               <tr>
+                  <th>Option</th>
+                  <th>Description</th>
+               </tr>
+            </thead>
+            <tbody>
+               <tr>
+                  <td class="varlistoption"><a name="mkvextract.description.parse_fully"><span class="option">-f</span>, <span class="option">--parse-fully</span></a><a class="headerlink" href="#mkvextract.description.parse_fully" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Задаецца рэжым аналізу на «поўны». Стандартны рэжым не аналізуе ўвесь файл,
+                        а выкарыстоўвае элементы метапошуку для знаходжання элементаў у зыходным
+                        файле. У 99% выпадкаў гэтага дастаткова. Але для пашкоджаных файлаў і для
+                        тых, у якіх няма элементаў метапошуку, карыстальніку прыйдзецца
+                        выкарыстоўваць гэты рэжым. Поўнае сканаванне файла можа патрабаваць некалькі
+                        хвілін, у той час як хуткае сканаванне праходзіць за секунды.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvextract.description.common.command_line_charset"><span class="option">--command-line-charset</span> <span class="parameter">кадзіроўка</span></a><a class="headerlink" href="#mkvextract.description.common.command_line_charset" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Задае кадзіроўку для канвертацыі радкоў, зададзеных у камандным
+                        радку. Стандартная кадзіроўка прывязаная да сістэмнай лакалізацыі.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvextract.description.common.output_charset"><span class="option">--output-charset</span> <span class="parameter">кадзіроўка</span></a><a class="headerlink" href="#mkvextract.description.common.output_charset" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Задае кадзіроўку, у якой канвертуюцца выхадныя радкі. Па змаўчанні
+                        выкарыстоўваецца бягучая кадзіроўка сістэмнай мовы.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvextract.description.common.redirect_output"><span class="option">-r</span>, <span class="option">--redirect-output</span>
+                        <span class="parameter">імя-файла</span></a><a class="headerlink" href="#mkvextract.description.common.redirect_output" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Усе паведамленні запісваюцца ў файл <span class="parameter">імя-файла</span> замест
+                        кансолі. Хаця гэта можна зрабіць і праз перанакіраванне вываду, ёсць асобныя
+                        выпадкі ўжывання менавіта гэтага параметра: калі тэрмінал інтэрпрэтуе ў іншы
+                        спосаб вываду пераз запісам файла. Кадзіороўка, зададзеная ў <a href="#mkvextract.description.common.output_charset">
+                           --output-charset</a>, улічваецца.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvextract.description.flush_on_close"><span class="option">--flush-on-close</span></a><a class="headerlink" href="#mkvextract.description.flush_on_close" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Задае праграме скінуць усе даныя, закэшаваныя ў памяці, у сховішчы пры
+                        закрыцці файлаў, адкрытых для запісу. Гэта можа быць выкарыстана для
+                        прадухілення страты даных пры адключэнні сілкавання або для абыходу пэўных
+                        праблем у аперацыйнай сістэме або драйверах. Недахопам з'яўляецца тое, што
+                        зліццё зойме больш часу, бо mkvmerge прыйдзецца чакаць, пакуль усе даныя не
+                        будуць запісаныя ў сховішча перад выхадам. Гдядзіце праблемы #2469 і #2480 ў
+                        трэкеры памылак MKVToolNix, дзе падрабязна пракаментаваныя плючы і мінусы.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvextract.description.common.ui_language"><span class="option">--ui-language</span> <span class="parameter">код</span></a><a class="headerlink" href="#mkvextract.description.common.ui_language" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Прымусова выкарыстоўваць пераклад на <span class="parameter">код</span> мовы (напр.,
+                        «<span class="literal">de_DE</span>» для нямецкай). Калі задаць
+                        «<span class="literal">list</span>» замест <span class="parameter">кода</span>, то будзе
+                        выведзены спіс даступных перакладаў.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvextract.description.abort_on_warnings"><span class="option">--abort-on-warnings</span></a><a class="headerlink" href="#mkvextract.description.abort_on_warnings" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Задае mkvmerge перапыненне пасля з'яўлення першага папярэджання. Код
+                        завяршэння праграмы будзе 1.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvextract.description.debug"><span class="option">--debug</span> <span class="parameter">тэматыка</span></a><a class="headerlink" href="#mkvextract.description.debug" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Уключыць рэжым адладкі для зададзенай функцыі. Гэты параметр карысны толькі
+                        для распрацоўшчыкаў.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvextract.description.engage"><span class="option">--engage</span> <span class="parameter">функцыя</span></a><a class="headerlink" href="#mkvextract.description.engage" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Уключыць эксперыментальныя функцыі. Спіс даступных функцый можа быць
+                        выкліканы праз <span class="command">mkvextract --engage list</span>. Гэтыя функцыі не
+                        прызначаныя для звычайнага выкарыстання.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvextract.description.gui_mode"><span class="option">--gui-mode</span></a><a class="headerlink" href="#mkvextract.description.gui_mode" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Уключае рэжым графічнага інтэрфейса. У гэтым рэжыме могуць выводзіцца
+                        спецыяльна адфармаціраваныя радкі для адпраўкі кантрольных паведамленняў
+                        інтэрфейсу. Фармат паведмленняў — '<span class="literal">#GUI#message</span>'. За
+                        паведамленнем могуць быць зададзеныя пары ключа і значэння, напрыклад
+                        '<span class="literal">#GUI#message#key1=value1#key2=value2…</span>'. Паведамленні і
+                        ключы не перакладаюцца і заўжды выводзяцца на англійскай.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvextract.description.verbose"><span class="option">-v</span>, <span class="option">--verbose</span></a><a class="headerlink" href="#mkvextract.description.verbose" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Увесці пашыраны вывад і паказваць усе важныя элементы <span class="productname">Matroska</span><sup>(tm)</sup> па меры іх
+                        чытання.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvextract.description.help"><span class="option">-h</span>, <span class="option">--help</span></a><a class="headerlink" href="#mkvextract.description.help" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Паказаць звесткі аб выкарыстанні і выйсці.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvextract.description.version"><span class="option">-V</span>, <span class="option">--version</span></a><a class="headerlink" href="#mkvextract.description.version" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Паказаць звесткі аб версіі і выйсці.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvextract.description.at_sign"><span class="option">@</span><span class="parameter">файл-параметраў.json</span></a><a class="headerlink" href="#mkvextract.description.at_sign" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Счытвае дадатковыя аргументы каманднага радка з файла
+                        <span class="parameter">options-file</span>. Поўнае апісанне падтрымліваных фарматаў
+                        для такіх файлаў глядзіце ў секцыі «Файлы параметраў» на старонцы
+                        дакументацыі <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a>.
+                        </p>
+                     </td>
+               </tr>
+            </tbody>
+         </table>
+         
+         
+         
+         <h2><a name="mkvextract.description.tracks">2.2. Рэжым вымання трэка</a><a class="headerlink" href="#mkvextract.description.tracks" title="Link to this heading">#</a></h2>
+         
+         
+         
+         <p>
+            Сінтаксіс: <span class="command">mkvextract <span class="parameter">імя-зыходнага-файла</span>
+               <span class="option">трэкі</span> [<span class="parameter">параметры</span>]
+               <span class="parameter">TID1:імя-мэтавага-файла1</span>
+               [<span class="parameter">TID2:імя-мэтавага-файла2</span>
+               ...]</span>
+            </p>
+         
+         
+         <p>
+            Наступныя параметры каманднага радка даступныя для кожнага трэка ў рэжыме
+            вымання '<span class="literal">tracks</span>'. Яны павінны прысутнічаць перад заданнем
+            трэка (гл. ніжэй), да якога будуць ужывацца.
+            </p>
+         
+         
+         <table class="variablelist">
+            <thead>
+               <tr>
+                  <th>Option</th>
+                  <th>Description</th>
+               </tr>
+            </thead>
+            <tbody>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.character_set"><span class="option">-c</span> <span class="parameter">кадзіроўка</span></a><a class="headerlink" href="#mkvpropedit.description.character_set" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Задае набор сімвалаў, які павінен змяшчаць наступны трэк субцітраў пасля
+                        канвертацыі. Ужывацца толькі тады, калі ID наступнага трэка паказвае на трэк
+                        субцітраў. Па змаўчанні выкарыстоўваецца UTF-8.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvextract.description.blockadd"><span class="option">--blockadd</span> <span class="parameter">узровень</span></a><a class="headerlink" href="#mkvextract.description.blockadd" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Захаваць BlockAdditions толькі да гэтага ўзроўня. Па змаўчанні захоўваюцца
+                        ўсе ўзроўні. Гэты параметр уплывае толькі на пэўны тып кадзіроўшчыкаў,
+                        напрыклад WAVPACK4.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvextract.description.cuesheet"><span class="option">--Сuesheet</span></a><a class="headerlink" href="#mkvextract.description.cuesheet" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Выконвае з дапамогай <span class="productname">mkvextract</span>(1) вымання спісаў <span class="abbrev">CUE</span> са
+                        звестак аб раздзелах і з даных тэгаў дадзенага трэка ў файл з назвай
+                        выхаднога трэка і пашырэннем '<span class="literal">.Сue</span>'.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvextract.description.raw"><span class="option">--raw</span></a><a class="headerlink" href="#mkvextract.description.raw" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        У адрозненні ад пазнакі <a href="#mkvextract.description.tracks.fullraw">--fullraw</a>
+                        гэты параметр не прыводзіць да запісу звесціва элемента
+                        <span class="classname">CodecPrivate</span> у файл. Гэты рэжым працуе з усімі
+                        <span class="classname">CodecIDs</span>, нават з тымі, якія <span class="productname">mkvextract</span>(1) не
+                        падтрымлівае, але гэта можа прывесці да стварэння пашкоджанага файла.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvextract.description.tracks.fullraw"><span class="option">--fullraw</span></a><a class="headerlink" href="#mkvextract.description.tracks.fullraw" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Вымае неапрацаваныя даныя ў файл без кантэйнера. Змесціва элемента
+                        <span class="classname">CodecPrivate</span> будзе запісана першым у файл, калі трэк
+                        утрымлівае падобны элемент загалоўка. Гэты рэжым працуе з усімі
+                        <span class="classname">CodecIDs</span>, нават з тымі, якія <span class="productname">mkvextract</span>(1) не
+                        падтрымлівае, але гэта можа прывесці да стварэння пашкоджанага файла.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvextract.description.output_track"><span class="parameter">TID:выхадное-імя</span></a><a class="headerlink" href="#mkvextract.description.output_track" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Вымае трэк з ID <span class="parameter">TID</span> у файла
+                        <span class="parameter">выхадное_імя</span> пры ўмове, што такі трэк утрымліваецца ў
+                        зыходным файле. Гэты параметр можна задаваць некалькі разоў. ID трэкаў
+                        павінны быць такімі ж як і пры вывадзе звестак камандай <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a> з
+                        параметрам <span class="option">--identify</span>.
+                        </p>
+                     
+                     
+                     <p>
+                        Кожнае імя выхаднога файла павінна выкарыстоўвацца толькі раз. Выключэннем
+                        ёсць трэкі RealAudio і RealVideo. Калі выкарыстоўваць аднолькавыя імі для
+                        розных трэкаў, то яны будуць захаваныя ў адным файле. Прыклад:
+                        </p>
+                     
+                     
+                     <pre class="screen">$ mkvextract input.mkv tracks 0:video.h264 2:output-two-vobsub-tracks.idx 3:output-two-vobsub-tracks.idx</pre>
+                     </td>
+               </tr>
+            </tbody>
+         </table>
+         
+         
+         
+         <h2><a name="mkvextract.description.attachments">2.3. Рэжым вымання далучэнняў</a><a class="headerlink" href="#mkvextract.description.attachments" title="Link to this heading">#</a></h2>
+         
+         
+         
+         <p>
+            Сінтаксіс: <span class="command">mkvextract <span class="parameter">імя-зыходнага-файла</span>
+               <span class="option">далучэнні</span>
+               [<span class="parameter">параметры</span>]
+               <span class="parameter">AID1:выхадное-імя1</span>
+               [<span class="parameter">AID2:выхадное-імя2</span> ...]</span>
+            </p>
+         
+         
+         <table class="variablelist">
+            <thead>
+               <tr>
+                  <th>Option</th>
+                  <th>Description</th>
+               </tr>
+            </thead>
+            <tbody>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.output_attachment"><span class="parameter">AID</span>:<span class="parameter">выхадное-імя</span></a><a class="headerlink" href="#mkvpropedit.description.output_attachment" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Робіць выманне далучэння з ID <span class="parameter">AID</span> у файл
+                        <span class="parameter">outname</span> пры ўмове, калі такое далучэнне ўтрымліваецца
+                        ва ўваходным файле. Калі ж пакінуць <span class="parameter">outname</span> пустым,
+                        то будзе выкарыстоўвацца імя далучэння з уваходнага файла <span class="productname">Matroska</span><sup>(tm)</sup>. Гэты
+                        параметр можна выкарыстоўваць некалькі разоў. ID далучэнняў павінныя быць
+                        такімі ж як і пры вывадзе звестак камандай <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a> з параметрам
+                        <span class="option">--identify</span>.
+                        </p>
+                     </td>
+               </tr>
+            </tbody>
+         </table>
+         
+         
+         
+         <h2><a name="mkvextract.description.chapters">2.4. Рэжым вымання раздзелаў</a><a class="headerlink" href="#mkvextract.description.chapters" title="Link to this heading">#</a></h2>
+         
+         
+         
+         <p>
+            Сінтаксіс: <span class="command">mkvextract <span class="parameter">імя-зыходнага-файла</span>
+               <span class="option">раздзелы</span>
+               [<span class="parameter">параметры</span>]
+               <span class="parameter">імя-выхаднога-файла.xml</span></span>
+            </p>
+         
+         
+         <table class="variablelist">
+            <thead>
+               <tr>
+                  <th>Option</th>
+                  <th>Description</th>
+               </tr>
+            </thead>
+            <tbody>
+               <tr>
+                  <td class="varlistoption"><a name="mkvextract.description.simple"><span class="option">-s</span>, <span class="option">--simple</span></a><a class="headerlink" href="#mkvextract.description.simple" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Экспарт раздзела звестак у просты фармат, які выкарыстоўваецца ў
+                        інструментах <span class="abbrev">OGM</span> (РАЗДЗЕЛ01=..., РАЗДЗЕЛ01ІІМЯ=...). У
+                        гэтым рэжыме некаторыя звесткі павінны быць адкінутыя. Па змаўчанні раздзелы
+                        выводзяцца ў фармат <span class="abbrev">XML</span>.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.simple_language"><span class="option">--simple-language</span> <span class="parameter">мова</span></a><a class="headerlink" href="#mkvpropedit.description.simple_language" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Калі ўключаны просты фармат, то <span class="productname">mkvextract</span>(1) будзе выводзіць толькі адзіны
+                        запіс для кожнага сустрэчнага атама раздзелаў, нават калі атам раздзелаў
+                        утрымлівае больш за адно імя раздзела. Па змаўчанні <span class="productname">mkvextract</span>(1) будзе
+                        выкарыстоўваць першы знойдзены залаговак раздзела для кожнага атама
+                        незалежна ад яго мовы.
+                        </p>
+                     
+                     
+                     <p>
+                        Выкарыстанне гэтага параметра дае магчымасць карыстальніку вызначыць, якія
+                        імі раздзелаў выводзяцца, калі атамы ўтрымліваюць больш за адно імя
+                        раздзела. Параметр <span class="parameter">language</span> павінен быць кодам з ISO
+                        639-1 або ISO 639-2.
+                        </p>
+                     </td>
+               </tr>
+            </tbody>
+         </table>
+         
+         
+         <p>
+            Раздзелы запісаныя ў зададзены выхадны файл. Па змаўчанні выкарыстоўваецца
+            зразумеды для <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a> фармат <span class="abbrev">XML</span>. Калі ў файле няма раздзелаў, то
+            выхадны файл не створаны.
+            </p>
+         
+         
+         
+         <h2><a name="mkvextract.description.tags">2.5. Рэжым вымання метак</a><a class="headerlink" href="#mkvextract.description.tags" title="Link to this heading">#</a></h2>
+         
+         
+         
+         <p>
+            Сінтаксіс: <span class="command">mkvextract <span class="parameter">імя-зыходнага-файла</span>
+               <span class="option">тэгі</span> [<span class="parameter">параметры</span>]
+               <span class="parameter">імя-выхаднога-файла.xml</span></span>
+            </p>
+         
+         
+         <table class="variablelist">
+            <thead>
+               <tr>
+                  <th>Option</th>
+                  <th>Description</th>
+               </tr>
+            </thead>
+            <tbody>
+               <tr>
+                  <td class="varlistoption"><a name="mkvextract.description.global_tags"><span class="option">-T</span>, <span class="option">--no-track-tags</span></a><a class="headerlink" href="#mkvextract.description.global_tags" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Exports only tags that aren't track-specific.
+                        </p>
+                     </td>
+               </tr>
+            </tbody>
+         </table>
+         
+         
+         <p>
+            Тэгі запісаныя ў зададзены выхадны <span class="abbrev">XML</span>-файл, зразумелы для
+            <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a>. Калі ў файле няма тэгаў, то выхадны файл не створаны.
+            </p>
+         
+         
+         
+         <h2><a name="mkvextract.description.cuesheets">2.6. Рэжым вымання файлаў разметкі Cue</a><a class="headerlink" href="#mkvextract.description.cuesheets" title="Link to this heading">#</a></h2>
+         
+         
+         
+         <p>
+            Сінтаксіс: <span class="command">mkvextract <span class="parameter">імя-зыходнага-файла</span>
+               <span class="option">Сuesheet</span>
+               [<span class="parameter">параметры</span>]
+               <span class="parameter">імя-выхаднога-файла.Сue</span></span>
+            </p>
+         
+         
+         <p>
+            Cue sheet (файл разметкі) запісаны ў зададзены выхадны файл. Калі ў фале
+            няма раздзелаў або тэгаў, то выхадны файл не створаны.
+            </p>
+         
+         
+         
+         <h2><a name="mkvextract.description.timestamps_v2">2.7. Рэжым вымання меткі часу</a><a class="headerlink" href="#mkvextract.description.timestamps_v2" title="Link to this heading">#</a></h2>
+         
+         
+         
+         <p>
+            Сінтаксіс: <span class="command">mkvextract <span class="parameter">імя-зыходнага-файла</span>
+               <span class="option">меткі-часу_v2</span>
+               [<span class="parameter">параметры</span>]
+               <span class="parameter">TID1:імя-мэтавага-файла1</span>
+               [<span class="parameter">TID2:імя-мэтавага-файла2</span>
+               ...]</span>
+            </p>
+         
+         
+         <table class="variablelist">
+            <thead>
+               <tr>
+                  <th>Option</th>
+                  <th>Description</th>
+               </tr>
+            </thead>
+            <tbody>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.output_timestamps_v2"><span class="parameter">TID:выхадное-імя</span></a><a class="headerlink" href="#mkvpropedit.description.output_timestamps_v2" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Вымае меткі часу трэка з ID <span class="parameter">TID</span> у файла
+                        <span class="parameter">выхадное_імя</span> пры ўмове, што такі трэк утрымліваецца ў
+                        зыходным файле. Гэты параметр можна задаць некалькі разоў. ID трэкаў павінны
+                        быць такія ж як і пры вывадзе звестка камандай <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a> з параметрам
+                        <span class="option">--identify</span>.
+                        </p>
+                     
+                     
+                     <p>
+                        Прыклад:
+                        </p>
+                     
+                     
+                     <pre class="screen">$ mkvextract input.mkv timestamps_v2 1:ts-track1.txt 2:ts-track2.txt</pre>
+                     </td>
+               </tr>
+            </tbody>
+         </table>
+         
+         
+         
+         <h2><a name="mkvextract.description.cues">2.8. Рэжым вымання Cue</a><a class="headerlink" href="#mkvextract.description.cues" title="Link to this heading">#</a></h2>
+         
+         
+         
+         <p>
+            Сінтаксіс: <span class="command">mkvextract <span class="parameter">імя-зыходнага-файла</span>
+               <span class="option">Cue</span> [<span class="parameter">параметры</span>]
+               <span class="parameter">TID1:імя-мэтавага-файла1</span>
+               [<span class="parameter">TID2:імя-мэтавага-файла2</span>
+               ...]</span>
+            </p>
+         
+         
+         <table class="variablelist">
+            <thead>
+               <tr>
+                  <th>Option</th>
+                  <th>Description</th>
+               </tr>
+            </thead>
+            <tbody>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.output_cues"><span class="parameter">TID:імя-мэтавага-файла</span></a><a class="headerlink" href="#mkvpropedit.description.output_cues" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Вымае трэк з ID <span class="parameter">TID</span> у файла
+                        <span class="parameter">выхадное_імя</span> пры ўмове, што такі трэк утрымліваецца ў
+                        зыходным фале. Гэты параметр можна задаваць некалькі разоў. ID трэкаў
+                        павінен быць такім жа, як і пры вывадзе звестак камандай <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a> з
+                        параметрам <span class="option">--identify</span>, пры гэтым не павінны супадаць з
+                        лічбамі, якія ўтрымліваюцца ў элеменце <span class="classname">CueTrack</span>.
+                        </p>
+                     </td>
+               </tr>
+            </tbody>
+         </table>
+         
+         
+         <p>
+            Выхадны фармат прадстаўлены ў тэкставым выглядзе: адзін элемент
+            <span class="classname">CuePoint</span> на лінію з парай
+            <span class="literal">ключ=значэнне</span>. Калі элемент параметра не прадстаўлены ў
+            <span class="classname">CuePoint</span> (напр. <span class="classname">CueDuration</span>),
+            то замест значэння будзе працяжнік.
+            </p>
+         
+         
+         <p>
+            Прыклад:
+            </p>
+         
+         
+         <pre class="screen">timestamp=00:00:13.305000000 duration=- cluster_position=757741 relative_position=11</pre>
+         
+         
+         <p>Магчымыя ключы:</p>
+         
+         
+         <table class="variablelist">
+            <thead>
+               <tr>
+                  <th>Option</th>
+                  <th>Description</th>
+               </tr>
+            </thead>
+            <tbody>
+               <tr>
+                  <td class="varlistoption">метка часу</td>
+                  <td>
+                     
+                     <p>Даўжыня кропкі Сue з дакладнасцю да нанасекунд. Фармат:
+                        <span class="literal">HH:MM:SS.nnnnnnnnn</span>. Гэты элемент заўсёды задаецца.</p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption">даўжыня</td>
+                  <td>
+                     
+                     <p>Даўжыня кропкі Сue з дакладнасцю да нанасекунд. Фармат:
+                        <span class="literal">HH:MM:SS.nnnnnnnnn</span>.</p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption">cluster_position</td>
+                  <td>
+                     
+                     <p>Абсалютная пазіцыя ў байтах унутры файла <span class="productname">Matroska</span><sup>(tm)</sup>, з якой пачынаецца
+                        кластар, які ўтрымлівае спасылачны элемент.</p>
+                     
+                     
+                     <div class="note">
+                        <p class="note-title">Note:</p>
+                        
+                        <p>Унутры файла <span class="productname">Matroska</span><sup>(tm)</sup> <span class="classname">CueClusterPosition</span>
+                           знаходзіцца адносна пачатковага змяшчэння дадзеных сегмента. Аднак значэнне,
+                           якое выводзіцца ў рэжыме вымання Сue <span class="productname">mkvextract</span>(1), ўжо ўтрымлівае гэтае
+                           змяшчэнне і з'яўляецца абслаютным змяшчэннем ад пачатка файла.</p>
+                        </div>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption">relative_position</td>
+                  <td>
+                     
+                     <p>Адносная пазіцыя ў байтах унутры кластара, дзе пачынаюцца элементы
+                        <span class="classname">BlockGroup</span> або <span class="classname">SimpleBlock</span>, на
+                        якія спачылаецца Сue-кропка.</p>
+                     
+                     
+                     <div class="note">
+                        <p class="note-title">Note:</p>
+                        
+                        <p>Унутры файла <span class="productname">Matroska</span><sup>(tm)</sup> <span class="classname">CueRelativePosition</span> адносна
+                           пачатковага змяшчэння дадзеных кластара. Аднак значэнне, якое выводзіцца
+                           рэжымам вымання меткі <span class="productname">mkvextract</span>(1), залежыць ад ідэнтыфікатара
+                           кластара. Абсалютная пазіцыя ўнутры файла можна вылічыць дабаўленнем
+                           <span class="literal">cluster_position</span> і <span class="literal">relative_position</span>.</p>
+                        </div>
+                     </td>
+               </tr>
+            </tbody>
+         </table>
+         
+         
+         <p>
+            Прыклад:
+            </p>
+         
+         
+         <pre class="screen">$ mkvextract input.mkv Сues 1:Сues-track1.txt 2:Сues-track2.txt</pre>
+         
+         
+         <h1><a name="mkvextract.examples">3. Прыклады</a><a class="headerlink" href="#mkvextract.examples" title="Link to this heading">#</a></h1>
+         
+         
+         
+         <p>
+            Выманне раздзелаў і тэгаў у іхнія адпаведныя фарматы <span class="abbrev">XML</span> за адзін раз:
+            </p>
+         
+         
+         <pre class="screen">$ mkvextract фільм.mkv chapters раздзелы-фільма.xml tags тэгі-фільма.xml</pre>
+         
+         
+         <p>
+            Выманне пары трэкаў і іхнія адпаведныя меткі часу за адзін раз:
+            </p>
+         
+         
+         <pre class="screen">$ mkvextract "Іншы фільм.mkv" tracks 0:video.h265 "1:асноўнае аўдыя.aac" "2:каментарыі рэжысёра.aac" меткі часу_v2 "0:меткі часу відэа.txt" "1:меткі часу асноўнага аўдыя.txt" "2:меткі часу каментарыяў рэжысёра.txt"</pre>
+         
+         
+         <p>
+            Выманне раздзелаў у фармат Ogg/OGM і перакадзіраванне трэка тэкставых
+            субцітраў у іншую кадзіроўку:
+            </p>
+         
+         
+         <pre class="screen">$ mkvextract "Мой фільм.mkv" chapters --simple "Мае раздзелы.txt" tracks -c MS-ANSI "2:Мае субцітры.srt"</pre>
+         
+         <h1><a name="mkvextract.text_files_and_charsets">4. Канвертацыя тэкставых файлаў і кадзіровак</a><a class="headerlink" href="#mkvextract.text_files_and_charsets" title="Link to this heading">#</a></h1>
+         
+         
+         
+         <p>
+            Падрабязнае абмеркаванне таго, як усе інструменты пакета MKVToolNix
+            апрацоўваюць канвертацыю набораў сімвалаў, кадзіроўку ўводу/вываду,
+            кадзіроўку каманднага радка і кадзіроўку кансолі, глядзіце ў секцыі з
+            ідэнтычнай назвай у даведкавай старонцы <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a>.
+            </p>
+         
+         <h1><a name="mkvextract.output_file_formats">5. Фарматы файлаў на выхадзе</a><a class="headerlink" href="#mkvextract.output_file_formats" title="Link to this heading">#</a></h1>
+         
+         
+         
+         <p>
+            Рашэнне аб фармаце файла на выхадзе выбіраецца на аснове тыпу трэка, а не
+            пашырэння выхаднога файла. На дадзены момант падтрымлліваюцца наступныя тыпы
+            трэкаў:
+            </p>
+         
+         
+         <table class="variablelist">
+            <thead>
+               <tr>
+                  <th>Option</th>
+                  <th>Description</th>
+               </tr>
+            </thead>
+            <tbody>
+               <tr>
+                  <td class="varlistoption">A_AAC/MPEG2/*, A_AAC/MPEG4/*, A_AAC</td>
+                  <td>
+                     
+                     <p>
+                        Усе файлы <span class="abbrev">AAC</span> будуць запісаныя ў файл <span class="abbrev">AAC</span>
+                        з загалоўкамі <span class="abbrev">ADTS</span> перад кожным пакетам. Загалоўкі
+                        <span class="abbrev">ADTS</span> не будуць змяшчаць састарэлае поле асаблівага
+                        назначэння.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption">A_AC3, A_EAC3</td>
+                  <td>
+                     
+                     <p>
+                        Гэта будзе вынята ў неапрацаваныя файлы <span class="abbrev">AC-3</span>.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption">A_ALAC</td>
+                  <td>
+                     
+                     <p>
+                        Трэкі <span class="productname">ALAC</span><sup>(tm)</sup> запісаныя ў файлы
+                        <span class="productname">CAF</span><sup>(tm)</sup>.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption">A_DTS</td>
+                  <td>
+                     
+                     <p>
+                        Гэта будзе вынята ў неапрацаваныя файлы <span class="abbrev">DTS</span>.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption">A_FLAC</td>
+                  <td>
+                     
+                     <p>
+                        Трэкі <span class="productname">FLAC</span><sup>(tm)</sup> запісаныя ў файлы
+                        <span class="productname">FLAC</span><sup>(tm)</sup>.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption">A_MPEG/L2</td>
+                  <td>
+                     
+                     <p>
+                        Патокі MPEG-1 Audio Layer II будуць вынятыя ў неапрацаваныя файлы
+                        <span class="abbrev">MP2</span>.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption">A_MPEG/L3</td>
+                  <td>
+                     
+                     <p>
+                        Гэта будзе вынята ў неапрацаваныя файлы <span class="abbrev">MP3</span>.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption">A_OPUS</td>
+                  <td>
+                     
+                     <p>
+                        Трэкі <span class="productname">Opus</span><sup>(tm)</sup> запісаныя ў файлы
+                        <span class="productname">OggOpus</span><sup>(tm)</sup>.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption">A_PCM/INT/LIT, A_PCM/INT/BIG</td>
+                  <td>
+                     
+                     <p>
+                        Неапрацаваныя даныя <span class="abbrev">PCM</span> будуць запісаныя ў файл
+                        <span class="abbrev">WAV</span>. Дадзеныя ў выглядзе цэлалікавых з вялікім канцом
+                        будуць сканвертаваныя ў даныя з малым канцом у працэсе.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption">A_REAL/*</td>
+                  <td>
+                     
+                     <p>
+                        Трэкі <span class="productname">RealAudio</span><sup>(tm)</sup> запісаныя ў файлы
+                        <span class="productname">RealMedia</span><sup>(tm)</sup>.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption">A_TRUEHD, A_MLP</td>
+                  <td>
+                     
+                     <p>
+                        Гэта будзе вынята ў неапрацаваныя файлы
+                        <span class="abbrev">TrueHD</span>/<span class="abbrev">MLP</span>.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption">A_TTA1</td>
+                  <td>
+                     
+                     <p>
+                        Трэкі <span class="productname">TrueAudio</span><sup>(tm)</sup> запісваюцца ў файлы
+                        <span class="abbrev">TTA</span>. Майце на ўвазе, што праз абмежаваную дакладнасць метак
+                        часу <span class="productname">Matroska</span><sup>(tm)</sup>, вынятыя загалоўкі файлаў будуць рознымі, як зададзена ў
+                        дзух палях <span class="varname">data_length</span> (сумарная колькасць узораў у
+                        файле) і <span class="abbrev">CRC</span>.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption">A_VORBIS</td>
+                  <td>
+                     
+                     <p>
+                        Аўдыяфайлы Vorbis будуць запісаныя ў файл <span class="productname">OggVorbis</span><sup>(tm)</sup>.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption">A_WAVPACK4</td>
+                  <td>
+                     
+                     <p>
+                        Трэкі <span class="productname">WavPack</span><sup>(tm)</sup> запісаныя ў файлы
+                        <span class="productname">WV</span><sup>(tm)</sup>.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption">S_HDMV/PGS</td>
+                  <td>
+                     
+                     <p>
+                        Субцітры <span class="abbrev">PGS</span> будуць запісаныя ў файлы <span class="abbrev">SUP</span>.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption">S_HDMV/TEXTST</td>
+                  <td>
+                     
+                     <p>
+                        Субцітры <span class="abbrev">TextST</span> будуць запісаныя в виде файла, созданного
+                        специально для <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a> и <span class="productname">mkvextract</span>(1).
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption">S_KATE</td>
+                  <td>
+                     
+                     <p>
+                        Патокі <span class="productname">Kate</span><sup>(tm)</sup> будуць запісаныя ў кантэйнер
+                        <span class="productname">Ogg</span><sup>(tm)</sup>.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption">S_TEXT/SSA, S_TEXT/ASS, S_SSA, S_ASS</td>
+                  <td>
+                     
+                     <p>
+                        Тэкставыя субцітры <span class="abbrev">SSA</span> і <span class="abbrev">ASS</span> будуць
+                        запісаныя ў выглядзе файлаў <span class="abbrev">SSA</span>/<span class="abbrev">ASS</span>
+                        адпаведна.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption">S_TEXT/UTF8, S_TEXT/ASCII</td>
+                  <td>
+                     
+                     <p>
+                        Простыя тэкставыя субцітры будуць запісаныя ў выглядзе файлаў
+                        <span class="abbrev">SRT</span>.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption">S_VOBSUB</td>
+                  <td>
+                     
+                     <p>
+                        Субцітры <span class="productname">VobSub</span><sup>(tm)</sup> будуць запісаныя ў выглядзе
+                        файлаў <span class="abbrev">SUB</span> с соответствующими файлами индексов в виде
+                        <span class="abbrev">IDX</span>.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption">S_TEXT/USF</td>
+                  <td>
+                     
+                     <p>
+                        Тэкставыя субцітры <span class="abbrev">USF</span> будуць запісаныя ў выглядзе файлаў
+                        <span class="abbrev">USF</span>.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption">S_TEXT/WEBVTT</td>
+                  <td>
+                     
+                     <p>
+                        Тэкставыя субцітры <span class="abbrev">WebVTT</span> будуць запісаныя ў выглядзе
+                        файлаў <span class="abbrev">WebVTT</span>.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption">V_MPEG1, V_MPEG2</td>
+                  <td>
+                     
+                     <p>
+                        Відэатрэкі <span class="abbrev">MPEG-1</span> і <span class="abbrev">MPEG-2</span> будуць
+                        запісаныя ў выглядзе элементарных патокаў <span class="abbrev">MPEG</span>.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption">V_MPEG4/ISO/AVC</td>
+                  <td>
+                     
+                     <p>
+                        Відэатрэкі <span class="abbrev">H.264</span> /  <span class="abbrev">AVC</span> будуць запісаныя ў
+                        выглядзе элементарных патокаў <span class="abbrev">H.264</span>, якія ў далейшым могуць
+                        быць апрацаваныя, напрыклад, праз <span class="productname">MP4Box</span><sup>(tm)</sup> з пакета
+                        <span class="productname">GPAC</span><sup>(tm)</sup>.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption">V_MPEG4/ISO/HEVC</td>
+                  <td>
+                     
+                     <p>
+                        Відэатрэкі <span class="abbrev">H.265</span> /  <span class="abbrev">EVC</span> будуць запісаныя ў
+                        выглядзе элементарных патокаў <span class="abbrev">H.265</span>, якія ў далейшым могуць
+                        быць апрацаваныя, напрыклад, праз <span class="productname">MP4Box</span><sup>(tm)</sup> з пакета
+                        <span class="productname">GPAC</span><sup>(tm)</sup>.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption">V_MS/VFW/FOURCC</td>
+                  <td>
+                     
+                     <p>
+                        Відэатрэкі з фіксаванай <span class="abbrev">кадравай частатой</span> і з дадзеным
+                        <span class="classname">CodecID</span> запісаныя ў выглядзе файлаў
+                        <span class="abbrev">AVI</span>.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption">V_REAL/*</td>
+                  <td>
+                     
+                     <p>
+                        Трэкі <span class="productname">RealVideo</span><sup>(tm)</sup> запісаныя ў файлы
+                        <span class="productname">RealMedia</span><sup>(tm)</sup>.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption">V_THEORA</td>
+                  <td>
+                     
+                     <p>
+                        Патокі <span class="productname">Theora</span><sup>(tm)</sup> будуць запісаныя ў кантэйнер
+                        <span class="productname">Ogg</span><sup>(tm)</sup>
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption">V_VP8, V_VP9</td>
+                  <td>
+                     
+                     <p>
+                        Трэкі <span class="abbrev">VP8</span> / <span class="abbrev">VP9</span> запісаныя ў файлы
+                        <span class="abbrev">IVF</span>.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption">Тэгі</td>
+                  <td>
+                     
+                     <p>
+                        Тэгі канвертуюцца ў фармат <span class="abbrev">XML</span>. Гэты ж фармат <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a> выкарыстоўвае для
+                        чытання тэгаў.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption">Далучэнні</td>
+                  <td>
+                     
+                     <p>
+                        Далучэнні запісваюцца ў выхадны файл як ёсць. Ніякай канвертацыі не
+                        выконваецца.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption">Раздзелы</td>
+                  <td>
+                     
+                     <p>
+                        Раздзелы канвертуюцца ў фармат <span class="abbrev">XML</span>. Гэты ж фармат <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a>
+                        выкарыстоўваецца для чытання раздзелаў. Або можна выняць урэзаную версію ў
+                        спрошчаны стылевы фармат <span class="abbrev">OGM</span>.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption">Меткі часу</td>
+                  <td>
+                     
+                     <p>
+                        Меткі часу спачатку сартуюцца і затым выводзяцца ў фармаце метак часу v2,
+                        сумяшальным для выкарыстання ў <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a>. Выманне ў іншыя фарматы (v1, v3 і
+                        v4) не падтрымліваецца.
+                        </p>
+                     </td>
+               </tr>
+            </tbody>
+         </table>
+         
+         <h1><a name="d4e1476">6. Коды завяршэння</a><a class="headerlink" href="#d4e1476" title="Link to this heading">#</a></h1>
+         
+         
+         
+         <p>
+            <span class="productname">mkvextract</span>(1) завяршаецца з адным з трох кодаў:
+            </p>
+         
+         
+         <ul>
+            
+            <li>
+               
+               <p>
+                  <span class="constant">0</span> -- Гэты код завяршэння азначае, што выманне
+                  скончылася паспяхова.
+                  </p>
+               </li>
+            
+            
+            <li>
+               
+               <p>
+                  <span class="constant">1 </span>-- У гэтым выпадку <span class="productname">mkvextract</span>(1) выдаў хаця б адно
+                  папярэджанне, аднак выманне працягнулася. Папярэджанню папярэднічае тэкст
+                  '<span class="literal">Warning:</span>'. У залежнасці ад узніклых памылак, выніковыя
+                  файлы могуць быць або цэлымі, або пашкоджанымі. Карыстальніку рэкамендуецца
+                  звярнуць увагу на само папярэджанне і праверыць выніковыя файлы.
+                  </p>
+               </li>
+            
+            
+            <li>
+               
+               <p>
+                  <span class="constant">2</span> -- Гэты код завяршэння выкарыстоўваецца ў выніку
+                  ўзнікнення памылкі.  <span class="productname">mkvextract</span>(1) спыняе працу адразу пасля вываду
+                  паведамлення аб памылцы. Памылкі могуць узнікнуць праз памылковыя параметры
+                  каманднага радка, праз памылкі чытання/запісу або проста праз пашкоджаныя
+                  файлы.
+                  </p>
+               </li>
+            </ul>
+         
+         <h1><a name="mkvextract.environment_variables">7. Пераменныя асяроддзя</a><a class="headerlink" href="#mkvextract.environment_variables" title="Link to this heading">#</a></h1>
+         
+         
+         
+         <p>
+            <span class="productname">mkvextract</span>(1) выкарыстоўвае стандартныя пераменныя, якія вызначаюць сістэмную
+            мову (напрыклад: <span class="varname">LANG</span> і сямейства
+            <span class="varname">LC_*</span>). Дадатковыя пераменныя:
+            </p>
+         
+         
+         <table class="variablelist">
+            <thead>
+               <tr>
+                  <th>Option</th>
+                  <th>Description</th>
+               </tr>
+            </thead>
+            <tbody>
+               <tr>
+                  <td class="varlistoption"><a name="mkvextract.environment_variables.debug"><span class="varname">MKVEXTRACT_DEBUG</span>, <span class="varname">MKVTOOLNIX_DEBUG</span> і
+                        яго кароткая форма <span class="varname">MTX_DEBUG</span></a><a class="headerlink" href="#mkvextract.environment_variables.debug" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>Змесціва апрацоўваецца так, каб калі б яно было перададзенае праз параметр
+                        <a href="#mkvextract.description.debug">--debug</a>.</p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvextract.environment_variables.engage"><span class="varname">MKVEXTRACT_ENGAGE</span>, <span class="varname">MKVTOOLNIX_ENGAGE</span> і
+                        яго кароткая форма <span class="varname">MTX_ENGAGE</span></a><a class="headerlink" href="#mkvextract.environment_variables.engage" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>Змесціва апрацоўваецца так, каб калі б яно было перададзенае праз параметр
+                        <a href="#mkvextract.description.engage">--engage</a>.</p>
+                     </td>
+               </tr>
+            </tbody>
+         </table>
+         
+         <h1><a name="mkvextract.seealso">8. Глядзіце таксама</a><a class="headerlink" href="#mkvextract.seealso" title="Link to this heading">#</a></h1>
+         
+         
+         <p>
+            <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a>, <a href="mkvinfo.html"><span class="productname">mkvinfo</span>(1)</a>, <a href="mkvpropedit.html"><span class="productname">mkvpropedit</span>(1)</a>, <a href="mkvtoolnix-gui.html"><span class="productname">mkvtoolnix-gui</span>(1)</a>
+            </p>
+         
+         <h1><a name="mkvextract.www">9. Хатняя старонка</a><a class="headerlink" href="#mkvextract.www" title="Link to this heading">#</a></h1>
+         
+         
+         <p>
+            Апошняя версія праграмы заўсёды даступная на <a href="https://mkvtoolnix.download/">хатняй старонцы MKVToolNix</a>.
+            </p>
+         </div>
+   </body>
+</html>

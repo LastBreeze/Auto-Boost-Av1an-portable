@@ -1,0 +1,1071 @@
+<!DOCTYPE html
+  PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
+<html>
+   <head>
+      <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+      <title>mkvpropedit -- 완전한 remux 없이 기존 Matroska 파일의 속성 수정</title>
+      <link rel="stylesheet" type="text/css" href="mkvtoolnix-doc.css">
+   </head>
+   <body>
+      <div class="heading">mkvpropedit -- 완전한 remux 없이 기존 <span class="productname">Matroska</span><sup>(tm)</sup> 파일의 속성 수정</div>
+      <hr>
+      <div id="toc" class="toc">
+         <h1>Table of contents</h1>
+         <ul>
+            <li><a href="#mkvpropedit.synopsis">1. 개요</a></li>
+            <li><a href="#mkvpropedit.description">2. 설명</a></li>
+            <li><a href="#mkvpropedit.edit_selectors">3. 선택기 편집</a></li>
+            <li><a href="#mkvpropedit.attachment_selectors">4. 첨부 파일 선택기</a></li>
+            <li><a href="#mkvpropedit.language_handling">5. Language handling</a></li>
+            <li><a href="#mkvpropedit.examples">6. 보기</a></li>
+            <li><a href="#d4e1320">7. 종료 코드</a></li>
+            <li><a href="#mkvinfo.text_files_and_charsets">8. 텍스트 파일과 문자셋 변환</a></li>
+            <li><a href="#mkvpropedit.environment_variables">9. 환경 변수</a></li>
+            <li><a href="#mkvpropedit.seealso">10. 더 보기</a></li>
+            <li><a href="#mkvpropedit.www">11. WWW</a></li>
+         </ul>
+      </div>
+      <div class="content">
+         <h1><a name="mkvpropedit.synopsis">1. 개요</a><a class="headerlink" href="#mkvpropedit.synopsis" title="Link to this heading">#</a></h1>
+         
+         
+         <div class="cmdsynopsis"><span class="commandname">mkvpropedit</span> options {source-filename} {actions}</div>
+         
+         <h1><a name="mkvpropedit.description">2. 설명</a><a class="headerlink" href="#mkvpropedit.description" title="Link to this heading">#</a></h1>
+         
+         
+         <p>
+            이 프로그램은 기존 <span class="productname">Matroska</span><sup>(tm)</sup> 파일을 분석하고 일부 속성을 수정합니다. 그런 다음 수정 사항을 기존 파일에 기록합니다. 변경할
+            수 있는 속성에는 세그먼트 정보 요소(예: 제목)와 트랙 헤더(예: 언어 코드, '기본 트랙' 플래그 또는 이름)가 있습니다.
+            </p>
+         
+         
+         <p>
+            옵션:
+            </p>
+         
+         
+         <table class="variablelist">
+            <thead>
+               <tr>
+                  <th>Option</th>
+                  <th>Description</th>
+               </tr>
+            </thead>
+            <tbody>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.list_property_names"><span class="option">-l</span>, <span class="option">--list-property-names</span></a><a class="headerlink" href="#mkvpropedit.description.list_property_names" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        알려진 편집 가능한 모든 속성 이름, 유형(문자열, 정수, 부울 등) 및 간단한 설명을 나열합니다. 프로그램이 나중에 종료됩니다. 따라서
+                        <span class="parameter">source-filename</span> 매개 변수를 제공할 필요가 없습니다.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.parse_mode"><span class="option">-p</span>, <span class="option">--parse-mode</span>
+                        <span class="parameter">mode</span></a><a class="headerlink" href="#mkvpropedit.description.parse_mode" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        구문 분석 모드를 설정합니다. '<span class="parameter">mode</span>' 매개 변수는
+                        '<span class="literal">fast</span>'(기본값이기도 함) 또는 '<span class="literal">full</span>'일 수
+                        있습니다. '<span class="literal">fast</span>' 모드는 전체 파일을 구문 분석하지 않고 원본 파일의 필수 요소를 찾기 위해 메타
+                        검색 요소를 사용합니다. 모든 경우에 99%는 이것으로 충분하다. 그러나 메타 탐색 요소를 포함하지 않거나 손상된 파일의 경우 사용자는
+                        '<span class="literal">full</span>' 구문 분석 모드를 설정해야 할 수 있습니다. 파일 전체 검색에는 몇 분 정도 걸릴 수
+                        있지만 빠른 검색에는 몇 초밖에 걸리지 않습니다.
+                        </p>
+                     </td>
+               </tr>
+            </tbody>
+         </table>
+         
+         
+         <p>
+            트랙 및 세그먼트 정보 속성을 다루는 작업:
+            </p>
+         
+         
+         <table class="variablelist">
+            <thead>
+               <tr>
+                  <th>Option</th>
+                  <th>Description</th>
+               </tr>
+            </thead>
+            <tbody>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.edit"><span class="option">-e</span>, <span class="option">--edit</span> <span class="parameter">selector</span></a><a class="headerlink" href="#mkvpropedit.description.edit" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        다음 모든 <a href="#mkvpropedit.description.add">add</a>, <a href="#mkvpropedit.description.set">set</a>및 <a href="#mkvpropedit.description.delete">delete</a> 작업이 작동하는 <span class="productname">Matroska</span><sup>(tm)</sup>
+                        파일 섹션(세그먼트 정보 또는 특정 트랙의 헤더)을 설정합니다. 이 옵션은 둘 이상의 요소를 수정하기 위해 여러 번 사용할 수 있습니다.
+                        </p>
+                     
+                     
+                     <p>
+                        기본적으로 <span class="productname">mkvpropedit</span>(1)는 세그먼트 정보 섹션을 편집합니다.
+                        </p>
+                     
+                     
+                     <p>
+                        구문에 대한 전체 설명은 <a href="#mkvpropedit.edit_selectors">edit
+                           selectors</a>섹션을 참조하십시오.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.add"><span class="option">-a</span>, <span class="option">--add</span>
+                        <span class="parameter">name</span>=<span class="parameter">value</span></a><a class="headerlink" href="#mkvpropedit.description.add" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        값 <span class="parameter">value</span>를 사용하여 속성 <span class="parameter">name</span>을
+                        추가합니다. 해당 속성이 이미 있는 경우에도 속성이 추가됩니다. 대부분의 속성은 고유하며 두 번 이상 발생할 수 없습니다.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.set"><span class="option">-s</span>, <span class="option">--set</span>
+                        <span class="parameter">name</span>=<span class="parameter">value</span></a><a class="headerlink" href="#mkvpropedit.description.set" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        속성 <span class="parameter">name</span>의 모든 항목을 값 <span class="parameter">value</span>로
+                        설정합니다. 해당 속성이 없으면 추가됩니다.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.delete"><span class="option">-d</span>, <span class="option">--delete</span> <span class="parameter">name</span></a><a class="headerlink" href="#mkvpropedit.description.delete" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        속성 <span class="parameter">name</span>의 모든 항목을 삭제합니다. 일부 속성은 필수이며 삭제할 수 없습니다.
+                        </p>
+                     </td>
+               </tr>
+            </tbody>
+         </table>
+         
+         
+         <p>
+            태그 및 장을 처리하는 작업:
+            </p>
+         
+         
+         <table class="variablelist">
+            <thead>
+               <tr>
+                  <th>Option</th>
+                  <th>Description</th>
+               </tr>
+            </thead>
+            <tbody>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.tags"><span class="option">-t</span>, <span class="option">--tags</span>
+                        <span class="parameter">selector</span>:<span class="parameter">filename</span></a><a class="headerlink" href="#mkvpropedit.description.tags" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        파일의 태그를 <span class="filename">filename</span>의 태그로 추가하거나 바꾸거나,
+                        <span class="filename">filename</span>이 비어 있으면 제거합니다. <span class="productname">mkvpropedit</span>(1)는 <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a>가 읽는
+                        것과 동일한 XML 태그 형식도 읽습니다.
+                        </p>
+                     
+                     
+                     <p>
+                        <span class="parameter">selector</span>는 <span class="constant">all</span>,
+                        <span class="constant">global</span> 또는 <span class="constant">track</span> 단어 중 하나여야
+                        합니다. <span class="constant">all</span>의 경우 <span class="productname">mkvpropedit</span>(1)는 파일의 모든 태그를 바꾸거나
+                        제거합니다. global을 사용할 경우 <span class="constant">global</span> 태그만 교체되거나 제거됩니다.
+                        </p>
+                     
+                     
+                     <p>
+                        <span class="constant">track</span>을 사용하면 <span class="productname">mkvpropedit</span>(1)가 특정 트랙의 태그를 대체합니다. 또한
+                        <span class="filename">filename</span>에서 읽은 태그가 동일한 트랙에 할당됩니다. 트랙은 <a href="#mkvpropedit.edit_selectors">edit selectors</a>가 지정된 것과 동일한 방식으로
+                        지정됩니다(아래 참조). 예를 들어 <span class="code">--tags track:a1:new-audio-tags.xml</span>입니다.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.add_track_statistics_tags"><span class="option">--add-track-statistics-tags</span></a><a class="headerlink" href="#mkvpropedit.description.add_track_statistics_tags" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        파일의 모든 트랙에 대한 통계를 계산하고 해당 트랙에 대한 새 통계 태그를 추가합니다. 파일에 이미 이러한 태그가 포함되어 있으면 해당
+                        태그가 업데이트됩니다.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.delete_track_statistics_tags"><span class="option">--delete-track-statistics-tags</span></a><a class="headerlink" href="#mkvpropedit.description.delete_track_statistics_tags" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        파일에서 기존의 모든 추적 통계 태그를 삭제합니다. 파일에 추적 통계 태그가 없으면 수정되지 않습니다.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.chapters"><span class="option">-c</span>, <span class="option">--chapters</span>
+                        <span class="parameter">filename</span></a><a class="headerlink" href="#mkvpropedit.description.chapters" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        파일의 장을 <span class="filename">filename</span>의 장으로 추가하거나 바꾸거나,
+                        <span class="filename">filename</span>이 비어 있으면 제거하십시오. <span class="productname">mkvpropedit</span>(1)는 <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a>와 동일한
+                        XML 및 간단한 챕터 형식을 읽습니다.
+                        </p>
+                     </td>
+               </tr>
+            </tbody>
+         </table>
+         
+         
+         <p>
+            첨부 파일 처리 동작:
+            </p>
+         
+         
+         <table class="variablelist">
+            <thead>
+               <tr>
+                  <th>Option</th>
+                  <th>Description</th>
+               </tr>
+            </thead>
+            <tbody>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.add_attachment"><span class="option">--add-attachment</span> <span class="parameter">filename</span></a><a class="headerlink" href="#mkvpropedit.description.add_attachment" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        <span class="parameter">filename</span>에서 새 첨부 파일을 추가합니다.
+                        </p>
+                     
+                     
+                     <p>
+                        <span class="option">--attachment-name</span> 옵션이 이 선택사항 이전에 사용된 경우, 해당 값은 새 첨부 파일의
+                        이름으로 사용됩니다. 그렇지 않으면 <span class="parameter">filename</span>에서 파생됩니다.
+                        </p>
+                     
+                     
+                     <p>
+                        <span class="option">--attachment-mime-type</span> 선택사항이 이 선택사항 이전에 사용된 경우, 해당 값은 새로운
+                        첨부파일의 MIME 유형으로 사용됩니다. 그렇지 않으면 <span class="parameter">filename</span>의 내용에서 자동으로
+                        탐지됩니다.
+                        </p>
+                     
+                     
+                     <p>
+                        <span class="option">--attachment-description</span> 옵션이 이 선택사항 이전에 사용된 경우, 해당 값은 새 첨부
+                        파일의 설명으로 사용됩니다. 그렇지 않으면 설명이 설정되지 않습니다.
+                        </p>
+                     
+                     
+                     <p>
+                        <span class="option">--attachment-uid</span> 옵션이 이 선택사항 이전에 사용된 경우, 해당 값은 새 첨부 파일의 UID로
+                        사용됩니다. 그렇지 않으면 랜덤 UID가 자동으로 생성됩니다.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.replace_attachment"><span class="option">--replace-attachment</span>
+                        <span class="parameter">selector</span><span class="literal">:</span><span class="parameter">filename</span></a><a class="headerlink" href="#mkvpropedit.description.replace_attachment" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        <span class="parameter">selector</span>와 일치하는 첨부 파일을 <span class="parameter">filename</span>
+                        파일로 바꿉니다. 둘 이상의 기존 첨부 파일이 <span class="parameter">selector</span>와 일치하는 경우, 모든 첨부
+                        파일의 내용이 <span class="parameter">filename</span>의 내용으로 바뀝니다.
+                        </p>
+                     
+                     
+                     <p>
+                        <span class="parameter">selector</span>는 네 가지 형태 중 하나를 가질 수 있습니다. 아래 <a href="#mkvpropedit.attachment_selectors">attachment selectors</a> 섹션에서
+                        설명합니다.
+                        </p>
+                     
+                     
+                     <p>
+                        <span class="option">--attachment-name</span> 옵션이 이 선택사항 이전에 사용된 경우, 이 값은 수정된 각 첨부파일의 새
+                        이름으로 설정됩니다. 그렇지 않으면 이름이 바뀌지 않습니다.
+                        </p>
+                     
+                     
+                     <p>
+                        <span class="option">--attachment-mime-type</span> 옵션이 이 선택사항 이전에 사용된 경우, 이 값은 수정된 각
+                        첨부파일에 대한 새 MIME 유형으로 설정됩니다. 그렇지 않으면 MIME 유형은 변경되지 않습니다.
+                        </p>
+                     
+                     
+                     <p>
+                        <span class="option">--attachment-description</span> 옵션이 이 선택사항 이전에 사용된 경우, 이 값은 수정된 각
+                        첨부파일에 대한 새 설명으로 설정됩니다. 그렇지 않으면 설명이 변경되지 않습니다.
+                        </p>
+                     
+                     
+                     <p>
+                        <span class="option">--attachment-uid</span> 옵션이 이 선택사항 이전에 사용된 경우, 이 값은 수정된 각 첨부파일의 새
+                        UID로 설정됩니다. 그렇지 않으면 UIDs가 바뀌지 않습니다.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.update_attachment"><span class="option">--update-attachment</span> <span class="parameter">selector</span></a><a class="headerlink" href="#mkvpropedit.description.update_attachment" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        <span class="parameter">selector</span>와 일치하는 하나 이상의 첨부 파일의 속성을 설정합니다. 둘 이상의 기존 첨부
+                        파일이 <span class="parameter">selector</span>와 일치하는 경우 해당 모든 속성이 업데이트됩니다.
+                        </p>
+                     
+                     
+                     <p>
+                        <span class="parameter">selector</span>는 네 가지 형태 중 하나를 가질 수 있습니다. 아래 <a href="#mkvpropedit.attachment_selectors">attachment selectors</a> 섹션에서
+                        설명합니다.
+                        </p>
+                     
+                     
+                     <p>
+                        <span class="option">--attachment-name</span> 옵션이 이 선택사항 이전에 사용된 경우, 이 값은 수정된 각 첨부파일의 새
+                        이름으로 설정됩니다. 그렇지 않으면 이름이 바뀌지 않습니다.
+                        </p>
+                     
+                     
+                     <p>
+                        <span class="option">--attachment-mime-type</span> 옵션이 이 선택사항 이전에 사용된 경우, 이 값은 수정된 각
+                        첨부파일에 대한 새 MIME 유형으로 설정됩니다. 그렇지 않으면 MIME 유형은 변경되지 않습니다.
+                        </p>
+                     
+                     
+                     <p>
+                        <span class="option">--attachment-description</span> 옵션이 이 선택사항 이전에 사용된 경우, 이 값은 수정된 각
+                        첨부파일에 대한 새 설명으로 설정됩니다. 그렇지 않으면 설명이 변경되지 않습니다.
+                        </p>
+                     
+                     
+                     <p>
+                        <span class="option">--attachment-uid</span> 옵션이 이 선택사항 이전에 사용된 경우, 이 값은 수정된 각 첨부파일의 새
+                        UID로 설정됩니다. 그렇지 않으면 UIDs가 바뀌지 않습니다.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.delete_attachment"><span class="option">--delete-attachment</span> <span class="parameter">selector</span></a><a class="headerlink" href="#mkvpropedit.description.delete_attachment" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        <span class="parameter">selector</span>와 일치하는 첨부 파일을 하나 이상 삭제합니다.
+                        </p>
+                     
+                     
+                     <p>
+                        <span class="parameter">selector</span>는 네 가지 형태 중 하나를 가질 수 있습니다. 아래 <a href="#mkvpropedit.attachment_selectors">attachment selectors</a> 섹션에서
+                        설명합니다.
+                        </p>
+                     </td>
+               </tr>
+            </tbody>
+         </table>
+         
+         
+         <p>
+            첨부 작업 옵션:
+            </p>
+         
+         
+         <table class="variablelist">
+            <thead>
+               <tr>
+                  <th>Option</th>
+                  <th>Description</th>
+               </tr>
+            </thead>
+            <tbody>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.attachment_name"><span class="option">--attachment-name</span> <span class="parameter">name</span></a><a class="headerlink" href="#mkvpropedit.description.attachment_name" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        다음 <span class="option">--add-attachment</span> 또는
+                        <span class="option">--replace-attachment</span> 작업에 사용할 이름을 설정합니다.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.attachment_mime_type"><span class="option">--attachment-mime-type</span> <span class="parameter">mime-type</span></a><a class="headerlink" href="#mkvpropedit.description.attachment_mime_type" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        다음 <span class="option">--add-attachment</span> 또는
+                        <span class="option">--replace-attachment</span> 작업에 사용할 MIME을 설정합니다.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.attachment_description"><span class="option">--attachment-description</span> <span class="parameter">설명</span></a><a class="headerlink" href="#mkvpropedit.description.attachment_description" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        다음 <span class="option">--add-attachment</span> 또는
+                        <span class="option">--replace-attachment</span> 작업에 사용할 설명을 설정합니다.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.enable_legacy_font_mime_types"><span class="option">--enable-legacy-font-mime-types</span></a><a class="headerlink" href="#mkvpropedit.description.enable_legacy_font_mime_types" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        특정 유형의 글꼴 첨부 파일에 대해 기존 <span class="abbrev">MIME</span> 유형을 사용할 수 있습니다. 예를 들어 TrueType
+                        글꼴에는 '<span class="literal">fonts/ttf</span>' 대신
+                        '<span class="literal">application/x-truetype-font</span>'가 사용됩니다.
+                        </p>
+                     
+                     
+                     <p>
+                        이것은 새 첨부 파일 추가 및 기존 첨부 파일 교체 모두에 영향을 미치지만, 새 <span class="abbrev">MIME</span> 유형이 지정되지
+                        않은 경우에만 적용됩니다. 다른 기존 첨부 파일은 변경되지 않습니다.
+                        </p>
+                     
+                     
+                     <p>
+                        영향을 받는 <span class="abbrev">MIME</span> 유형은
+                        '<span class="literal">application/x-truetype-fonts</span>'에 매핑된
+                        '<span class="literal">font/sfnt</span>'와 '<span class="literal">font/ttf</span>',
+                        '<span class="literal">font/collection</span>'이고
+                        '<span class="literal">application/vnd.ms-opentype</span>'에 매핑된
+                        '<span class="literal">font/otf</span>' 입니다.
+                        </p>
+                     </td>
+               </tr>
+            </tbody>
+         </table>
+         
+         
+         <p>
+            다른 옵션:
+            </p>
+         
+         
+         <table class="variablelist">
+            <thead>
+               <tr>
+                  <th>Option</th>
+                  <th>Description</th>
+               </tr>
+            </thead>
+            <tbody>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.disable_language_ietf"><span class="option">--disable-language-ietf</span></a><a class="headerlink" href="#mkvpropedit.description.disable_language_ietf" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        일반적으로 사용자가 '<span class="literal">language</span>' 트랙 헤더 속성 변경을 요청할 때 <span class="productname">mkvpropedit</span>(1)는
+                        기존 <span class="classname">Language</span> 요소 외에 새
+                        <span class="classname">LanguageIETF</span> 트랙 헤더 요소에도 동일한 변경 사항을 적용합니다. 이 옵션을 사용할
+                        경우 변경 사항은 레거시 <span class="classname">Language</span> 요소에만 적용됩니다.
+                        </p>
+                     
+                     
+                     <p>
+                        이 옵션은 <span class="literal">language-ietf</span> 트랙 헤더 속성을 통해 요청된 변경에는 영향을 주지 않습니다.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.normalize_language_ietf"><span class="option">--normalize-language-ietf</span> <span class="parameter">mode</span></a><a class="headerlink" href="#mkvpropedit.description.normalize_language_ietf" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        모든 IETF BCP 47 언어 태그를 모드 '<span class="literal">canonical</span>'의 표준 형식, 모드
+                        '<span class="literal">extlang</span>'의 확장 언어 하위 태그 형식으로 정규화하거나 모드
+                        '<span class="literal">off</span>'로 해제할 수 있습니다. 기본적으로 표준 형식에 대한 정규화가 적용됩니다.
+                        </p>
+                     
+                     
+                     <p>
+                        표준 형식에서 기본값이 존재하는 모든 하위 태그는 해당 기본 값으로 대체됩니다. 이를 통해
+                        '<span class="literal">zh-yue-jyutping</span>'을 '<span class="literal">yue-jyutping</span>'으로
+                        변환하거나 '<span class="literal">fr-FX</span>'를 '<span class="literal">fr-FR</span>'로 변환합니다.
+                        </p>
+                     
+                     
+                     <p>
+                        확장 언어 하위 태그 형식의 경우 표준 형식이 먼저 구축됩니다. 나중에 확장 언어 하위 태그가 존재하는 모든 기본 언어는 확장 언어 하위
+                        태그와 접두사로 대체됩니다.  예를 들면 '<span class="literal">yue-jyutping</span>'을
+                        '<span class="literal">zh-yue-jyutping</span>'으로 다시 변환하지만 '<span class="literal">fr</span>'은 확장
+                        언어 하위 태그가 아니기 때문에 '<span class="literal">fr-FR</span>'에는 영향을 미치지 않습니다.
+                        </p>
+                     
+                     
+                     <p>
+                        이 정규화는 실제로 변경된 요소에만 적용됩니다:
+                        </p>
+                     
+                     
+                     <ul>
+                        
+                        <li>
+                           
+                           <p>
+                              트랙 헤더를 편집할 때 편집 규격을 통해 설정된 트랙 언어 요소만 영향을 받습니다. 편집되지 않은 트랙의 언어는 변경되지
+                              않습니다. 트랙을 편집하고 언어가 아닌 속성만 설정해도 언어에 영향을 주지 않습니다.
+                              </p>
+                           </li>
+                        
+                        
+                        <li>
+                           
+                           <p>
+                              챕터를 편집할 때 기존 챕터가 항상 완전히 교체되므로 모든 챕터 요소의 모든 언어 요소가 영향을 받습니다.
+                              </p>
+                           </li>
+                        
+                        
+                        <li>
+                           
+                           <p>
+                              태그를 편집할 때 실제로 대체되는 태그의 언어 요소만 영향을 받습니다. 예를 들어 글로벌 태그를 교체해도 기존 트랙 태그는 영향을 받지
+                              않습니다.
+                              </p>
+                           </li>
+                        </ul>
+                     
+                     
+                     <p>
+                        파일의 모든 기존 언어 태그를 정규화하는 가장 좋은 방법은 <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a>로 remux하고
+                        '<span class="literal">--normalize-language-ietf</span>' 옵션을 원하는 모드로 설정하는 것입니다.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.command_line_charset"><span class="option">--command-line-charset</span> <span class="parameter">문자셋</span></a><a class="headerlink" href="#mkvpropedit.description.command_line_charset" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        명령행에 주어진 문자열을 변환할 문자셋을 정합니다. 기본값은 현재 시스템 로케일에 따른 문자셋입니다.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.output_charset"><span class="option">--output-charset</span> <span class="parameter">문자셋</span></a><a class="headerlink" href="#mkvpropedit.description.output_charset" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        출력할 문자열을 변환할 문자셋을 정합니다. 기본값은 현재 시스템 로케일에 따른 문자셋입니다.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.redirect_output"><span class="option">-r</span>, <span class="option">--redirect-output</span>
+                        <span class="parameter">파일명</span></a><a class="headerlink" href="#mkvpropedit.description.redirect_output" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        모든 메시지를 콘솔 대신 <span class="parameter">file-name</span> 파일에 씁니다. 출력 리디렉션을 통해 쉽게 수행할 수
+                        있지만 터미널이 출력을 파일에 쓰기 전에 재해석하는 경우 이 옵션이 필요한 경우가 있습니다. <a href="#mkvpropedit.description.output_charset">--output-charset</a>으로
+                        설정된 문자 집합이 적용됩니다.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.ui_language"><span class="option">--ui-language</span> <span class="parameter">코드</span></a><a class="headerlink" href="#mkvpropedit.description.ui_language" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        언어 <span class="parameter">코드</span>의 번역을 강제로 사용합니다 (예: 강제 사용할 독일어 번역 코드는
+                        '<span class="literal">de_DE</span>'). '<span class="literal">list</span>'를
+                        <span class="parameter">코드</span>로 입력하면 <a href="mkvextract.html"><span class="productname">mkvextract</span>(1)</a> 에서 이용 가능한 번역 목록을 출력할 것입니다.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.abort_on_warnings"><span class="option">--abort-on-warnings</span></a><a class="headerlink" href="#mkvpropedit.description.abort_on_warnings" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        첫 번째 경고가 발생한 후 프로그램을 중단하도록 지시합니다. 프로그램의 종료 코드는 1입니다.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.debug"><span class="option">--debug</span> <span class="parameter">토픽</span></a><a class="headerlink" href="#mkvpropedit.description.debug" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        특정 기능에 대해 디버깅을 켭니다. 이 기능은 개발자에게만 유용합니다.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.engage"><span class="option">--engage</span> <span class="parameter">기능</span></a><a class="headerlink" href="#mkvpropedit.description.engage" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        실험 기능을 켭니다. 사용 가능한 기능 목록은 <span class="command">mkvpropedit --engague list</span>와 함께
+                        요청할 수 있습니다. 이러한 기능은 정상적인 상황에서 사용할 수 없습니다.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.gui_mode"><span class="option">--gui-mode</span></a><a class="headerlink" href="#mkvpropedit.description.gui_mode" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        GUI 모드를 켭니다. 이 모드에서는 GUI 동작시 무슨 일이 일어나는지 알려줄 수 있는 특별하게 형식화된 줄을 출력할 것입니다. 이
+                        메시지들은 '<span class="literal">#GUI#message</span>' 형식을 따릅니다.  이 메시지 뒤에
+                        '<span class="literal">#GUI#message#key1=value1#key2=value2…</span>' 형태의 키/값 쌍이 붙을 수
+                        있습니다. 메시지나 키값들은 결코 번역되지 않고 항상 영어로 출력됩니다.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.verbose"><span class="option">-v</span>, <span class="option">--verbose</span></a><a class="headerlink" href="#mkvpropedit.description.verbose" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        읽어들인 모든 중요한 <span class="productname">Matroska</span><sup>(tm)</sup> 요소를 자세하게 보여 줍니다.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.help"><span class="option">-h</span>, <span class="option">--help</span></a><a class="headerlink" href="#mkvpropedit.description.help" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        사용법에 관한 정보를 표시하고 종료합니다.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.version"><span class="option">-V</span>, <span class="option">--version</span></a><a class="headerlink" href="#mkvpropedit.description.version" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        버전 정보를 표시하고 종료합니다.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.at_sign"><span class="option">@</span><span class="parameter">옵션 파일.json</span></a><a class="headerlink" href="#mkvpropedit.description.at_sign" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        추가 명령행 인수는 <span class="parameter">옵션-파일</span> 파일에서 읽어보세요. 이러한 파일용 지원 형식에 대한 자세한
+                        설명은 <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a> man page에서 "옵션 파일"이라는 섹션을 참고하세요.
+                        </p>
+                     </td>
+               </tr>
+            </tbody>
+         </table>
+         
+         <h1><a name="mkvpropedit.edit_selectors">3. 선택기 편집</a><a class="headerlink" href="#mkvpropedit.edit_selectors" title="Link to this heading">#</a></h1>
+         
+         
+         <p>
+            <a href="#mkvpropedit.description.edit">--edit</a>
+            옵션은 다음과 같은 모든 <a href="#mkvpropedit.description.add">add</a>, <a href="#mkvpropedit.description.set">set</a> 및 <a href="#mkvpropedit.description.delete">delete</a> 작업이 작동하는 <span class="productname">Matroska</span><sup>(tm)</sup>
+            파일 섹션(세그먼트 정보 또는 특정 트랙의 헤더)을 설정합니다. 이것은 다음 <a href="#mkvpropedit.description.edit">--edit</a> 선택사항을
+            찾을 때까지 유효합니다. 이 옵션의 인수를 편집 선택기라고 합니다.
+            </p>
+         
+         
+         <p>
+            기본적으로 <span class="productname">mkvpropedit</span>(1)는 세그먼트 정보 섹션을 편집합니다.
+            </p>
+         
+         
+         <h2><a name="mkvpropedit.edit_selectors.segment_info">3.1. 세그먼트 정보</a><a class="headerlink" href="#mkvpropedit.edit_selectors.segment_info" title="Link to this heading">#</a></h2>
+         
+         
+         <p>
+            세그먼트 정보는 '<span class="literal">info</span>', '<span class="literal">segment_info</span>' 또는
+            '<span class="literal">segmentinfo</span>'의 세 단어 중 하나로 선택할 수 있습니다. 세그먼트 제목 또는 세그먼트
+            <span class="abbrev">UID</span>와 같은 속성을 포함합니다.
+            </p>
+         
+         
+         
+         <h2><a name="mkvpropedit.edit_selectors.track_headers">3.2. 트랙 헤더</a><a class="headerlink" href="#mkvpropedit.edit_selectors.track_headers" title="Link to this heading">#</a></h2>
+         
+         
+         <p>
+            트랙 헤더는 조금 더 복잡한 선택기로 선택할 수 있습니다. 모든 변형은 '<span class="literal">track:</span>'로
+            시작합니다. 트랙 헤더 속성에는 언어 코드, '기본 트랙' 플래그 또는 트랙 이름과 같은 요소가 포함됩니다.
+            </p>
+         
+         
+         <table class="variablelist">
+            <thead>
+               <tr>
+                  <th>Option</th>
+                  <th>Description</th>
+               </tr>
+            </thead>
+            <tbody>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.track_nth"><span class="option">track:</span><span class="parameter">n</span></a><a class="headerlink" href="#mkvpropedit.description.track_nth" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        매개 변수 <span class="parameter">n</span>이 숫자이면 <span class="parameter">n</span>번째 트랙이
+                        선택됩니다. 트랙 순서는 <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a>의 <span class="option">--identify</span> 옵션 출력과 동일합니다.
+                        </p>
+                     
+                     
+                     <p>
+                        번호는 1부터 시작입니다.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.track_type_nth"><span class="option">track:</span><span class="parameter">t</span><span class="parameter">n</span></a><a class="headerlink" href="#mkvpropedit.description.track_type_nth" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        파라미터가 단일 문자 <span class="parameter">t</span>로 시작하고 이어서 특정 트랙 유형의
+                        <span class="parameter">n</span>번째 트랙이 선택됩니다. 트랙 유형 매개 변수 <span class="parameter">t</span>는
+                        오디오 트랙의 경우 '<span class="literal">a</span>', 버튼 트랙의 경우 '<span class="literal">b</span>', 자막 트랙의
+                        경우 '<span class="literal">s</span>', 비디오 트랙의 경우 '<span class="literal">v</span>' 중 하나여야 합니다. 트랙
+                        순서는 <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a>의 <span class="option">--identify</span> 옵션 출력과 동일합니다.
+                        </p>
+                     
+                     
+                     <p>
+                        번호는 1부터 시작입니다.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.track_uid"><span class="option">track:</span>=<span class="parameter">uid</span></a><a class="headerlink" href="#mkvpropedit.description.track_uid" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        파라미터가 '<span class="literal">=</span>'에 이어 숫자 <span class="parameter">uid</span>로 시작하는 경우 트랙
+                        <span class="abbrev">UID</span> 요소가 지정된 <span class="parameter">uid</span>와 동일한 트랙이 선택됩니다. 트랙
+                        <span class="abbrev">UIDs</span>는 <a href="mkvinfo.html"><span class="productname">mkvinfo</span>(1)</a>에서 얻을 수 있습니다.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.track_number"><span class="option">track:</span>@<span class="parameter">number</span></a><a class="headerlink" href="#mkvpropedit.description.track_number" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        파라미터가 '<span class="literal">@</span>'로 시작하고 숫자<span class="parameter">number</span> 뒤에 오는 경우,
+                        트랙 번호 요소가 이 <span class="parameter">number</span>와 같은 트랙이 선택됩니다. 트랙 번호는 <a href="mkvinfo.html"><span class="productname">mkvinfo</span>(1)</a>를
+                        통해 얻을 수 있습니다.
+                        </p>
+                     </td>
+               </tr>
+            </tbody>
+         </table>
+         
+         
+         
+         <h2><a name="mkvpropedit.edit_selectors.notes">3.3. 주의</a><a class="headerlink" href="#mkvpropedit.edit_selectors.notes" title="Link to this heading">#</a></h2>
+         
+         
+         <p>
+            트랙 편집 선택기의 특성상 여러 선택기가 실제로 동일한 트랙 헤더와 일치할 수 있습니다. 이러한 경우 편집 선택기에 대한 모든 작업은
+            명령줄에 지정된 순서대로 결합되고 실행됩니다.
+            </p>
+         
+         
+         <h1><a name="mkvpropedit.attachment_selectors">4. 첨부 파일 선택기</a><a class="headerlink" href="#mkvpropedit.attachment_selectors" title="Link to this heading">#</a></h1>
+         
+         
+         
+         <p>
+            첨부 파일 선택기는 <a href="#mkvpropedit.description.replace_attachment">--replace-attachment</a>
+            및 <a href="#mkvpropedit.description.delete_attachment">--delete-attachment</a>
+            두 가지 동작과 함께 사용됩니다. 다음 네 가지 형식 중 하나를 사용할 수 있습니다:
+            </p>
+         
+         
+         <ol>
+            
+            <li>
+               
+               <p>
+                  첨부 파일 ID로 선택합니다. 이 양식에서 선택기는 <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a>의 식별 명령에 의해 출력되는 첨부 파일의 ID인 숫자입니다.
+                  </p>
+               </li>
+            
+            
+            <li>
+               
+               <p>
+                  첨부파일 UID(고유 ID)에 의한 선택입니다. 이 양식에서 선택기는 등호 <span class="literal">=</span> 뒤에 숫자, 첨부 파일의
+                  고유 ID를 출력하는 <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a>의 상세 식별 명령입니다.
+                  </p>
+               </li>
+            
+            
+            <li>
+               
+               <p>
+                  첨부 파일 이름으로 선택합니다. 이 양식에서 선택기는 문자 그대로의 단어 <span class="literal">name:</span> 뒤에 기존 첨부
+                  파일의 이름이 붙습니다. 이 선택기를 <span class="option">--replace-attachment</span>와 함께 사용할 경우 일치시킬
+                  이름 내의 콜론은 <span class="literal">\c</span>로 이스케이프해야 합니다.
+                  </p>
+               </li>
+            
+            
+            <li>
+               
+               <p>
+                  MIME 유형별로 선택합니다. 이 양식에서 선택기는 <span class="literal">mime-type:</span>이고 그 뒤에 기존 첨부파일의
+                  MIME 유형이 있습니다. 이 선택기가 <span class="option">--replace-attachment</span>와 함께 사용되는 경우 일치시킬
+                  MIME 유형 내의 콜론은 <span class="literal">\c</span>로 이스케이프해야 합니다.
+                  </p>
+               </li>
+            </ol>
+         
+         <h1><a name="mkvpropedit.language_handling">5. Language handling</a><a class="headerlink" href="#mkvpropedit.language_handling" title="Link to this heading">#</a></h1>
+         
+         
+         
+         <p>
+            <span class="productname">mkvpropedit</span>(1) mostly tries to do the right thing by default. Therefore
+            changes to the <span class="option">language</span> property will cause <span class="productname">mkvpropedit</span>(1)
+            to apply the same change to both the new "LanguageIETF" element as well as
+            the old "Language" element similar to how <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a> applies the language to
+            both elements. For example, when using <span class="literal">mkvpropedit movie.mkv --edit
+               track:2 --set language=zh-TW</span> the "LanguageIETF" element will be
+            set to <span class="literal">zh-TW</span> and the old "Language" element to
+            <span class="literal">chi</span>.
+            </p>
+         
+         
+         <p>
+            Additionally there's a new track header property named
+            <span class="option">language-ietf</span> that can be set or removed. Changes to this
+            property only apply to the new "LanguageIETF" track header element. A caveat
+            is that the old "Language" track header element is a mandatory element in
+            Matroska — meaning even if it isn't present in the file it still has an
+            implied value. When the user only sets the <span class="option">language-ietf</span>
+            property but not the <span class="option">language</span> property, <span class="productname">mkvpropedit</span>(1) will
+            therefore add the old "Language" element in certain cases &amp; set it to
+            <span class="literal">und</span> (meaning "undetermined") as the user didn't specify a
+            value for it.
+            </p>
+         
+         
+         <p>When reading XML chapter or tag files <span class="productname">mkvpropedit</span>(1) works like <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a>
+            does.</p>
+         
+         
+         <p>The creation of the new elements can be disabled completely with the
+            command-line option `--disable-language-ietf` which operates on all three
+            new elements.</p>
+         
+         
+         <p>You can chose the normalization method applied to extended language sub-tags
+            with the parameter <span class="option">--normalize-language-ietf</span>.</p>
+         
+         <h1><a name="mkvpropedit.examples">6. 보기</a><a class="headerlink" href="#mkvpropedit.examples" title="Link to this heading">#</a></h1>
+         
+         
+         <p>
+            다음 예제에서는 '<span class="literal">movie.mkv</span>'라는 파일을 편집합니다. 세그먼트 제목을 설정하고 오디오와 자막
+            트랙의 언어 코드를 수정합니다. 세그먼트 정보 요소를 편집하는 것은 어쨌든 첫 번째 <a href="#mkvpropedit.description.edit">--edit</a> 옵션 이전에
+            발견된 모든 옵션의 기본값이기 때문에 첫 번째 <a href="#mkvpropedit.description.edit">--edit</a> 옵션을
+            생략하면 이 예를 단축할 수 있습니다.
+            </p>
+         
+         
+         <pre class="screen">$ mkvpropedit movie.mkv --edit info --set "title=The movie" --edit track:a1 --set language=fre --edit track:a2 --set language=ita</pre>
+         
+         
+         <p>
+            두 번째 예는 첫 번째 자막 트랙에서 '기본 트랙 플래그'를 제거하고 두 번째 트랙으로 설정합니다. <span class="productname">mkvpropedit</span>(1)는
+            <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a>와 달리 다른 트랙의 '기본 트랙 플래그'가 자동으로 '1'로 설정된 경우 '0'으로 설정되지 않습니다.
+            </p>
+         
+         
+         <pre class="screen">$ mkvpropedit movie.mkv --edit track:s1 --set flag-default=0 --edit track:s2 --set flag-default=1</pre>
+         
+         
+         <p>
+            파일에서 두 번째 자막 트랙의 태그를 바꾸는 것은 다음과 같습니다.
+            </p>
+         
+         
+         <pre class="screen">$ mkvpropedit movie.mkv --tags track:s2:new-subtitle-tags.xml</pre>
+         
+         
+         <p>
+            모든 태그를 제거하려면 파일 이름을 생략해야 합니다.
+            </p>
+         
+         
+         <pre class="screen">$ mkvpropedit movie.mkv --tags all:</pre>
+         
+         
+         <p>
+            파일의 장을 바꾸는 것은 다음과 같습니다.
+            </p>
+         
+         
+         <pre class="screen">$ mkvpropedit movie.mkv --chapters new-chapters.xml</pre>
+         
+         
+         <p>
+            모든 챕터를 제거하려면 파일 이름을 생략해야 합니다.
+            </p>
+         
+         
+         <pre class="screen">$ mkvpropedit movie.mkv --chapters ''</pre>
+         
+         
+         <p>
+            첨부 파일로 글꼴 파일(<span class="literal">Arial.ttf</span>) 추가:
+            </p>
+         
+         
+         <pre class="screen">$ mkvpropedit movie.mkv --add-attachment Arial.ttf</pre>
+         
+         
+         <p>
+            첨부 파일로 글꼴 파일(<span class="literal">89719823.ttf</span>)을 추가하고 실제로 Arial에 해당하는 정보를
+            제공합니다.
+            </p>
+         
+         
+         <pre class="screen">$ mkvpropedit movie.mkv --attachment-name Arial.ttf --attachment-description 'The Arial font as a TrueType font' --attachment-mime-type application/x-truetype-font --add-attachment 89719823.ttf</pre>
+         
+         
+         <p>
+            첨부된 글꼴(<span class="literal">Comic.ttf</span>) 파일을 다른
+            글꼴(<span class="literal">Arial.ttf</span>)로 대체하는 경우:
+            </p>
+         
+         
+         <pre class="screen">$ mkvpropedit movie.mkv --attachment-name Arial.ttf --attachment-description 'The Arial font as a TrueType font' --replace-attachment name:Comic.ttf:Arial.ttf</pre>
+         
+         
+         <p>
+            두 번째 첨부 파일 삭제:
+            </p>
+         
+         
+         <pre class="screen">$ mkvpropedit movie.mkv --delete-attachment 2</pre>
+         
+         
+         <p>
+            MIME 유형별로 연결된 모든 글꼴 삭제:
+            </p>
+         
+         
+         <pre class="screen">$ mkvpropedit movie.mkv --delete-attachment mime-type:application/x-truetype-font</pre>
+         
+         <h1><a name="d4e1320">7. 종료 코드</a><a class="headerlink" href="#d4e1320" title="Link to this heading">#</a></h1>
+         
+         
+         
+         <p>
+            <span class="productname">mkvpropedit</span>(1) 종료 시 다음 세 가지 종료 코드 중 하나가 표시됩니다.
+            </p>
+         
+         
+         <ul>
+            
+            <li>
+               
+               <p>
+                  <span class="constant">0</span> - 이 종료 코드는 수정이 성공적으로 완료되었음을 의미합니다.
+                  </p>
+               </li>
+            
+            
+            <li>
+               
+               <p>
+                  <span class="constant">1</span> -- 이 경우 <span class="productname">mkvpropedit</span>(1)는 경고를 하나 이상 출력했지만 수정은
+                  계속되었습니다. 경고 앞에 '<span class="literal">Warning:</span>'이라는 텍스트가 붙습니다. 관련된 문제에 따라 결과 파일이
+                  정상 또는 그렇지 않을 수 있습니다. 사용자는 경고와 결과 파일을 모두 확인해야 합니다.
+                  </p>
+               </li>
+            
+            
+            <li>
+               
+               <p>
+                  <span class="constant">2</span> - 오류가 발생한 후 이 종료 코드가 사용됩니다. 오류 메시지를 출력한 후 바로
+                  중단합니다. 오류 메시지는 읽기/쓰기 오류에 대한 잘못된 명령줄 인수에서 손상된 파일에 이르기까지 다양합니다.
+                  </p>
+               </li>
+            </ul>
+         
+         <h1><a name="mkvinfo.text_files_and_charsets">8. 텍스트 파일과 문자셋 변환</a><a class="headerlink" href="#mkvinfo.text_files_and_charsets" title="Link to this heading">#</a></h1>
+         
+         
+         
+         <p>
+            MKVToolNix 제품군의 모든 도구가 문자 집합 변환, 입력/출력 인코딩, 명령줄 인코딩 및 콘솔 인코딩을 처리하는 방법에 대한
+            자세한 내용은 <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a> 매뉴얼 페이지에서 동일한 이름의 섹션을 참조하십시오.
+            </p>
+         
+         <h1><a name="mkvpropedit.environment_variables">9. 환경 변수</a><a class="headerlink" href="#mkvpropedit.environment_variables" title="Link to this heading">#</a></h1>
+         
+         
+         
+         <p>
+            <span class="productname">mkvpropedit</span>(1)는 시스템의 로케일을 결정하는 기본 변수(예: <span class="varname">LANG</span> 및
+            <span class="varname">LC_*</span> 제품군)를 사용합니다. 추가 변수:
+            </p>
+         
+         
+         <table class="variablelist">
+            <thead>
+               <tr>
+                  <th>Option</th>
+                  <th>Description</th>
+               </tr>
+            </thead>
+            <tbody>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.environment_variables.debug"><span class="varname">MKVPROPEDIT_DEBUG</span>, <span class="varname">MKVTOOLNIX_DEBUG</span> 와
+                        그 간략한 형태인<span class="varname">MTX_DEBUG</span></a><a class="headerlink" href="#mkvpropedit.environment_variables.debug" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>내용은 <a href="#mkvpropedit.description.debug">--debug</a> 옵션을
+                        통해 전달된 것으로 간주됩니다.</p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.environment_variables.engage"><span class="varname">MKVPROPEDIT_ENGAGE</span>, <span class="varname">MKVTOOLNIX_ENGAGE</span>
+                        와 그 간략한 형태인 <span class="varname">MTX_ENGAGE</span></a><a class="headerlink" href="#mkvpropedit.environment_variables.engage" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>내용은 <a href="#mkvpropedit.description.engage">--engage</a>
+                        옵션을 통해 전달된 것으로 간주됩니다.</p>
+                     </td>
+               </tr>
+            </tbody>
+         </table>
+         
+         <h1><a name="mkvpropedit.seealso">10. 더 보기</a><a class="headerlink" href="#mkvpropedit.seealso" title="Link to this heading">#</a></h1>
+         
+         
+         <p>
+            <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a>, <a href="mkvinfo.html"><span class="productname">mkvinfo</span>(1)</a>, <a href="mkvextract.html"><span class="productname">mkvextract</span>(1)</a>, <a href="mkvtoolnix-gui.html"><span class="productname">mkvtoolnix-gui</span>(1)</a>
+            </p>
+         
+         <h1><a name="mkvpropedit.www">11. WWW</a><a class="headerlink" href="#mkvpropedit.www" title="Link to this heading">#</a></h1>
+         
+         
+         <p>
+            이전 버전은 언제나 <a href="https://mkvtoolnix.download/">MKVToolNix
+               홈페이지</a>에서 찾을 수 있습니다.
+            </p>
+         </div>
+   </body>
+</html>

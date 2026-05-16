@@ -1,0 +1,444 @@
+<!DOCTYPE html
+  PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
+<html>
+   <head>
+      <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+      <title>mkvinfo -- Запись информации об элементах в файлы Matroska</title>
+      <link rel="stylesheet" type="text/css" href="mkvtoolnix-doc.css">
+   </head>
+   <body>
+      <div class="heading">mkvinfo -- Запись информации об элементах в файлы <span class="productname">Matroska</span><sup>(tm)</sup></div>
+      <hr>
+      <div id="toc" class="toc">
+         <h1>Table of contents</h1>
+         <ul>
+            <li><a href="#mkvinfo.synopsis">1. Краткое содержание</a></li>
+            <li><a href="#mkvinfo.description">2. Описание</a></li>
+            <li><a href="#mkvinfo.verbosity_levels">3. Уровни детализации</a></li>
+            <li><a href="#mkvinfo.text_files_and_charsets">4. Преобразование текстовых файлов и кодировок</a></li>
+            <li><a href="#d4e509">5. Коды завершения</a></li>
+            <li><a href="#mkvinfo.environment_variables">6. Переменные среды</a></li>
+            <li><a href="#mkvinfo.seealso">7. Смотрите также</a></li>
+            <li><a href="#mkvinfo.www">8. Домашняя страница</a></li>
+         </ul>
+      </div>
+      <div class="content">
+         <h1><a name="mkvinfo.synopsis">1. Краткое содержание</a><a class="headerlink" href="#mkvinfo.synopsis" title="Link to this heading">#</a></h1>
+         
+         
+         <div class="cmdsynopsis"><span class="commandname">mkvinfo</span> параметры {исходный-файл}</div>
+         
+         <h1><a name="mkvinfo.description">2. Описание</a><a class="headerlink" href="#mkvinfo.description" title="Link to this heading">#</a></h1>
+         
+         
+         <p>
+            Эта программа выводит список всех элементы, содержащихся в
+            <span class="productname">Matroska</span><sup>(tm)</sup>. Выходные данные, включая информацию об используемых кодеках,
+            можно ограничить списком дорожек в файле.
+            </p>
+         
+         
+         <table class="variablelist">
+            <thead>
+               <tr>
+                  <th>Option</th>
+                  <th>Description</th>
+               </tr>
+            </thead>
+            <tbody>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.all"><span class="option">-a</span>, <span class="option">--all</span></a><a class="headerlink" href="#mkvinfo.description.all" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        По умолчанию <span class="productname">mkvinfo</span>(1) останавливается, когда встречает первый
+                        кластер. Кроме того, он не показывает некоторые часто встречающиеся
+                        элементы. С помощью этого параметра <span class="productname">mkvinfo</span>(1) продолжит обработку независимо
+                        от уровня детализации и покажет все элементы.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.checksums"><span class="option">-c</span>, <span class="option">--checksums</span></a><a class="headerlink" href="#mkvinfo.description.checksums" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Вычисляет и отображает контрольную сумму <span class="function">Adler-32</span> для
+                        каждого кадра. Полезно только для отладки.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.continue"><span class="option">-o</span>, <span class="option">--continue</span></a><a class="headerlink" href="#mkvinfo.description.continue" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        По умолчанию <span class="productname">mkvinfo</span>(1) останавливается, когда он обнаруживает первый
+                        кластер. С помощью этого параметра <span class="productname">mkvinfo</span>(1) будет продолжать обработку
+                        независимо от уровня детализации.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.hex_positions"><span class="option">-p</span>, <span class="option">--hex-positions</span></a><a class="headerlink" href="#mkvinfo.description.hex_positions" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Показывать позицию каждого элемента в шестнадцатеричном виде вне зависимости
+                        от уровня детализации.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.positions"><span class="option">-P</span>, <span class="option">--positions</span></a><a class="headerlink" href="#mkvinfo.description.positions" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Показывать позицию каждого элемента в десятичном виде вне зависимости от
+                        уровня детализации.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.summary"><span class="option">-s</span>, <span class="option">--summary</span></a><a class="headerlink" href="#mkvinfo.description.summary" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Показывать только краткую информацию и не каждый элемент в результатах
+                        поиска <span class="productname">mkvinfo</span>(1).
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.track_info"><span class="option">-t</span>, <span class="option">--track-info</span></a><a class="headerlink" href="#mkvinfo.description.track_info" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Показать статистику для каждой дорожки в расширенном режиме. Также
+                        устанавливает режим расширенности в 1, если он был 0 до этого.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.hexdump"><span class="option">-x</span>, <span class="option">--hexdump</span></a><a class="headerlink" href="#mkvinfo.description.hexdump" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Показать 16 первых байтов каждого кадра в шестнадцатеричном виде.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.full_hexdump"><span class="option">-X</span>, <span class="option">--full-hexdump</span></a><a class="headerlink" href="#mkvinfo.description.full_hexdump" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Показать все байты каждого кадра в шестнадцатеричном виде.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.size"><span class="option">-z</span>, <span class="option">--size</span></a><a class="headerlink" href="#mkvinfo.description.size" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Показать размер каждого элемента, в том числе его заголовка.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.command_line_charset"><span class="option">--command-line-charset</span> <span class="parameter">кодировка</span></a><a class="headerlink" href="#mkvinfo.description.command_line_charset" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Устанавливает кодировку для конвертации строк, указанных в командной
+                        строке. Стандартная кодировка привязана с системной локализации.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.output_charset"><span class="option">--output-charset</span> <span class="parameter">кодировка</span></a><a class="headerlink" href="#mkvinfo.description.output_charset" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Указывает кодировку, в которую конвертируются выходные строки. По умолчанию
+                        используется текущая кодировка системного языка.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.redirect_output"><span class="option">-r</span>, <span class="option">--redirect-output</span>
+                        <span class="parameter">имя-файла</span></a><a class="headerlink" href="#mkvinfo.description.redirect_output" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Все сообщения записываются в файл <span class="parameter">имя-файла</span> вместо
+                        консоли. Хотя это можно сделать и через перенаправление вывода, есть
+                        отдельные случаи применения именно этого параметра: когда терминал
+                        интерпретирует в другой способ вывод перед записью файла. Набор символов,
+                        заданный через <a href="#mkvinfo.description.output_charset">
+                           --output-charset</a>, учитывается.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.ui_language"><span class="option">--ui-language</span> <span class="parameter">код</span></a><a class="headerlink" href="#mkvinfo.description.ui_language" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Принудительно использовать перевод на <span class="parameter">код</span> языка
+                        (напр., «<span class="literal">de_DE</span>» для немецкого). Если указать
+                        «<span class="literal">list</span>» на месте <span class="parameter">кода</span>, то
+                        отобразится список доступных переводов.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.abort_on_warnings"><span class="option">--abort-on-warnings</span></a><a class="headerlink" href="#mkvinfo.description.abort_on_warnings" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Указывает mkvmerge прерывание после появления первого предупреждения. Код
+                        завершения программы будет 1.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.debug"><span class="option">--debug</span> <span class="parameter">тематика</span></a><a class="headerlink" href="#mkvinfo.description.debug" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Включить режим отладки для указанной функции. Этот параметр полезен только
+                        для разработчиков.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.engage"><span class="option">--engage</span> <span class="parameter">функция</span></a><a class="headerlink" href="#mkvinfo.description.engage" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Включить экспериментальные функции. Список доступных функций может быть
+                        вызван с помощью <span class="command">mkvinfo --engage list</span>. Эти функции не
+                        предназначены для повседневного использования.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.gui_mode"><span class="option">--gui-mode</span></a><a class="headerlink" href="#mkvinfo.description.gui_mode" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Включает режим графического интерфейса. В этом режиме могут отображаться
+                        специально отформатированные строки для отправки управляющих сообщений
+                        интерфейсу. Формат сообщений — «<span class="literal">#GUI#message</span>». За
+                        сообщением могут быть указаны пары ключа и значения, например,
+                        «<span class="literal">#GUI#message#key1=value1#key2=value2…</span>». Сообщения и
+                        ключи не переводятся и всегда выводятся на английском.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.verbose"><span class="option">-v</span>, <span class="option">--verbose</span></a><a class="headerlink" href="#mkvinfo.description.verbose" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Больше подробностей. Смотрите раздел об <a href="#mkvinfo.verbosity_levels">уровнях детализации</a> с описанием
+                        информации, выводимой на каждом уровне.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.help"><span class="option">-h</span>, <span class="option">--help</span></a><a class="headerlink" href="#mkvinfo.description.help" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Показать сведения об использовании и выйти.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.version"><span class="option">-V</span>, <span class="option">--version</span></a><a class="headerlink" href="#mkvinfo.description.version" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Показать сведения о версии и выйти.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.description.options_file"><span class="option">@</span><span class="parameter">файл-параметров.json</span></a><a class="headerlink" href="#mkvinfo.description.options_file" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Считывает дополнительные аргументы командной строки из файла
+                        <span class="parameter">options-file</span>. Полное описание поддерживаемых форматов
+                        для таких файлов смотрите в разделе "Файлы параметров" на странице
+                        документации <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a>.
+                        </p>
+                     </td>
+               </tr>
+            </tbody>
+         </table>
+         
+         <h1><a name="mkvinfo.verbosity_levels">3. Уровни детализации</a><a class="headerlink" href="#mkvinfo.verbosity_levels" title="Link to this heading">#</a></h1>
+         
+         
+         
+         <p>
+            Параметр <a href="#mkvinfo.description.verbose">-v</a> может быть
+            использован для повышения уровня детализации <span class="productname">mkvinfo</span>(1) и для вывода большей
+            информации о текущем файле.
+            </p>
+         
+         
+         <p>
+            На уровне 0 <span class="productname">mkvinfo</span>(1) напечатает только заголовки найденных треков и их
+            типы. <span class="productname">mkvinfo</span>(1) завершится, как только заголовки будут полностью
+            проанализированы (более технически: как только будет обнаружен первый
+            кластер). На этом уровне записи заголовка поиска и cues не будут
+            отображаться — даже если они расположены перед информацией о треке.
+            </p>
+         
+         
+         <p>
+            На уровне 1 <span class="productname">mkvinfo</span>(1) также будет печатать все элементы <span class="productname">Matroska</span><sup>(tm)</sup>,
+            встречающиеся для полного файла, кроме записей заголовка поиска и записей
+            cue. Если включён режим сводки, то <span class="productname">mkvinfo</span>(1) также выведет положение кадра.
+            </p>
+         
+         
+         <p>
+            Тот же эффект достигается параметром <span class="option">--continue</span>.
+            </p>
+         
+         
+         <p>
+            На уровне 2 <span class="productname">mkvinfo</span>(1) также выведет записи заголовков поиска, записи cue и
+            позицию в файле, на которой каждый элемент <span class="productname">Matroska</span><sup>(tm)</sup> может быть найден.
+            </p>
+         
+         
+         <p>
+            Тот же эффект достигается параметром <span class="option">--all --positions</span>.
+            </p>
+         
+         
+         <p>
+            На уровне 3 и выше <span class="productname">mkvinfo</span>(1) напечатает некоторую информацию, которая не
+            связана напрямую с элементом <span class="productname">Matroska</span><sup>(tm)</sup>. Все остальные элементы печатают
+            только те элементы, которые были только что найдены. Уровень 3 добавляет
+            метаинформацию для облегчения отладки (читай: предназначена только для
+            разработчиков). Все строки, написанные на уровне 3, заключены в квадратные
+            скобки, чтобы их было легко отфильтровать.
+            </p>
+         
+         <h1><a name="mkvinfo.text_files_and_charsets">4. Преобразование текстовых файлов и кодировок</a><a class="headerlink" href="#mkvinfo.text_files_and_charsets" title="Link to this heading">#</a></h1>
+         
+         
+         
+         <p>
+            Подробное обсуждение того, как все инструменты пакета MKVToolNix
+            обрабатывают преобразование наборов символов, кодировку ввода / вывода,
+            кодировку командной строки и кодировку консоли, смотрите в разделе с
+            идентичным названием в справочной странице <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a>.
+            </p>
+         
+         <h1><a name="d4e509">5. Коды завершения</a><a class="headerlink" href="#d4e509" title="Link to this heading">#</a></h1>
+         
+         
+         
+         <p>
+            <span class="productname">mkvinfo</span>(1) завершается с одним из трёх кодов:
+            </p>
+         
+         
+         <ul>
+            
+            <li>
+               
+               <p>
+                  <span class="constant">0</span> -- Этот код завершения означает, что запуск
+                  закончился успешно.
+                  </p>
+               </li>
+            
+            
+            <li>
+               
+               <p>
+                  <span class="constant">1 </span>-- В этом случае <span class="productname">mkvinfo</span>(1) выдал хотя бы одно
+                  предупреждение, однако процесс продолжился. Предупреждение начинается с
+                  текста «<span class="literal">Warning:</span>».
+                  </p>
+               </li>
+            
+            
+            <li>
+               
+               <p>
+                  <span class="constant">2</span> -- Этот код завершения используется в случае
+                  возникновения ошибки. <span class="productname">mkvinfo</span>(1) прекращает работу сразу после вывода
+                  сообщения об ошибке. Ошибки могут возникнуть из-за неверных параметров
+                  командной строки, из-за ошибки чтения/записи или просто из-за повреждённых
+                  файлов.
+                  </p>
+               </li>
+            </ul>
+         
+         <h1><a name="mkvinfo.environment_variables">6. Переменные среды</a><a class="headerlink" href="#mkvinfo.environment_variables" title="Link to this heading">#</a></h1>
+         
+         
+         
+         <p>
+            <span class="productname">mkvinfo</span>(1) использует стандартные переменные, определяющие системный язык
+            (например: <span class="varname">LANG</span> и семейство
+            <span class="varname">LC_*</span>). Дополнительные переменные:
+            </p>
+         
+         
+         <table class="variablelist">
+            <thead>
+               <tr>
+                  <th>Option</th>
+                  <th>Description</th>
+               </tr>
+            </thead>
+            <tbody>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.environment_variables.debug"><span class="varname">MKVINFO_DEBUG</span>, <span class="varname">MKVTOOLNIX_DEBUG</span> и его
+                        краткая форма <span class="varname">MTX_DEBUG</span></a><a class="headerlink" href="#mkvinfo.environment_variables.debug" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>Содержимое обрабатывается так, как если бы оно было передано с помощью
+                        параметра <a href="#mkvinfo.description.debug">--debug</a>.</p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvinfo.environment_variables.engage"><span class="varname">MKVINFO_ENGAGE</span>, <span class="varname">MKVTOOLNIX_ENGAGE</span> и
+                        его краткая форма <span class="varname">MTX_ENGAGE</span></a><a class="headerlink" href="#mkvinfo.environment_variables.engage" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>Содержимое обрабатывается так, как если бы оно было передано с помощью
+                        параметра <a href="#mkvinfo.description.engage">--engage</a>.</p>
+                     </td>
+               </tr>
+            </tbody>
+         </table>
+         
+         <h1><a name="mkvinfo.seealso">7. Смотрите также</a><a class="headerlink" href="#mkvinfo.seealso" title="Link to this heading">#</a></h1>
+         
+         
+         <p>
+            <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a>, <a href="mkvextract.html"><span class="productname">mkvextract</span>(1)</a>, <a href="mkvpropedit.html"><span class="productname">mkvpropedit</span>(1)</a>, <a href="mkvtoolnix-gui.html"><span class="productname">mkvtoolnix-gui</span>(1)</a>
+            </p>
+         
+         <h1><a name="mkvinfo.www">8. Домашняя страница</a><a class="headerlink" href="#mkvinfo.www" title="Link to this heading">#</a></h1>
+         
+         
+         <p>
+            Последняя версия программы всегда доступна на <a href="https://mkvtoolnix.download/">домашней странице MKVToolNix</a>.
+            </p>
+         </div>
+   </body>
+</html>

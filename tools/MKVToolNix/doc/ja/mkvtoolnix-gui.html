@@ -1,0 +1,124 @@
+<!DOCTYPE html
+  PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
+<html>
+   <head>
+      <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+      <title>mkvtoolnix-gui -- mkvmerge1の楽章・頭部編集機能付きGUI</title>
+      <link rel="stylesheet" type="text/css" href="mkvtoolnix-doc.css">
+   </head>
+   <body>
+      <div class="heading">mkvtoolnix-gui -- <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a>の楽章・頭部編集機能付きGUI</div>
+      <hr>
+      <div id="toc" class="toc">
+         <h1>Table of contents</h1>
+         <ul>
+            <li><a href="#mkvtoolnix-gui.synopsis">1. 書式</a></li>
+            <li><a href="#mkvtoolnix-gui.description">2. 説明</a></li>
+            <li><a href="#mkvtoolnix-gui.seealso">3. 関連項目</a></li>
+            <li><a href="#mkvtoolnix-gui.www">4. ウェブ</a></li>
+         </ul>
+      </div>
+      <div class="content">
+         <h1><a name="mkvtoolnix-gui.synopsis">1. 書式</a><a class="headerlink" href="#mkvtoolnix-gui.synopsis" title="Link to this heading">#</a></h1>
+         
+         
+         <div class="cmdsynopsis"><span class="commandname">mkvtoolnix-gui</span> [[設定ファイル名.mtxcfg] | [原ファイル.ext] | [Matroskaファイル.mkv] | [楽章ファイル.ext] | [Matroskaファイル.mkv]]</div>
+         
+         <h1><a name="mkvtoolnix-gui.description">2. 説明</a><a class="headerlink" href="#mkvtoolnix-gui.description" title="Link to this heading">#</a></h1>
+         
+         
+         <p>
+            <span class="productname">mkvtoolnix-gui</span>(1)は<span class="productname">Qt</span><sup>(tm)</sup>に基づいた<a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a>の<span class="abbrev">GUI</span>です。<a href="mkvinfo.html"><span class="productname">mkvinfo</span>(1)</a>と<a href="mkvpropedit.html"><span class="productname">mkvpropedit</span>(1)</a>の機能も実装しており、同様に<a href="mkvextract.html"><span class="productname">mkvextract</span>(1)</a>の機能実装も視野に入れています。全ての設定（例えば原ファイルやトラックのオプション等）は保存・復元できます。
+            </p>
+         
+         
+         <p>
+            <span class="literal">.mtxcfg</span>拡張子のファイル名を列挙すると、GUIは列挙した設定ファイルを適切な器具で読み込みます。残りのファイル名は、現行モードに従って、多重化の原曲として、情報操作機で、楽章編集機で、あるいは頭部編集機で開くように追加されます。現行のモードは<span class="option">--merge</span>、<span class="option">--info</span>、<span class="option">--edit-chapters</span>または<span class="option">--edit-headers</span>で変更できます。既定のモードではファイルを多重化用に追加します。
+            </p>
+         
+         
+         <p>
+            注意:
+            既に<span class="productname">mkvtoolnix-gui</span>(1)実体が起動している状態で<span class="productname">mkvtoolnix-gui</span>(1)を新しく立ち上げた場合は、命令行で指定した全てのファイル名が既存の実体に渡されて処理されます。
+            </p>
+         
+         
+         <table class="variablelist">
+            <thead>
+               <tr>
+                  <th>Option</th>
+                  <th>Description</th>
+               </tr>
+            </thead>
+            <tbody>
+               <tr>
+                  <td class="varlistoption"><span class="option">--merge</span></td>
+                  <td>
+                     
+                     <p>以降に続く全てのファイル名が現在の多重化作業への原曲として追加されます。これは既定のモードです。</p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><span class="option">--info</span></td>
+                  <td>
+                     
+                     <p>以降に続く全てのファイル名が情報操作機で開かれます。</p>
+                     
+                     <p>加えて、開始時には多重化装置ではなく情報操作機が選択されます。</p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><span class="option">--edit-chapters</span></td>
+                  <td>
+                     
+                     <p>以降に続く全てのファイル名が楽章編集機で開かれます。</p>
+                     
+                     <p>加えて、開始時には多重化装置ではなく楽章編集機が選択されます。</p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><span class="option">--edit-headers</span></td>
+                  <td>
+                     
+                     <p>以降に続く全てのファイル名が頭部編集機で開かれます。</p>
+                     
+                     <p>加えて、開始時には多重化装置ではなく頭部編集機が選択されます。</p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><span class="option">-h</span>, <span class="option">--help</span></td>
+                  <td>
+                     
+                     <p>
+                        使用法情報を出力して終了します。
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><span class="option">-V</span>, <span class="option">--version</span></td>
+                  <td>
+                     
+                     <p>
+                        版次情報を出力して終了します。
+                        </p>
+                     </td>
+               </tr>
+            </tbody>
+         </table>
+         
+         <h1><a name="mkvtoolnix-gui.seealso">3. 関連項目</a><a class="headerlink" href="#mkvtoolnix-gui.seealso" title="Link to this heading">#</a></h1>
+         
+         
+         <p>
+            <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a> <a href="mkvextract.html"><span class="productname">mkvextract</span>(1)</a>, <a href="mkvinfo.html"><span class="productname">mkvinfo</span>(1)</a>, <a href="mkvpropedit.html"><span class="productname">mkvpropedit</span>(1)</a>
+            </p>
+         
+         <h1><a name="mkvtoolnix-gui.www">4. ウェブ</a><a class="headerlink" href="#mkvtoolnix-gui.www" title="Link to this heading">#</a></h1>
+         
+         
+         <p>
+            最新版は常に<a href="https://mkvtoolnix.download/">MKVToolNixの拠点</a>で入手できます。
+            </p>
+         </div>
+   </body>
+</html>

@@ -1,0 +1,6 @@
+[console_scripts]
+vpy-unittest=vsengine.tests.unittest:main
+
+[pytest11]
+vsengine=vsengine.tests.pytest
+

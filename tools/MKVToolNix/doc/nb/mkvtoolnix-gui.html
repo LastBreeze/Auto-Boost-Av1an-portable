@@ -1,0 +1,138 @@
+<!DOCTYPE html
+  PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
+<html>
+   <head>
+      <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+      <title>mkvtoolnix-gui -- en GUI for mkvmerge1 inkludert et kapittel og en datahoderedigerer</title>
+      <link rel="stylesheet" type="text/css" href="mkvtoolnix-doc.css">
+   </head>
+   <body>
+      <div class="heading">mkvtoolnix-gui -- en GUI for <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a> inkludert et kapittel og en datahoderedigerer</div>
+      <hr>
+      <div id="toc" class="toc">
+         <h1>Table of contents</h1>
+         <ul>
+            <li><a href="#mkvtoolnix-gui.synopsis">1. Sammendrag</a></li>
+            <li><a href="#mkvtoolnix-gui.description">2. Beskrivelse</a></li>
+            <li><a href="#mkvtoolnix-gui.seealso">3. Se også</a></li>
+            <li><a href="#mkvtoolnix-gui.www">4. WWW</a></li>
+         </ul>
+      </div>
+      <div class="content">
+         <h1><a name="mkvtoolnix-gui.synopsis">1. Sammendrag</a><a class="headerlink" href="#mkvtoolnix-gui.synopsis" title="Link to this heading">#</a></h1>
+         
+         
+         <div class="cmdsynopsis"><span class="commandname">mkvtoolnix-gui</span> [[konfigurasjonsfilnavn.mtxcfg] | [kildefil.ext] | [matroska-fil.mkv] | [kapittelfil.ext] | [matroska-fil.mkv]]</div>
+         
+         <h1><a name="mkvtoolnix-gui.description">2. Beskrivelse</a><a class="headerlink" href="#mkvtoolnix-gui.description" title="Link to this heading">#</a></h1>
+         
+         
+         <p>
+            <span class="productname">mkvtoolnix-gui</span>(1) er en Qt-basert GUI for <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a>. Den implementerer også
+            <a href="mkvinfo.html"><span class="productname">mkvinfo</span>(1)</a>s og <a href="mkvpropedit.html"><span class="productname">mkvpropedit</span>(1)</a>s funksjonalitet og vil utvikle seg til å dekke
+            <a href="mkvextract.html"><span class="productname">mkvextract</span>(1)</a> også. Alle innstillinger (f.eks. kildefiler, sporalternativer
+            osv.) kan lagres og gjenopprettes.
+            </p>
+         
+         
+         <p>
+            Oppføring av konfigurasjonsfilnavn med filtypen <span class="literal">.mtxcfg</span>
+            får GUI til å laste disse konfigurasjonsfilene i det aktuelle
+            verktøyet. Ethvert annet filnavn legges til som en kildefil for
+            multipleksing, åpnet i infoverktøyet, kapittelredigereren eller i
+            datahoderedigereren avhengig av gjeldende modus. Gjeldende modus kan endres
+            med --merge, --info, --edit-chapters eller --edit-headers. Standardmodusen
+            er å legge til filer for multipleksing.
+            </p>
+         
+         
+         <p>
+            Merk at hvis en forekomst av programmet allerede kjører når programmet
+            startes en gang til, håndteres alle filnavnene som er angitt på
+            kommandolinjen, av forekomsten som allerede kjører.
+            </p>
+         
+         
+         <table class="variablelist">
+            <thead>
+               <tr>
+                  <th>Option</th>
+                  <th>Description</th>
+               </tr>
+            </thead>
+            <tbody>
+               <tr>
+                  <td class="varlistoption"><span class="option">--merge</span></td>
+                  <td>
+                     
+                     <p>Alle følgende filnavn vil bli lagt til som kildefiler til den gjeldende
+                        multipleksjobben. Dette er standardmodusen.</p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><span class="option">--info</span></td>
+                  <td>
+                     
+                     <p>Alle følgende filnavn åpnes i infoverktøyet.</p>
+                     
+                     <p>I tillegg vil infoverktøyet bli valgt ved oppstart i stedet for
+                        multiplekserverktøyet.</p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><span class="option">--edit-chapters</span></td>
+                  <td>
+                     
+                     <p>Alle følgende filnavn åpnes i kapittelredigereren.</p>
+                     
+                     <p>I tillegg vil infoverktøyet bli valgt ved oppstart i stedet for
+                        multiplekserverktøyet.</p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><span class="option">--edit-headers</span></td>
+                  <td>
+                     
+                     <p>Alle følgende filnavn åpnes i datahoderedigereren.</p>
+                     
+                     <p>I tillegg vil datahoderedigereren bli valgt ved oppstart i stedet for
+                        multiplekserverktøyet.</p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><span class="option">-h</span>, <span class="option">--help</span></td>
+                  <td>
+                     
+                     <p>
+                        Vis bruksinformasjon og avslutt.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><span class="option">-V</span>, <span class="option">--version</span></td>
+                  <td>
+                     
+                     <p>
+                        Vis versjonsinformasjon og avslutt.
+                        </p>
+                     </td>
+               </tr>
+            </tbody>
+         </table>
+         
+         <h1><a name="mkvtoolnix-gui.seealso">3. Se også</a><a class="headerlink" href="#mkvtoolnix-gui.seealso" title="Link to this heading">#</a></h1>
+         
+         
+         <p>
+            <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a>, <a href="mkvextract.html"><span class="productname">mkvextract</span>(1)</a>, <a href="mkvinfo.html"><span class="productname">mkvinfo</span>(1)</a>, <a href="mkvpropedit.html"><span class="productname">mkvpropedit</span>(1)</a>
+            </p>
+         
+         <h1><a name="mkvtoolnix-gui.www">4. WWW</a><a class="headerlink" href="#mkvtoolnix-gui.www" title="Link to this heading">#</a></h1>
+         
+         
+         <p>
+            Den nyeste versjonen finner du alltid på <a href="https://mkvtoolnix.download/">MKVToolNixs hjemmeside</a>.
+            </p>
+         </div>
+   </body>
+</html>

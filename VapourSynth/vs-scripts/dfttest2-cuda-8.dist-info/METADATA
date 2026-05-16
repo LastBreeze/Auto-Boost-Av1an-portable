@@ -1,0 +1,5 @@
+Metadata-Version: 2.1
+Name: dfttest2-cuda
+Version: 8
+Summary: DFTTest re-implemetation (CUDA)
+Platform: All

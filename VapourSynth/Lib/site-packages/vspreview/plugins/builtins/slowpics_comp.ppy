@@ -1,0 +1,48 @@
+from __future__ import annotations
+
+from PyQt6.QtCore import QKeyCombination, Qt
+from PyQt6.QtGui import QKeySequence
+from PyQt6.QtWidgets import QTabWidget
+
+from vspreview.main import MainWindow
+from vspreview.plugins import AbstractPlugin, PluginConfig
+
+from .slowpics_comp import CompUploadWidget, CompSettings, CompHistoryWidget
+
+__all__ = [
+    'CompPlugin'
+]
+
+
+class CompPlugin(AbstractPlugin, QTabWidget):
+    _config = PluginConfig('dev.setsugen.comp', 'SlowPics Comps')
+
+    def __init__(self, main: MainWindow) -> None:
+        super().__init__(main)
+
+        self.settings_tab = CompSettings(self)
+
+    def setup_ui(self) -> None:
+        self.main_tab = CompUploadWidget(self.settings_tab)
+        self.history_tab = CompHistoryWidget()
+
+        self.setUsesScrollButtons(False)
+
+        self.addTab(self.main_tab, 'Upload')
+        self.addTab(self.settings_tab, 'Settings')
+        self.addTab(self.history_tab, 'History')
+
+        self.settings.globals.settings = self.settings_tab
+
+    def add_shortcuts(self) -> None:
+        self.add_shortcut(
+            "add_current_frame_to_comp",
+            'self.main_tab',
+            'self.main_tab.add_current_frame_to_comp',
+            QKeySequence(QKeyCombination(Qt.Modifier.CTRL, Qt.Key.Key_Space).toCombined()),
+            "Add current frame to \"Manual frames\""
+        )
+        super().add_shortcuts()
+
+    def on_current_output_changed(self, index: int, prev_index: int) -> None:
+        self.main_tab.on_current_output_changed(index, prev_index)

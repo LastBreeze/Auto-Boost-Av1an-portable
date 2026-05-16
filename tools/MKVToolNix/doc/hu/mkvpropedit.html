@@ -1,0 +1,1188 @@
+<!DOCTYPE html
+  PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
+<html>
+   <head>
+      <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+      <title>mkvpropedit -- Meglévő Matroska fájlok tulajdonságainak módosítása teljes remux nélkül</title>
+      <link rel="stylesheet" type="text/css" href="mkvtoolnix-doc.css">
+   </head>
+   <body>
+      <div class="heading">mkvpropedit -- Meglévő <span class="productname">Matroska</span><sup>(tm)</sup> fájlok tulajdonságainak módosítása teljes remux nélkül</div>
+      <hr>
+      <div id="toc" class="toc">
+         <h1>Table of contents</h1>
+         <ul>
+            <li><a href="#mkvpropedit.synopsis">1. Szinopszis</a></li>
+            <li><a href="#mkvpropedit.description">2. Leírás</a></li>
+            <li><a href="#mkvpropedit.edit_selectors">3. Szerkesztés szelektorok</a></li>
+            <li><a href="#mkvpropedit.attachment_selectors">4. Csatlakozási szelektorok</a></li>
+            <li><a href="#mkvpropedit.language_handling">5. Nyelvi kezelés</a></li>
+            <li><a href="#mkvpropedit.examples">6. Példák</a></li>
+            <li><a href="#d4e1318">7. Kilépési kódok</a></li>
+            <li><a href="#mkvinfo.text_files_and_charsets">8. Szövegfájlok és karakterkészlet-átalakítások</a></li>
+            <li><a href="#mkvpropedit.environment_variables">9. Környezeti változók</a></li>
+            <li><a href="#mkvpropedit.seealso">10. Lásd még</a></li>
+            <li><a href="#mkvpropedit.www">11. WWW</a></li>
+         </ul>
+      </div>
+      <div class="content">
+         <h1><a name="mkvpropedit.synopsis">1. Szinopszis</a><a class="headerlink" href="#mkvpropedit.synopsis" title="Link to this heading">#</a></h1>
+         
+         
+         <div class="cmdsynopsis"><span class="commandname">mkvpropedit</span> options {source-filame} {actions}</div>
+         
+         <h1><a name="mkvpropedit.description">2. Leírás</a><a class="headerlink" href="#mkvpropedit.description" title="Link to this heading">#</a></h1>
+         
+         
+         <p>
+            Ez a program elemez egy meglévő <span class="productname">Matroska</span><sup>(tm)</sup> fájlt, és módosítja annak néhány
+            tulajdonságát. Ezután ezeket a módosításokat a meglévő fájlba írja. A
+            módosítható tulajdonságok közé tartoznak a szegmensinformációs elemek (pl. a
+            cím) és a sávcímek (pl. a nyelvi kód, az 'alapértelmezett sáv' jelző vagy a
+            név).
+            </p>
+         
+         
+         <p>
+            Lehetőségek:
+            </p>
+         
+         
+         <table class="variablelist">
+            <thead>
+               <tr>
+                  <th>Option</th>
+                  <th>Description</th>
+               </tr>
+            </thead>
+            <tbody>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.list_property_names"><span class="option">-l</span>, <span class="option">--list-property-names</span></a><a class="headerlink" href="#mkvpropedit.description.list_property_names" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Felsorolja az összes ismert és szerkeszthető tulajdonság nevét, típusát
+                        (string, integer, boolean stb.) és rövid leírását. A program ezt követően
+                        kilép. Ezért a <span class="parameter">forrás-fájlnév</span> paramétert nem kell
+                        megadni.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.parse_mode"><span class="option">-p</span>, <span class="option">--parse-mode</span>
+                        <span class="parameter">mode</span></a><a class="headerlink" href="#mkvpropedit.description.parse_mode" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Beállítja az elemzési módot. A '<span class="parameter">mode</span>' paraméter lehet
+                        '<span class="literal">fast</span>' (ami az alapértelmezett is) vagy
+                        '<span class="literal">full</span>'. A '<span class="literal">fast</span>' mód nem elemzi a
+                        teljes fájlt, hanem a meta seek elemeket használja a forrásfájl szükséges
+                        elemeinek megtalálására. Az esetek 99%-ában ez elegendő. De olyan fájlok
+                        esetében, amelyek nem tartalmaznak meta seek elemeket, vagy amelyek
+                        sérültek, a felhasználónak esetleg a '<span class="literal">full</span>' elemzési
+                        módot kell beállítania. Egy fájl teljes átvizsgálása néhány percig is
+                        eltarthat, míg a gyors átvizsgálás csak másodperceket vesz igénybe.
+                        </p>
+                     </td>
+               </tr>
+            </tbody>
+         </table>
+         
+         
+         <p>
+            A pálya- és szegmensinformációs tulajdonságokkal foglalkozó műveletek:
+            </p>
+         
+         
+         <table class="variablelist">
+            <thead>
+               <tr>
+                  <th>Option</th>
+                  <th>Description</th>
+               </tr>
+            </thead>
+            <tbody>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.edit"><span class="option">-e</span>, <span class="option">--szerkesztés</span>
+                        <span class="parameter">választó</span></a><a class="headerlink" href="#mkvpropedit.description.edit" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Beállítja azt a <span class="productname">Matroska</span><sup>(tm)</sup> fájlszakaszt (szegmensinformáció vagy egy adott
+                        sáv fejléc), amelyre a következő <a href="#mkvpropedit.description.add">add</a>, <a href="#mkvpropedit.description.set">set</a> és <a href="#mkvpropedit.description.delete">delete</a> műveletek hatnak. Ez
+                        az opció többször is használható, hogy egynél több elemet módosítson.
+                        </p>
+                     
+                     
+                     <p>
+                        Alapértelmezés szerint az <span class="productname">mkvpropedit</span>(1) szerkeszti a szegmensinformációs
+                        részt.
+                        </p>
+                     
+                     
+                     <p>
+                        A szintaxis teljes leírását lásd a <a href="#mkvpropedit.edit_selectors">választók szerkesztése</a> című
+                        részben.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.add"><span class="option">-a</span>, <span class="option">--add</span>
+                        <span class="parameter">name</span>=<span class="parameter">value</span></a><a class="headerlink" href="#mkvpropedit.description.add" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Hozzáad egy <span class="parameter">név</span> tulajdonságot a
+                        <span class="parameter">érték</span> értékkel. A tulajdonság akkor is hozzáadásra
+                        kerül, ha már létezik ilyen tulajdonság. Vegye figyelembe, hogy a legtöbb
+                        tulajdonság egyedi, és nem fordulhat elő többször.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.set"><span class="option">-s</span>, <span class="option">--set</span>
+                        <span class="parameter">name</span>=<span class="parameter">value</span></a><a class="headerlink" href="#mkvpropedit.description.set" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        A <span class="parameter">név</span> tulajdonság minden előfordulását a
+                        <span class="parameter">érték</span> értékre állítja. Ha ilyen tulajdonság nem
+                        létezik, akkor hozzáadódik.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.delete"><span class="option">-d</span>, <span class="option">--delete</span> <span class="parameter">name</span></a><a class="headerlink" href="#mkvpropedit.description.delete" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Törli a <span class="parameter">név</span> tulajdonság összes előfordulását. Vegye
+                        figyelembe, hogy egyes tulajdonságok kötelezőek, és nem törölhetők.
+                        </p>
+                     </td>
+               </tr>
+            </tbody>
+         </table>
+         
+         
+         <p>
+            Címkékkel és fejezetekkel foglalkozó műveletek:
+            </p>
+         
+         
+         <table class="variablelist">
+            <thead>
+               <tr>
+                  <th>Option</th>
+                  <th>Description</th>
+               </tr>
+            </thead>
+            <tbody>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.tags"><span class="option">-t</span>, <span class="option">--tags</span>
+                        <span class="parameter">selector</span>:<span class="parameter">filename</span></a><a class="headerlink" href="#mkvpropedit.description.tags" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        A fájlban lévő címkéket a <span class="filename">filename</span> címkékkel egészíti
+                        ki vagy helyettesíti, vagy eltávolítja őket, ha a
+                        <span class="filename">filename</span> üres. <span class="productname">mkvpropedit</span>(1) ugyanazt az XML
+                        címkeformátumot olvassa, mint amit az <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a> is.
+                        </p>
+                     
+                     
+                     <p>
+                        A <span class="parameter">választó</span> a <span class="constant">all</span>,
+                        <span class="constant">global</span> vagy <span class="constant">track</span> szavak egyikének
+                        kell lennie. A <span class="constant">all</span> esetén az <span class="productname">mkvpropedit</span>(1) az összes
+                        taget kicseréli vagy eltávolítja a fájlban. A <span class="constant">global</span>
+                        esetén csak a globális címkék lesznek kicserélve vagy eltávolítva.
+                        </p>
+                     
+                     
+                     <p>
+                        A <span class="constant">track</span> <span class="productname">mkvpropedit</span>(1) egy adott trackhez tartozó
+                        címkéket cserél ki. Emellett a <span class="filename">filename</span>-ből beolvasott
+                        címkék ugyanahhoz a sávhoz lesznek rendelve. A sávot ugyanúgy kell megadni,
+                        ahogyan a <a href="#mkvpropedit.edit_selectors">szerkesztési
+                           szelektorok</a> is megadhatók (lásd alább), pl. <span class="code">--tags
+                           track:a1:new-audio-tags.xml</span>.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.add_track_statistics_tags"><span class="option">--add-track-statistics-tags</span></a><a class="headerlink" href="#mkvpropedit.description.add_track_statistics_tags" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Kiszámítja a statisztikákat a fájlban lévő összes zeneszámra, és új
+                        statisztikai címkéket ad hozzá. Ha a fájl már tartalmaz ilyen címkéket,
+                        akkor azokat frissíti.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.delete_track_statistics_tags"><span class="option">--delete-track-statistics-tags</span></a><a class="headerlink" href="#mkvpropedit.description.delete_track_statistics_tags" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Törli az összes meglévő pályastatisztikai címkét egy fájlból. Ha a fájl nem
+                        tartalmaz pályastatisztikai címkéket, akkor nem módosítja.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.chapters"><span class="option">-c</span>, <span class="option">--chapters</span>
+                        <span class="parameter">filename</span></a><a class="headerlink" href="#mkvpropedit.description.chapters" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        A fájlban lévő fejezetek hozzáadása vagy helyettesítése a
+                        <span class="filename">filename</span> fájlban lévő fejezetekkel, vagy eltávolítása,
+                        ha a <span class="filename">filename</span> üres. <span class="productname">mkvpropedit</span>(1) ugyanazokat az XML és
+                        egyszerű fejezetformátumokat olvassa, mint a <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a> is.
+                        </p>
+                     </td>
+               </tr>
+            </tbody>
+         </table>
+         
+         
+         <p>
+            A mellékletek kezelésére szolgáló műveletek:
+            </p>
+         
+         
+         <table class="variablelist">
+            <thead>
+               <tr>
+                  <th>Option</th>
+                  <th>Description</th>
+               </tr>
+            </thead>
+            <tbody>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.add_attachment"><span class="option">--add-attachment</span> <span class="parameter">filename</span></a><a class="headerlink" href="#mkvpropedit.description.add_attachment" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Új csatolmányt ad hozzá a <span class="parameter">fájlnév</span> címről.
+                        </p>
+                     
+                     
+                     <p>
+                        Ha a <span class="option">--csatolmány-név</span> opciót ezt az opciót megelőzően
+                        használták, akkor annak értéke lesz az új csatolmány neve. Ellenkező esetben
+                        a <span class="parameter">filename</span> értékéből származik.
+                        </p>
+                     
+                     
+                     <p>
+                        Ha ezt az opciót megelőzően a <span class="option">--attachment-mime-type</span> opciót
+                        használták, akkor annak értéke lesz az új csatolmány MIME-típusa. Ellenkező
+                        esetben a <span class="parameter">filename</span> tartalmából automatikusan
+                        felismerésre kerül.
+                        </p>
+                     
+                     
+                     <p>
+                        Ha a <span class="option">--csatolás-leírás</span> opciót ezt az opciót megelőzően
+                        használták, akkor annak értéke lesz az új csatolmány leírása. Ellenkező
+                        esetben nem kerül beállításra leírás.
+                        </p>
+                     
+                     
+                     <p>
+                        Ha ezt az opciót megelőzően a <span class="option">--attachment-uid</span> opciót
+                        használták, akkor annak értéke lesz az új csatolmány UID-je. Ellenkező
+                        esetben a rendszer automatikusan egy véletlenszerű UID-t generál.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.replace_attachment"><span class="option">---helyettesítő csatolás</span>
+                        <span class="parameter">kiválasztó</span><span class="literal">:</span><span class="parameter">fájlnév</span></a><a class="headerlink" href="#mkvpropedit.description.replace_attachment" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Egy vagy több, a <span class="parameter">kiválasztó</span>-nek megfelelő csatolmányt
+                        kicserél a <span class="parameter">fájlnév</span> fájlra. Ha egynél több meglévő
+                        csatolmány felel meg a <span class="parameter">kiválasztó</span>-nek, akkor az
+                        összes csatolmány tartalmát a <span class="parameter">filenév</span> tartalmával
+                        helyettesíti.
+                        </p>
+                     
+                     
+                     <p>
+                        A <span class="parameter">választó</span> négyféleképpen alakulhat. Ezeket az
+                        alábbiakban a <a href="#mkvpropedit.attachment_selectors">attachment
+                           selectors</a> szakaszban ismertetjük.
+                        </p>
+                     
+                     
+                     <p>
+                        Ha ezt az opciót megelőzően a <span class="option">--csatolmány-név</span> opciót
+                        használták, akkor annak értéke minden egyes módosított csatolmány új
+                        neveként kerül beállításra. Ellenkező esetben a nevek nem változnak.
+                        </p>
+                     
+                     
+                     <p>
+                        Ha ezt az opciót megelőzően a <span class="option">--attachment-mime-type</span> opciót
+                        használták, akkor annak értéke minden egyes módosított csatolmány új
+                        MIME-típusaként kerül beállításra. Ellenkező esetben a MIME típusok nem
+                        változnak.
+                        </p>
+                     
+                     
+                     <p>
+                        Ha ezt az opciót megelőzően a <span class="option">--csatolás-leírás</span> opciót
+                        használták, akkor annak értéke minden egyes módosított csatolmány új
+                        leírásaként kerül beállításra. Ellenkező esetben a leírások nem változnak.
+                        </p>
+                     
+                     
+                     <p>
+                        Ha ezt az opciót megelőzően a <span class="option">--attachment-uid</span> opciót
+                        használták, akkor annak értéke minden egyes módosított csatolmány új
+                        UID-jeként kerül beállításra. Ellenkező esetben az UID-k nem változnak.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.update_attachment"><span class="option">--update-attachment</span> <span class="parameter">selector</span></a><a class="headerlink" href="#mkvpropedit.description.update_attachment" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Egy vagy több olyan csatolmány tulajdonságainak beállítása, amelyek
+                        megfelelnek a <span class="parameter">kiválasztó</span> értéknek. Ha egynél több
+                        meglévő csatolmány felel meg a <span class="parameter">választó</span> értéknek,
+                        akkor az összes tulajdonságuk frissül.
+                        </p>
+                     
+                     
+                     <p>
+                        A <span class="parameter">választó</span> négyféleképpen alakulhat. Ezeket az
+                        alábbiakban a <a href="#mkvpropedit.attachment_selectors">attachment
+                           selectors</a> szakaszban ismertetjük.
+                        </p>
+                     
+                     
+                     <p>
+                        Ha ezt az opciót megelőzően a <span class="option">--csatolmány-név</span> opciót
+                        használták, akkor annak értéke minden egyes módosított csatolmány új
+                        neveként kerül beállításra. Ellenkező esetben a nevek nem változnak.
+                        </p>
+                     
+                     
+                     <p>
+                        Ha ezt az opciót megelőzően a <span class="option">--attachment-mime-type</span> opciót
+                        használták, akkor annak értéke minden egyes módosított csatolmány új
+                        MIME-típusaként kerül beállításra. Ellenkező esetben a MIME típusok nem
+                        változnak.
+                        </p>
+                     
+                     
+                     <p>
+                        Ha ezt az opciót megelőzően a <span class="option">--csatolás-leírás</span> opciót
+                        használták, akkor annak értéke minden egyes módosított csatolmány új
+                        leírásaként kerül beállításra. Ellenkező esetben a leírások nem változnak.
+                        </p>
+                     
+                     
+                     <p>
+                        Ha ezt az opciót megelőzően a <span class="option">--attachment-uid</span> opciót
+                        használták, akkor annak értéke minden egyes módosított csatolmány új
+                        UID-jeként kerül beállításra. Ellenkező esetben az UID-k nem változnak.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.delete_attachment"><span class="option">--delete-attachment</span> <span class="parameter">selector</span></a><a class="headerlink" href="#mkvpropedit.description.delete_attachment" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Töröl egy vagy több olyan csatolmányt, amelyek megfelelnek a
+                        <span class="parameter">választó</span>.
+                        </p>
+                     
+                     
+                     <p>
+                        A <span class="parameter">választó</span> négyféleképpen alakulhat. Ezeket az
+                        alábbiakban a <a href="#mkvpropedit.attachment_selectors">attachment
+                           selectors</a> szakaszban ismertetjük.
+                        </p>
+                     </td>
+               </tr>
+            </tbody>
+         </table>
+         
+         
+         <p>
+            A csatolási műveletek lehetőségei:
+            </p>
+         
+         
+         <table class="variablelist">
+            <thead>
+               <tr>
+                  <th>Option</th>
+                  <th>Description</th>
+               </tr>
+            </thead>
+            <tbody>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.attachment_name"><span class="option">--csatlakozás-név</span> <span class="parameter">név</span></a><a class="headerlink" href="#mkvpropedit.description.attachment_name" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Beállítja a következő <span class="option">--add-attachment</span> vagy
+                        <span class="option">--replace-attachment</span> művelethez használandó nevet.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.attachment_mime_type"><span class="option">--attchment-mime-type</span> <span class="parameter">mime-type</span></a><a class="headerlink" href="#mkvpropedit.description.attachment_mime_type" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Beállítja a következő <span class="option">--add-attachment</span> vagy
+                        <span class="option">--replace-attachment</span> művelethez használandó MIME-típust.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.attachment_description"><span class="option">--attchment-description</span> <span class="parameter">leírás</span></a><a class="headerlink" href="#mkvpropedit.description.attachment_description" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Beállítja a következő <span class="option">--add-attachment</span> vagy
+                        <span class="option">--replace-attachment</span> művelethez használandó leírást.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.enable_legacy_font_mime_types"><span class="option">--enable-legacy-font-mime-types</span></a><a class="headerlink" href="#mkvpropedit.description.enable_legacy_font_mime_types" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Lehetővé teszi a régi <span class="abbrev">MIME</span> típusok használatát bizonyos
+                        típusú betűmellékletekhez. Például a
+                        '<span class="literal">application/x-truetype-font</span>' a TrueType betűtípusok
+                        esetében a '<span class="literal">fonts/ttf</span>' helyett használatos.
+                        </p>
+                     
+                     
+                     <p>
+                        Ez mind az új mellékletek hozzáadását, mind a meglévő mellékletek cseréjét
+                        érinti, de csak akkor, ha az új <span class="abbrev">MIME</span> típus nincs megadva. A
+                        többi meglévő csatolmány nem változik.
+                        </p>
+                     
+                     
+                     <p>
+                        Az érintett <span class="abbrev">MIME</span> típusok a következők:
+                        '<span class="literal">font/sfnt</span>', '<span class="literal">font/ttf</span>' és
+                        '<span class="literal">font/collection</span>', amelyek mind a
+                        '<span class="literal">application/x-truetype-fonts</span>'-ra vannak leképezve,
+                        valamint a '<span class="literal">font/otf</span>', amely a
+                        '<span class="literal">application/vnd.ms-opentype</span>'.
+                        </p>
+                     </td>
+               </tr>
+            </tbody>
+         </table>
+         
+         
+         <p>
+            Egyéb lehetőségek:
+            </p>
+         
+         
+         <table class="variablelist">
+            <thead>
+               <tr>
+                  <th>Option</th>
+                  <th>Description</th>
+               </tr>
+            </thead>
+            <tbody>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.disable_language_ietf"><span class="option">--disable-language-ietf</span></a><a class="headerlink" href="#mkvpropedit.description.disable_language_ietf" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Normális esetben, amikor a felhasználó a '<span class="literal">language</span>' pálya
+                        fejléc tulajdonságának módosítását kéri, az <span class="productname">mkvpropedit</span>(1) ugyanezt a
+                        módosítást az új <span class="classname">LanguageIETF</span> pálya fejléc elemre is
+                        alkalmazza a régi <span class="classname">Language</span> elem mellett. Ha ezt az
+                        opciót használja, a módosítás csak a régi <span class="classname">Language</span>
+                        elemre kerül alkalmazásra.
+                        </p>
+                     
+                     
+                     <p>
+                        Ez az opció nem érinti a '<span class="literal">language-ietf</span>' sávfejléc
+                        tulajdonságon keresztül kért változásokat.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.normalize_language_ietf"><span class="option">--normalize-language-ietf</span> <span class="parameter">mode</span></a><a class="headerlink" href="#mkvpropedit.description.normalize_language_ietf" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Engedélyezi az összes IETF BCP 47 nyelvi tag normalizálását vagy a kanonikus
+                        formájukra a '<span class="literal">canonical</span>' móddal, vagy a kiterjesztett
+                        nyelvi altagok formájára a '<span class="literal">extlang</span>' móddal, vagy
+                        kikapcsolja a '<span class="literal">off</span>' móddal. Alapértelmezés szerint a
+                        kanonikus formára való normalizálás kerül alkalmazásra.
+                        </p>
+                     
+                     
+                     <p>
+                        A kanonikus formában minden olyan alcímke, amelyhez létezik preferált érték,
+                        az adott preferált értékekkel van helyettesítve. Így pl. a
+                        '<span class="literal">zh-yue-jyutping</span>'-t '<span class="literal">yue-jyutping</span>'-ra
+                        vagy a '<span class="literal">fr-FX</span>'-t '<span class="literal">fr-FR</span>'-ra alakítja
+                        át.
+                        </p>
+                     
+                     
+                     <p>
+                        A kiterjesztett nyelvi alcímkeforma esetében először a kanonikus forma épül
+                        fel. Ezután minden olyan elsődleges nyelv, amelyhez létezik kiterjesztett
+                        nyelvi alcímke, helyébe az adott kiterjesztett nyelvi alcímke és annak
+                        előtagja lép. Ez például a '<span class="literal">yue-jyutping</span>'-t visszaváltja
+                        '<span class="literal">zh-yue-jyutping</span>'-ra, de nincs hatással a
+                        '<span class="literal">fr-FR</span>'-ra, mivel a '<span class="literal">fr</span>' nem egy
+                        kiterjesztett nyelvi altag.
+                        </p>
+                     
+                     
+                     <p>
+                        Ez a normalizálás csak a ténylegesen megváltozott elemekre vonatkozik:
+                        </p>
+                     
+                     
+                     <ul>
+                        
+                        <li>
+                           
+                           <p>
+                              A sávfejlécek szerkesztésekor csak a szerkesztési specifikációkon keresztül
+                              beállított sávnyelvi elemeket érinti. A nem szerkesztett sávok nyelvei nem
+                              változnak. A sáv szerkesztése, de a nyelven kívül csak más tulajdonságok
+                              beállítása sem befolyásolja a nyelvet.
+                              </p>
+                           </li>
+                        
+                        
+                        <li>
+                           
+                           <p>
+                              A fejezetek szerkesztésekor az összes fejezetelem összes nyelvi elemét
+                              érinti, mivel a meglévő fejezetek mindig teljes mértékben kicserélődnek.
+                              </p>
+                           </li>
+                        
+                        
+                        <li>
+                           
+                           <p>
+                              A címkék szerkesztésekor csak a ténylegesen kicserélt címkék nyelvi elemeit
+                              érinti. Például, ha globális címkéket cserél, akkor a meglévő sávcímkékre
+                              nincs hatással.
+                              </p>
+                           </li>
+                        </ul>
+                     
+                     
+                     <p>
+                        A legjobb módja a fájlban lévő összes nyelvi tag normalizálásának az, ha az
+                        <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a> segítségével remuxolod a fájlt, és a
+                        '<span class="literal">--normalize-language-ietf</span>' opciót a kívánt módra
+                        állítod.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.command_line_charset"><span class="option">--command-line-charset</span>
+                        <span class="parameter">karakterkészlet</span></a><a class="headerlink" href="#mkvpropedit.description.command_line_charset" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Beállítja a karakterkészletet, amelyből a parancssorban megadott
+                        karakterláncokat konvertálni kell. Alapértelmezés szerint a rendszer
+                        aktuális területi beállítása által megadott karakterkészlet.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.output_charset"><span class="option">--output-charset</span> <span class="parameter">karakterkészlet</span></a><a class="headerlink" href="#mkvpropedit.description.output_charset" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Beállítja azt a karakterkészletet, amelybe a kimeneti karakterláncokat
+                        konvertálja.  Alapértelmezés szerint a rendszer aktuális területi beállítása
+                        által megadott karakterkészlet.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.redirect_output"><span class="option">-r</span>, <span class="option">--redirect-output</span>
+                        <span class="parameter">file-name</span></a><a class="headerlink" href="#mkvpropedit.description.redirect_output" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Az összes üzenetet a konzol helyett a <span class="parameter">fájlnév</span> fájlba
+                        írja.  Bár ez könnyen elvégezhető a kimenet átirányításával, vannak olyan
+                        esetek, amikor szükség van erre az opcióra: amikor a terminál újraértelmezi
+                        a kimenetet, mielőtt kiírná azt egy fájlba.  A <a href="#mkvpropedit.description.output_charset">--output-charset</a>
+                        karakterkészletet tiszteletben tartja.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.ui_language"><span class="option">--ui-language</span> <span class="parameter">code</span></a><a class="headerlink" href="#mkvpropedit.description.ui_language" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Kényszeríti a nyelv <span class="parameter">kód</span> fordításainak használatát
+                        (pl. '<span class="literal">de_DE</span>' a német fordításokhoz). A
+                        '<span class="literal">list</span>' mint <span class="parameter">kód</span> megadásával a
+                        program kiadja a rendelkezésre álló fordítások listáját.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.abort_on_warnings"><span class="option">--abort-on-warnings</span></a><a class="headerlink" href="#mkvpropedit.description.abort_on_warnings" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        A program megszakítására utasítja a programot az első figyelmeztetés
+                        megjelenése után. A program kilépési kódja 1 lesz.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.debug"><span class="option">--debug</span> <span class="parameter">topic</span></a><a class="headerlink" href="#mkvpropedit.description.debug" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        A hibakeresés bekapcsolása egy adott funkcióhoz. Ez az opció csak fejlesztők
+                        számára hasznos.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.engage"><span class="option">--engage</span> <span class="parameter">feature</span></a><a class="headerlink" href="#mkvpropedit.description.engage" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Kapcsolja be a kísérleti funkciókat. Az elérhető funkciók listája a
+                        <span class="command">mkvpropedit --engage list</span> paranccsal kérhető le. Ezek a
+                        funkciók nem használhatók normál helyzetekben.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.gui_mode"><span class="option">--gui-mode</span></a><a class="headerlink" href="#mkvpropedit.description.gui_mode" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Bekapcsolja a GUI módot. Ebben az üzemmódban speciálisan formázott sorokat
+                        adhat ki, amelyekkel a vezérlő GUI-nak elmondhatja, hogy mi történik. Ezek
+                        az üzenetek a '<span class="literal">#GUI#message</span>' formátumot követik. Az
+                        üzenetet kulcs/érték párok követhetik, mint a
+                        '<span class="literal">#GUI#üzenet#key1=value1#key2=value2...</span>'. Sem az
+                        üzenetek, sem a kulcsok nem kerülnek lefordításra, és mindig angol nyelven
+                        kerülnek kiadásra.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.verbose"><span class="option">-v</span>, <span class="option">--verbose</span></a><a class="headerlink" href="#mkvpropedit.description.verbose" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Legyen bőbeszédű, és mutassa meg az összes fontos <span class="productname">Matroska</span><sup>(tm)</sup> elemet olvasás
+                        közben.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.help"><span class="option">-h</span>, <span class="option">--help</span></a><a class="headerlink" href="#mkvpropedit.description.help" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Használati információk megjelenítése és kilépés.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.version"><span class="option">-V</span>, <span class="option">--version</span></a><a class="headerlink" href="#mkvpropedit.description.version" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Verzióinformációk megjelenítése és kilépés.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.at_sign"><span class="option">@</span><span class="parameter">options-file.json</span></a><a class="headerlink" href="#mkvpropedit.description.at_sign" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        További parancssori argumentumokat olvas be a
+                        <span class="parameter">options-file</span> fájlból. Az ilyen fájlok támogatott
+                        formátumainak teljes magyarázatát lásd az <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a> man oldal "Opciós
+                        fájlok" című szakaszában.
+                        </p>
+                     </td>
+               </tr>
+            </tbody>
+         </table>
+         
+         <h1><a name="mkvpropedit.edit_selectors">3. Szerkesztés szelektorok</a><a class="headerlink" href="#mkvpropedit.edit_selectors" title="Link to this heading">#</a></h1>
+         
+         
+         <p>
+            A <a href="#mkvpropedit.description.edit">--szerkesztés</a>
+            opció beállítja azt a <span class="productname">Matroska</span><sup>(tm)</sup> fájlrészletet (szegmensinformációk vagy egy
+            adott sáv fejléceit), amelyet az összes következő <a href="#mkvpropedit.description.add">add</a>, <a href="#mkvpropedit.description.set">set</a> és <a href="#mkvpropedit.description.delete">delete</a> műveleteket végzi. Ez
+            addig marad érvényben, amíg a következő <a href="#mkvpropedit.description.edit">--edit</a> opciót
+            meg nem találjuk. Ennek az opciónak az argumentumát nevezzük szerkesztési
+            szelektornak.
+            </p>
+         
+         
+         <p>
+            Alapértelmezés szerint az <span class="productname">mkvpropedit</span>(1) szerkeszti a szegmensinformációs
+            részt.
+            </p>
+         
+         
+         <h2><a name="mkvpropedit.edit_selectors.segment_info">3.1. Információs szegmens</a><a class="headerlink" href="#mkvpropedit.edit_selectors.segment_info" title="Link to this heading">#</a></h2>
+         
+         
+         <p>
+            A szegmensinformáció e három szó egyikével választható ki:
+            '<span class="literal">info</span>', '<span class="literal">segment_info</span>' vagy
+            '<span class="literal">segmentinfo</span>'. Olyan tulajdonságokat tartalmaz, mint a
+            szegmens címe vagy a szegmens <span class="abbrev">UID</span>.
+            </p>
+         
+         
+         
+         <h2><a name="mkvpropedit.edit_selectors.track_headers">3.2. Pálya fejlécek</a><a class="headerlink" href="#mkvpropedit.edit_selectors.track_headers" title="Link to this heading">#</a></h2>
+         
+         
+         <p>
+            A sávok fejléceit egy kissé összetettebb szelektorral lehet
+            kiválasztani. Minden variáció a '<span class="literal">track:</span>' kezdetűvel
+            kezdődik. A sávfejléc tulajdonságai olyan elemeket tartalmaznak, mint a
+            nyelvi kód, az 'alapértelmezett sáv' jelző vagy a sáv neve.
+            </p>
+         
+         
+         <table class="variablelist">
+            <thead>
+               <tr>
+                  <th>Option</th>
+                  <th>Description</th>
+               </tr>
+            </thead>
+            <tbody>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.track_nth"><span class="option">pálya:</span><span class="parameter">n</span></a><a class="headerlink" href="#mkvpropedit.description.track_nth" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Ha a <span class="parameter">n</span> paraméter egy szám, akkor a
+                        <span class="parameter">n</span>-edik sáv lesz kiválasztva. A sorrend ugyanaz, mint
+                        amit az <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a> <span class="option">--identify</span> opció kiad.
+                        </p>
+                     
+                     
+                     <p>
+                        A számozás 1-től kezdődik.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.track_type_nth"><span class="option">pálya:</span><span class="parameter">t</span><span class="parameter">n</span></a><a class="headerlink" href="#mkvpropedit.description.track_type_nth" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Ha a paraméter egyetlen karakterrel kezdődik <span class="parameter">t</span>,
+                        amelyet egy <span class="parameter">n</span> követ, akkor egy adott sávtípus
+                        <span class="parameter">n</span>-edik sávja lesz kiválasztva. A sávtípus paraméter
+                        <span class="parameter">t</span> e négy karakter egyikének kell lennie:
+                        '<span class="literal">a</span>' hangsáv esetén, '<span class="literal">b</span>' gombsáv
+                        esetén, '<span class="literal">s</span>' felirat-sáv esetén és '<span class="literal">v</span>'
+                        videó-sáv esetén. A sávok sorrendje megegyezik azzal, amit az <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a>
+                        <span class="option">--identify</span> opció kiad.
+                        </p>
+                     
+                     
+                     <p>
+                        A számozás 1-től kezdődik.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.track_uid"><span class="option">track:</span>=<span class="parameter">uid</span></a><a class="headerlink" href="#mkvpropedit.description.track_uid" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Ha a paraméter '<span class="literal">=</span>'-val kezdődik, amelyet egy szám követ
+                        <span class="parameter">uid</span>, akkor az a pálya lesz kiválasztva, amelynek
+                        <span class="abbrev">UID</span> eleme megegyezik az adott <span class="parameter">uid</span>
+                        elemmel. A pálya <span class="abbrev">UID</span> elemeit az <a href="mkvinfo.html"><span class="productname">mkvinfo</span>(1)</a> segítségével
+                        kaphatjuk meg.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.track_number"><span class="option">pálya:</span>@<span class="parameter">szám</span></a><a class="headerlink" href="#mkvpropedit.description.track_number" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Ha a paraméter egy '<span class="literal">@</span>' karakterrel kezdődik, amelyet egy
+                        szám <span class="parameter">szám</span> követ, akkor az a pálya lesz kiválasztva,
+                        amelynek pályaszám eleme megegyezik ezzel a <span class="parameter">szám</span>
+                        elemmel. A sávszámokat a <a href="mkvinfo.html"><span class="productname">mkvinfo</span>(1)</a> segítségével kaphatjuk meg.
+                        </p>
+                     </td>
+               </tr>
+            </tbody>
+         </table>
+         
+         
+         
+         <h2><a name="mkvpropedit.edit_selectors.notes">3.3. Megjegyzések</a><a class="headerlink" href="#mkvpropedit.edit_selectors.notes" title="Link to this heading">#</a></h2>
+         
+         
+         <p>
+            A sávszerkesztési szelektorok természetéből adódóan lehetséges, hogy több
+            szelektor is megegyezik ugyanazzal a sávfejléccel. Ilyen esetekben az ilyen
+            szerkesztési szelektorokhoz tartozó összes művelet kombinálva lesz, és a
+            parancssorban megadott sorrendben fog végrehajtódni.
+            </p>
+         
+         
+         <h1><a name="mkvpropedit.attachment_selectors">4. Csatlakozási szelektorok</a><a class="headerlink" href="#mkvpropedit.attachment_selectors" title="Link to this heading">#</a></h1>
+         
+         
+         
+         <p>
+            A csatolmányválasztót a két művelet <a href="#mkvpropedit.description.replace_attachment">--replace-attachment</a>
+            és <a href="#mkvpropedit.description.delete_attachment">--delete-attachment</a>
+            segítségével használjuk. A következő négy forma valamelyikével rendelkezhet:
+            </p>
+         
+         
+         <ol>
+            
+            <li>
+               
+               <p>
+                  Kiválasztás a melléklet azonosítója alapján. Ebben a formában a szelektor
+                  egyszerűen egy szám, a csatolmány azonosítója, ahogyan azt az <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a>
+                  azonosító parancsa kiadja.
+                  </p>
+               </li>
+            
+            
+            <li>
+               
+               <p>
+                  Kiválasztás a melléklet UID (egyedi azonosító) alapján. Ebben a formában a
+                  szelektor az <span class="literal">=</span> egyenlőségjel, amelyet egy szám követ, a
+                  csatolmány egyedi azonosítója, ahogyan azt az <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a> szóbeli azonosító
+                  parancsa kiadja.
+                  </p>
+               </li>
+            
+            
+            <li>
+               
+               <p>
+                  Kiválasztás a melléklet neve alapján. Ebben a formában a szelektor a
+                  <span class="literal">név:</span> szó, amelyet a meglévő csatolmány neve követ. Ha ezt
+                  a választót a <span class="option">--replace-attachment</span> opcióval együtt
+                  használjuk, akkor a megfeleltetendő névben lévő kettőspontokat
+                  <span class="literal">\c</span>-ként kell szedni.
+                  </p>
+               </li>
+            
+            
+            <li>
+               
+               <p>
+                  MIME-típus szerinti kiválasztás. Ebben a formában a szelektor a
+                  <span class="literal">mime-type:</span> szó, amelyet a meglévő melléklet MIME típusa
+                  követ. Ha ezt a kiválasztót a <span class="option">--replace-attachment</span>
+                  kapcsolóval együtt használjuk, akkor a keresett MIME-típuson belüli
+                  kettőspontokat <span class="literal">\c</span>-ként kell kikerülni.
+                  </p>
+               </li>
+            </ol>
+         
+         <h1><a name="mkvpropedit.language_handling">5. Nyelvi kezelés</a><a class="headerlink" href="#mkvpropedit.language_handling" title="Link to this heading">#</a></h1>
+         
+         
+         
+         <p>
+            <span class="productname">mkvpropedit</span>(1) alapértelmezés szerint többnyire megpróbál helyesen
+            cselekedni. Ezért a <span class="option">language</span> tulajdonság megváltoztatásával
+            az <span class="productname">mkvpropedit</span>(1) ugyanazt a változtatást fogja alkalmazni mind az új
+            "LanguageIETF" elemre, mind a régi "Language" elemre, hasonlóan ahhoz,
+            ahogyan az <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a> alkalmazza a nyelvet mindkét elemre. Például a
+            <span class="literal">mkvpropedit movie.mkv --edit track:2 --set language=zh-TW</span>
+            használatával a "LanguageIETF" elemet <span class="literal">zh-TW</span>-ra, a régi
+            "Language" elemet pedig <span class="literal">chi</span>-ra állítja.
+            </p>
+         
+         
+         <p>
+            Ezen kívül van egy új, <span class="option">language-ietf</span> nevű sávfejléc
+            tulajdonság, amely beállítható vagy eltávolítható. Ennek a tulajdonságnak a
+            módosítása csak az új "LanguageIETF" sávfejléc elemre vonatkozik. A
+            figyelmeztetés az, hogy a régi "Language" track header elem kötelező elem a
+            Matroska-ban - ami azt jelenti, hogy még akkor is van implicit értéke, ha
+            nincs jelen a fájlban. Ha a felhasználó csak a
+            <span class="option">language-ietf</span> tulajdonságot állítja be, de a
+            <span class="option">language</span> tulajdonságot nem, az <span class="productname">mkvpropedit</span>(1) ezért bizonyos
+            esetekben hozzáadja a régi "Language" elemet &amp; <span class="literal">und</span>-ra
+            állítja (azaz "undetermined"), mivel a felhasználó nem adott meg értéket.
+            </p>
+         
+         
+         <p>XML fejezet- vagy tagfájlok olvasásakor az <span class="productname">mkvpropedit</span>(1) úgy működik, mint
+            az <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a>.</p>
+         
+         
+         <p>Az új elemek létrehozása teljesen letiltható a `--disable-language-ietf`
+            parancssori opcióval, amely mindhárom új elemre hat.</p>
+         
+         
+         <p>A kiterjesztett nyelvi alcímkékre alkalmazott normalizálási módszert a
+            <span class="option">--normalize-language-ietf</span> paraméterrel választhatja ki.</p>
+         
+         <h1><a name="mkvpropedit.examples">6. Példák</a><a class="headerlink" href="#mkvpropedit.examples" title="Link to this heading">#</a></h1>
+         
+         
+         <p>
+            A következő példa a '<span class="literal">movie.mkv</span>' nevű fájlt
+            szerkeszti. Beállítja a szegmens címét, és módosítja egy hang- és egy
+            felirat-sáv nyelvi kódját. Megjegyezzük, hogy ez a példa lerövidíthető az
+            első <a href="#mkvpropedit.description.edit">--szerkesztés</a>
+            opció elhagyásával, mivel a szegmensinformációs elem szerkesztése az első
+            <a href="#mkvpropedit.description.edit">--szerkesztés</a>
+            opció előtt található összes opció alapértelmezett beállítása.
+            </p>
+         
+         
+         <pre class="screen">$ mkvpropedit movie.mkv --edit info --set "title=The movie" --edit track:a1 --set language=fre --edit track:a2 --set language=ita</pre>
+         
+         
+         <p>
+            A második példa eltávolítja az 'alapértelmezett sávjelzőt' az első
+            felirat-sávról, és beállítja a másodikra. Vegyük észre, hogy az
+            <span class="productname">mkvpropedit</span>(1) az <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a> paranccsal ellentétben nem állítja a többi sáv
+            'alapértelmezett sávjelzőjét' '0'-ra, ha az egy másik sávnál automatikusan
+            '1'-re van állítva.
+            </p>
+         
+         
+         <pre class="screen">$ mkvpropedit movie.mkv --edit track:s1 --set flag-default=0 --edit track:s2 --set flag-default=1</pre>
+         
+         
+         <p>
+            A második feliratos sáv címkéinek cseréje a fájlban így néz ki:
+            </p>
+         
+         
+         <pre class="screen">$ mkvpropedit movie.mkv --tags track:s2:new-subtitle-tags.xml</pre>
+         
+         
+         <p>
+            Az összes címke eltávolításához a fájlnév elhagyása szükséges:
+            </p>
+         
+         
+         <pre class="screen">$ mkvpropedit movie.mkv --tags all:</pre>
+         
+         
+         <p>
+            A fejezetek cseréje egy fájlban így néz ki:
+            </p>
+         
+         
+         <pre class="screen">$ mkvpropedit movie.mkv --chapters new-chapters.xml</pre>
+         
+         
+         <p>
+            Az összes fejezet eltávolításához el kell hagyni a fájl nevét:
+            </p>
+         
+         
+         <pre class="screen">$ mkvpropedit movie.mkv --chapters ''</pre>
+         
+         
+         <p>
+            Betűtípusfájl (<span class="literal">Arial.ttf</span>) csatolmányként történő
+            hozzáadása:
+            </p>
+         
+         
+         <pre class="screen">$ mkvpropedit movie.mkv --add-attachment Arial.ttf</pre>
+         
+         
+         <p>
+            Egy betűtípus fájl (<span class="literal">89719823.ttf</span>) csatolása
+            mellékletként, és némi információ megadása, mivel ez valóban csak Arial:
+            </p>
+         
+         
+         <pre class="screen">$ mkvpropedit movie.mkv --attachment-name Arial.ttf --attachment-description 'Az Arial betűtípus TrueType betűtípusként' --attachment-mime-type application/x-truetype-font --add-attachment 89719823.ttf</pre>
+         
+         
+         <p>
+            Egy csatolt betűtípus (<span class="literal">Comic.ttf</span>) fájl cseréje egy
+            másikra (<span class="literal">Arial.ttf</span>):
+            </p>
+         
+         
+         <pre class="screen">$ mkvpropedit movie.mkv --attachment-name Arial.ttf --attachment-description 'Az Arial betűtípus TrueType betűtípusként' --replace-attachment name:Comic.ttf:Arial.ttf</pre>
+         
+         
+         <p>
+            A második csatolt fájl törlése, bármi is legyen az:
+            </p>
+         
+         
+         <pre class="screen">$ mkvpropedit movie.mkv --delete-attachment 2</pre>
+         
+         
+         <p>
+            Az összes csatolt betűtípus törlése MIME-típus szerint:
+            </p>
+         
+         
+         <pre class="screen">$ mkvpropedit movie.mkv --delete-attachment mime-type:application/x-truetype-font</pre>
+         
+         <h1><a name="d4e1318">7. Kilépési kódok</a><a class="headerlink" href="#d4e1318" title="Link to this heading">#</a></h1>
+         
+         
+         
+         <p>
+            <span class="productname">mkvpropedit</span>(1) a három kilépési kód egyikével lép ki:
+            </p>
+         
+         
+         <ul>
+            
+            <li>
+               
+               <p>
+                  0 -- Ez a kilépési kód azt jelenti, hogy a módosítás
+                  sikeresen befejeződött.
+                  </p>
+               </li>
+            
+            
+            <li>
+               
+               <p>
+                  <span class="constant">1</span> -- Ebben az esetben az <span class="productname">mkvpropedit</span>(1) legalább egy
+                  figyelmeztetést adott ki, de a módosítás folytatódott.  A figyelmeztetés
+                  előtt a '<span class="literal">Figyelmeztetés:</span>' szöveg áll.  Az érintett
+                  problémáktól függően az eredményül kapott fájlok lehetnek rendben, vagy
+                  nem.  A felhasználót felszólítjuk, hogy ellenőrizze mind a figyelmeztetést,
+                  mind az eredményül kapott fájlokat.
+                  </p>
+               </li>
+            
+            
+            <li>
+               
+               <p>
+                  2 -- Ezt a kilépési kódot hiba esetén
+                  használjuk. <span class="productname">mkvpropedit</span>(1) a hibaüzenet kiadása után azonnal megszakad.  A
+                  hibaüzenetek a hibás parancssori argumentumoktól kezdve az olvasási/írási
+                  hibákon át a törött fájlokig terjednek.
+                  </p>
+               </li>
+            </ul>
+         
+         <h1><a name="mkvinfo.text_files_and_charsets">8. Szövegfájlok és karakterkészlet-átalakítások</a><a class="headerlink" href="#mkvinfo.text_files_and_charsets" title="Link to this heading">#</a></h1>
+         
+         
+         
+         <p>
+            Az MKVToolNix csomagban található összes eszköz
+            karakterkészlet-konverziójának, a be- és kimeneti kódolásnak, a parancssori
+            kódolásnak és a konzol kódolásnak a kezeléséről részletesebben az <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a>
+            man oldal azonos nevű szakaszában olvashat.
+            </p>
+         
+         <h1><a name="mkvpropedit.environment_variables">9. Környezeti változók</a><a class="headerlink" href="#mkvpropedit.environment_variables" title="Link to this heading">#</a></h1>
+         
+         
+         
+         <p>
+            <span class="productname">mkvpropedit</span>(1) a rendszer nyelvjárását meghatározó alapértelmezett változókat
+            használja (pl. <span class="varname">LANG</span> és a <span class="varname">LC_*</span>
+            család). További változók:
+            </p>
+         
+         
+         <table class="variablelist">
+            <thead>
+               <tr>
+                  <th>Option</th>
+                  <th>Description</th>
+               </tr>
+            </thead>
+            <tbody>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.environment_variables.debug"><span class="varname">MKVPROPEDIT_DEBUG</span>, <span class="varname">MKVTOOLNIX_DEBUG</span> és
+                        annak rövidített formája <span class="varname">MTX_DEBUG</span>.</a><a class="headerlink" href="#mkvpropedit.environment_variables.debug" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>A tartalmat úgy kezeli, mintha a <a href="#mkvpropedit.description.debug">--debug</a>
+                        opcióval adta volna át.</p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.environment_variables.engage"><span class="varname">MKVPROPEDIT_ENGAGE</span>, <span class="varname">MKVTOOLNIX_ENGAGE</span>
+                        és annak rövidített formája <span class="varname">MTX_ENGAGE</span>.</a><a class="headerlink" href="#mkvpropedit.environment_variables.engage" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>A tartalmat úgy kezeli, mintha a <a href="#mkvpropedit.description.engage">--engage</a>
+                        opcióval adta volna át.</p>
+                     </td>
+               </tr>
+            </tbody>
+         </table>
+         
+         <h1><a name="mkvpropedit.seealso">10. Lásd még</a><a class="headerlink" href="#mkvpropedit.seealso" title="Link to this heading">#</a></h1>
+         
+         
+         <p>
+            <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a>, <a href="mkvinfo.html"><span class="productname">mkvinfo</span>(1)</a>, <a href="mkvextract.html"><span class="productname">mkvextract</span>(1)</a>, <a href="mkvtoolnix-gui.html"><span class="productname">mkvtoolnix-gui</span>(1)</a>
+            </p>
+         
+         <h1><a name="mkvpropedit.www">11. WWW</a><a class="headerlink" href="#mkvpropedit.www" title="Link to this heading">#</a></h1>
+         
+         
+         <p>
+            A legfrissebb verzió mindig megtalálható a <a href="https://mkvtoolnix.download/">az MKVToolNix honlapon</a>.
+            </p>
+         </div>
+   </body>
+</html>

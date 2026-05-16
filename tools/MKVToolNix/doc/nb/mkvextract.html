@@ -1,0 +1,1199 @@
+<!DOCTYPE html
+  PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
+<html>
+   <head>
+      <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+      <title>mkvextract -- pakk ut spor fra Matroska filer til andre filer</title>
+      <link rel="stylesheet" type="text/css" href="mkvtoolnix-doc.css">
+   </head>
+   <body>
+      <div class="heading">mkvextract -- pakk ut spor fra <span class="productname">Matroska</span><sup>(tm)</sup> filer til andre filer</div>
+      <hr>
+      <div id="toc" class="toc">
+         <h1>Table of contents</h1>
+         <ul>
+            <li><a href="#mkvextract.synopsis">1. Sammendrag</a></li>
+            <li><a href="#mkvextract.description">2. Beskrivelse</a></li>
+            <li><a href="#mkvextract.examples">3. Eksempler</a></li>
+            <li><a href="#mkvextract.text_files_and_charsets">4. Tekstfiler og tegnsettkonverteringer</a></li>
+            <li><a href="#mkvextract.output_file_formats">5. Utdatafilformater</a></li>
+            <li><a href="#d4e1469">6. Avslutningskoder</a></li>
+            <li><a href="#mkvextract.environment_variables">7. Miljøvariabler</a></li>
+            <li><a href="#mkvextract.seealso">8. Se også</a></li>
+            <li><a href="#mkvextract.www">9. WWW</a></li>
+         </ul>
+      </div>
+      <div class="content">
+         <h1><a name="mkvextract.synopsis">1. Sammendrag</a><a class="headerlink" href="#mkvextract.synopsis" title="Link to this heading">#</a></h1>
+         
+         
+         <div class="cmdsynopsis"><span class="commandname">mkvextract</span> {kildefilnavn} {modus1} alternativer utpakking-spes1 modus2 alternativer utpakking-spes2 …</div>
+         
+         <h1><a name="mkvextract.description">2. Beskrivelse</a><a class="headerlink" href="#mkvextract.description" title="Link to this heading">#</a></h1>
+         
+         
+         <p>
+            Dette programmet trekker ut spesifikke deler fra en <span class="productname">Matroska</span><sup>(tm)</sup> fil til andre
+            nyttige formater. Det første argumentet er navnet på kildefilen som må være
+            en <span class="productname">Matroska</span><sup>(tm)</sup> fil.
+            </p>
+         
+         
+         <p>
+            Alle andre argumenter bytter enten til en bestemt utvinningsmodus, endrer
+            alternativer for den aktive modusen eller spesifiserer hva som skal trekkes
+            ut i hvilken fil. Flere moduser kan brukes i samme påkallelse av mkvextract,
+            noe som tillater utvinning av flere ting i en enkel iterasjon. De fleste
+            alternativer kan bare brukes i visse moduser med noen få alternativer som
+            gjelder for alle moduser.
+            </p>
+         
+         
+         <p>
+            For tiden støttes uttrekking av <a href="#mkvextract.description.tracks">spor</a>, <a href="#mkvextract.description.tags">tagger</a>, <a href="#mkvextract.description.attachments">vedlegg</a>, <a href="#mkvextract.description.chapters">kapitler</a>, <a href="#mkvextract.description.cuesheets">CUE-ark</a>, <a href="#mkvextract.description.timestamps_v2">tidsstempler</a> og <a href="#mkvextract.description.cues">cues</a>.
+            </p>
+         
+         
+         <h2><a name="mkvextract.description.common">2.1. Vanlige alternativer</a><a class="headerlink" href="#mkvextract.description.common" title="Link to this heading">#</a></h2>
+         
+         
+         
+         <p>
+            Følgende alternativer er tilgjengelige i alle moduser og beskrives bare én
+            gang i denne seksjonen.
+            </p>
+         
+         
+         <table class="variablelist">
+            <thead>
+               <tr>
+                  <th>Option</th>
+                  <th>Description</th>
+               </tr>
+            </thead>
+            <tbody>
+               <tr>
+                  <td class="varlistoption"><a name="mkvextract.description.parse_fully"><span class="option">-f</span>, <span class="option">--parse-fully</span></a><a class="headerlink" href="#mkvextract.description.parse_fully" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Setter analysemodus til 'full'. Standardmodusen analyserer ikke hele filen,
+                        men bruker metasøk-elementene for å finne de nødvendige elementene i en
+                        kildefil. I 99% av alle tilfeller er dette nok. Men for filer som ikke
+                        inneholder metasøk-elementer eller som er skadet, må brukeren kanskje bruke
+                        denne modusen. En full skanning av en fil kan ta et par minutter, mens en
+                        rask skanning bare tar sekunder.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvextract.description.common.command_line_charset"><span class="option">--command-line-charset</span> <span class="parameter">character-set</span></a><a class="headerlink" href="#mkvextract.description.common.command_line_charset" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Angir tegnsettet for å konvertere strenger fra gitt på kommandolinjen. Den
+                        er standard til tegnsettet gitt av systemets gjeldende lokalitet.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvextract.description.common.output_charset"><span class="option">--output-charset</span> <span class="parameter">character-set</span></a><a class="headerlink" href="#mkvextract.description.common.output_charset" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Angir tegnsettet som strenger konverteres til som skal sendes ut. Den er
+                        standard til tegnsettet gitt av systemets gjeldende lokalitet.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvextract.description.common.redirect_output"><span class="option">-r</span>, <span class="option">--redirect-output</span>
+                        <span class="parameter">filnavn</span></a><a class="headerlink" href="#mkvextract.description.common.redirect_output" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Skriver alle meldinger til filen <span class="parameter">filnavn</span> i stedet for
+                        til konsollen.  Selv om dette kan gjøres enkelt med omdirigering av utdata,
+                        er det tilfeller der dette alternativet er nødvendig: når terminalen tolker
+                        utdataene på nytt før du skriver den til en fil.  Tegnsettet angitt med
+                        <a href="#mkvextract.description.common.output_charset">--output-charset</a>
+                        er hedret.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvextract.description.flush_on_close"><span class="option">--flush-on-close</span></a><a class="headerlink" href="#mkvextract.description.flush_on_close" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Ber programmet tømme alle data som er bufret i minnet til lagring når filer
+                        som er åpnet for skriving lukkes. Dette kan brukes til å forhindre tap av
+                        data ved strømbrudd eller for å omgå visse problemer i operativsystemet
+                        eller driverne. Ulempen er at multipleksing vil ta lengre tid da mkvmerge
+                        vil vente til alle data er skrevet til lagringen før den avsluttes. Se saker
+                        #2469 og #2480 på MKVToolNix-feilsporeren for dyptgående diskusjoner om
+                        fordeler og ulemper.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvextract.description.common.ui_language"><span class="option">--ui-language</span> <span class="parameter">kode</span></a><a class="headerlink" href="#mkvextract.description.common.ui_language" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Tvinger oversettelsene for språk- <span class="parameter">koden</span> som skal
+                        brukes (eks.  '<span class="literal">de_DE</span>' for tyske oversettelser). Ved å
+                        skrive inn '<span class="literal">list</span>' som <span class="parameter">koden</span> vil
+                        føre til at programmet sender ut en liste over tilgjengelige oversettelser.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvextract.description.abort_on_warnings"><span class="option">--abort-on-warnings</span></a><a class="headerlink" href="#mkvextract.description.abort_on_warnings" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Ber programmet om å avbryte etter at den første advarselen er sendt
+                        ut. Programmets avslutningskode vil være 1.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvextract.description.debug"><span class="option">--debug</span> <span class="parameter">emne</span></a><a class="headerlink" href="#mkvextract.description.debug" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Slå på feilsøking for en bestemt funksjon. Dette alternativet er bare nyttig
+                        for utviklere.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvextract.description.engage"><span class="option">--engage</span> <span class="parameter">funksjon</span></a><a class="headerlink" href="#mkvextract.description.engage" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Slå på eksperimentelle funksjoner. En liste over tilgjengelige funksjoner
+                        kan bes om med <span class="command">mkvextract --engage list</span>. Disse
+                        funksjonene er ikke ment å brukes i normale situasjoner.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvextract.description.gui_mode"><span class="option">--gui-mode</span></a><a class="headerlink" href="#mkvextract.description.gui_mode" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Slår på det grafiske grensesnittet. I denne modusen kan spesialformaterte
+                        linjer være utdata som kan fortelle et kontrollerende grafisk grensesnitt
+                        hva som skjer. Disse meldingene følger formatet
+                        '<span class="literal">#GUI#melding</span>'. Meldingen kan etterfølges av
+                        nøkkel/verdipar som i
+                        '<span class="literal">#GUI#melding#nøkkel1=verdi1#nøkkel2=verdi2…</span>'. Verken
+                        meldingene eller nøklene blir noen gang oversatt og sendes alltid ut på
+                        engelsk.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvextract.description.verbose"><span class="option">-v</span>, <span class="option">--verbose</span></a><a class="headerlink" href="#mkvextract.description.verbose" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Vær detaljert og vis alle de viktige <span class="productname">Matroska</span><sup>(tm)</sup> elementene mens de leses.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvextract.description.help"><span class="option">-h</span>, <span class="option">--help</span></a><a class="headerlink" href="#mkvextract.description.help" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Vis bruksinformasjon og avslutt.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvextract.description.version"><span class="option">-V</span>, <span class="option">--version</span></a><a class="headerlink" href="#mkvextract.description.version" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Vis versjonsinformasjon og avslutt.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvextract.description.at_sign"><span class="option">@</span><span class="parameter">alternativer-fil.json</span></a><a class="headerlink" href="#mkvextract.description.at_sign" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Leser flere kommandolinjeargumenter fra filen
+                        <span class="parameter">alternativer-fil</span>. Hvis du vil ha en fullstendig
+                        forklaring på hvilke formater som støttes for slike filer, kan du se
+                        avsnittet "Alternativfiler" i <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a> manualside.
+                        </p>
+                     </td>
+               </tr>
+            </tbody>
+         </table>
+         
+         
+         
+         <h2><a name="mkvextract.description.tracks">2.2. Modus for sporuttrekking</a><a class="headerlink" href="#mkvextract.description.tracks" title="Link to this heading">#</a></h2>
+         
+         
+         
+         <p>
+            Syntaks: <span class="command">mkvextract <span class="parameter">kildefilnavn</span>
+               <span class="option">spor</span>
+               [<span class="parameter">alternativer</span>]
+               <span class="parameter">TID1:målfilnavn1</span>
+               [<span class="parameter">TID2:målfilnavn2</span> ...]</span>
+            </p>
+         
+         
+         <p>
+            Følgende kommandolinjealternativer er tilgjengelige for hvert spor i modus
+            for uttrekking av ' <span class="literal">spor</span>'.  De må vises foran
+            sporspesifikasjonen (se nedenfor) de skal anvendes på.
+            </p>
+         
+         
+         <table class="variablelist">
+            <thead>
+               <tr>
+                  <th>Option</th>
+                  <th>Description</th>
+               </tr>
+            </thead>
+            <tbody>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.character_set"><span class="option">-c</span> <span class="parameter">tegnsett</span></a><a class="headerlink" href="#mkvpropedit.description.character_set" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Angir tegnsettet som neste tekst-undertekstspor skal konverteres til. Bare
+                        gyldig hvis neste spor-ID er rettet mot et tekst-undertekstspor. Den er
+                        standard UTF-8.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvextract.description.blockadd"><span class="option">--blockadd</span> <span class="parameter">nivå</span></a><a class="headerlink" href="#mkvextract.description.blockadd" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Hold bare BlockAdditions opp til dette nivået. Standard er å beholde alle
+                        nivåer. Dette alternativet påvirker bare visse typer kodeker, for eksempel
+                        WAVPACK4.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvextract.description.cuesheet"><span class="option">--cuesheet</span></a><a class="headerlink" href="#mkvextract.description.cuesheet" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Fører <span class="productname">mkvextract</span>(1) til å trekke ut et  <span class="abbrev">CUE</span>-ark fra
+                        kapittelinformasjonen og taggdataene for det følgende sporet til en fil hvis
+                        navn er sporets utdatanavn med '<span class="literal">.cue</span>' tilføyd til den.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvextract.description.raw"><span class="option">--raw</span></a><a class="headerlink" href="#mkvextract.description.raw" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Trekker ut rådataene til en fil uten conteinerdata rundt den.  I motsetning
+                        til <a href="#mkvextract.description.tracks.fullraw">--fullraw</a>-flagget
+                        fører ikke dette flagget til at innholdet i
+                        <span class="classname">CodecPrivate</span>-elementet skrives til filen.  Denne
+                        modusen fungerer med alle <span class="classname">CodecIDs</span>, selv de som
+                        <span class="productname">mkvextract</span>(1) ellers ikke støtter, men de resulterende filene kan kanskje
+                        ikke brukes.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvextract.description.tracks.fullraw"><span class="option">--fullraw</span></a><a class="headerlink" href="#mkvextract.description.tracks.fullraw" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Trekker ut rådataene i en fil uten conteinerdata rundt den.  Innholdet i
+                        <span class="classname">CodecPrivate</span>-elementet skrives først til filen hvis
+                        sporet inneholder et slikt datahodeelement.  Denne modusen fungerer med alle
+                        <span class="classname">CodecIDs</span>, selv de som <span class="productname">mkvextract</span>(1) ellers ikke
+                        støtter, men de resulterende filene kan kanskje ikke brukes.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvextract.description.output_track"><span class="parameter">TID:utnavn</span></a><a class="headerlink" href="#mkvextract.description.output_track" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Forårsaker uttrekking av sporet med ID <span class="parameter">TID</span> inn i
+                        filen <span class="parameter">outname</span> hvis et slikt spor finnes i
+                        kildefilen. Dette alternativet kan gis flere ganger. Spor-ID-ene er de samme
+                        som de som sendes ut av <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a>s <span class="option">--identify</span>-alternativ.
+                        </p>
+                     
+                     
+                     <p>
+                        Hvert utdatanavn skal bare brukes én gang. Unntaket er RealAudio- og
+                        RealVideo-spor. Hvis du bruker samme navn for forskjellige spor, blir disse
+                        sporene lagret i samme fil. Eksempel:
+                        </p>
+                     
+                     
+                     <pre class="screen">$ mkvextract inndata.mkv tracks 0:video.h264 2:output-two-vobsub-tracks.idx 3:output-two-vobsub-tracks.idx</pre>
+                     </td>
+               </tr>
+            </tbody>
+         </table>
+         
+         
+         
+         <h2><a name="mkvextract.description.attachments">2.3. Uttrekkingsmodus for vedlegg</a><a class="headerlink" href="#mkvextract.description.attachments" title="Link to this heading">#</a></h2>
+         
+         
+         
+         <p>
+            Syntaks: <span class="command">mkvextract <span class="parameter">kildefilnavn</span>
+               <span class="option">vedlegg</span>
+               [<span class="parameter">alternativer</span>]
+               <span class="parameter">AID1:utnavn1</span>
+               [<span class="parameter">AID2:utnavn2</span> ...]</span>
+            </p>
+         
+         
+         <table class="variablelist">
+            <thead>
+               <tr>
+                  <th>Option</th>
+                  <th>Description</th>
+               </tr>
+            </thead>
+            <tbody>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.output_attachment"><span class="parameter">AID</span>:<span class="parameter">utnavn</span></a><a class="headerlink" href="#mkvpropedit.description.output_attachment" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Forårsaker uttrekking av vedlegget med ID <span class="parameter">AID</span> inn i
+                        filen <span class="parameter">utnavn</span> hvis et slikt vedlegg finnes i
+                        kildefilen. Hvis <span class="parameter">utnavnet</span> blir stående tomt, brukes
+                        navnet på vedlegget inne i kilden <span class="productname">Matroska</span><sup>(tm)</sup> filen i stedet. Dette
+                        alternativet kan gis flere ganger. Vedleggs-ID-ene er de samme som de som
+                        sendes ut av <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a>s <span class="option">--identify</span>-alternativ.
+                        </p>
+                     </td>
+               </tr>
+            </tbody>
+         </table>
+         
+         
+         
+         <h2><a name="mkvextract.description.chapters">2.4. Uttrekkingsmodus for kapitler</a><a class="headerlink" href="#mkvextract.description.chapters" title="Link to this heading">#</a></h2>
+         
+         
+         
+         <p>
+            Syntaks: <span class="command">mkvextract <span class="parameter">kildefilnavn</span>
+               <span class="option">kapitler</span>
+               [<span class="parameter">alternativer</span>]
+               <span class="parameter">utdatafilnavn.xml</span></span>
+            </p>
+         
+         
+         <table class="variablelist">
+            <thead>
+               <tr>
+                  <th>Option</th>
+                  <th>Description</th>
+               </tr>
+            </thead>
+            <tbody>
+               <tr>
+                  <td class="varlistoption"><a name="mkvextract.description.simple"><span class="option">-s</span>, <span class="option">--simple</span></a><a class="headerlink" href="#mkvextract.description.simple" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Eksporterer kapittelinformasjonen i det enkle formatet som brukes
+                        i<span class="abbrev">OGM</span>-verktøyene (CHAPTER01=..., CHAPTER01NAME=...). I denne
+                        modusen må noe informasjon forkastes. Standard er å sende kapitlene i <span class="abbrev">XML</span>
+                        format.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.simple_language"><span class="option">--simple-language</span> <span class="parameter">språk</span></a><a class="headerlink" href="#mkvpropedit.description.simple_language" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Hvis det enkle formatet er aktivert, vil <span class="productname">mkvextract</span>(1) bare sende ut en
+                        enkelt oppføring for hvert kapittelatom som oppstår, selv om et kapittelatom
+                        inneholder mer enn ett kapittelnavn. Som standard vil <span class="productname">mkvextract</span>(1) bruke det
+                        første kapittelnavnet som finnes for hvert atom uavhengig av språket.
+                        </p>
+                     
+                     
+                     <p>
+                        Ved å bruke dette alternativet kan brukeren bestemme hvilke kapittelnavn som
+                        sendes ut hvis atomer inneholder mer enn ett kapittelnavn.
+                        <span class="parameter">Språk</span>parameteren må være en ISO 639-1 eller ISO 639-2
+                        kode.
+                        </p>
+                     </td>
+               </tr>
+            </tbody>
+         </table>
+         
+         
+         <p>
+            Kapitlene er skrevet til spesifisert utdatafil. Som standard brukes
+            <span class="abbrev">XML</span>-formatet som forstås av <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a>. Hvis det ikke finnes kapitler i
+            filen, opprettes ikke utdatafilen.
+            </p>
+         
+         
+         
+         <h2><a name="mkvextract.description.tags">2.5. Modus for tagguttrekking</a><a class="headerlink" href="#mkvextract.description.tags" title="Link to this heading">#</a></h2>
+         
+         
+         
+         <p>
+            Syntaks: <span class="command">mkvextract <span class="parameter">kildefilnavn</span>
+               <span class="option">tagger</span>
+               [<span class="parameter">alternativer</span>]
+               <span class="parameter">utdatafilnavn.xml</span></span>
+            </p>
+         
+         
+         <table class="variablelist">
+            <thead>
+               <tr>
+                  <th>Option</th>
+                  <th>Description</th>
+               </tr>
+            </thead>
+            <tbody>
+               <tr>
+                  <td class="varlistoption"><a name="mkvextract.description.global_tags"><span class="option">-T</span>, <span class="option">--no-track-tags</span></a><a class="headerlink" href="#mkvextract.description.global_tags" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Eksporterer bare tagger som ikke er spor-spesifikke.
+                        </p>
+                     </td>
+               </tr>
+            </tbody>
+         </table>
+         
+         
+         <p>
+            Taggene skrives til spesifisert utdatafil i <span class="abbrev">XML</span> format forstått av
+            <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a>. Hvis det ikke finnes noen tagger i filen, opprettes ikke
+            utdatafilen.
+            </p>
+         
+         
+         
+         <h2><a name="mkvextract.description.cuesheets">2.6. Uttrekkingsmodus for Cue-ark</a><a class="headerlink" href="#mkvextract.description.cuesheets" title="Link to this heading">#</a></h2>
+         
+         
+         
+         <p>
+            Syntaks: <span class="command">mkvextract <span class="parameter">kildefilnavn</span>
+               <span class="option">cuesheet</span>
+               [<span class="parameter">alternativer</span>]
+               <span class="parameter">utdatafilnavn.cue</span></span>
+            </p>
+         
+         
+         <p>
+            Cue-arket er skrevet til spesifisert utdatafil. Hvis det ikke finnes
+            kapitler eller tagger i filen, opprettes ikke utdatafilen.
+            </p>
+         
+         
+         
+         <h2><a name="mkvextract.description.timestamps_v2">2.7. Modus for uttrekking av tidsstempel</a><a class="headerlink" href="#mkvextract.description.timestamps_v2" title="Link to this heading">#</a></h2>
+         
+         
+         
+         <p>
+            Syntaks: <span class="command">mkvextract <span class="parameter">kildefilnavn</span>
+               <span class="option">timestamps_v2</span>
+               [<span class="parameter">alternativer</span>]
+               <span class="parameter">TID1:målfilnavn1</span>
+               [<span class="parameter">TID2:målfilnavn2</span> ...]</span>
+            </p>
+         
+         
+         <table class="variablelist">
+            <thead>
+               <tr>
+                  <th>Option</th>
+                  <th>Description</th>
+               </tr>
+            </thead>
+            <tbody>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.output_timestamps_v2"><span class="parameter">TID:utnavn</span></a><a class="headerlink" href="#mkvpropedit.description.output_timestamps_v2" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Forårsaker uttrekking av tidsstemplene for sporet med ID
+                        <span class="parameter">TID</span> inn i filen <span class="parameter">utnavn</span> hvis et
+                        slikt spor finnes i kildefilen. Dette alternativet kan gis flere
+                        ganger. Spor-ID-ene er de samme som de som sendes ut av <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a>s
+                        <span class="option">--identify</span>-alternativ.
+                        </p>
+                     
+                     
+                     <p>
+                        Eksempel:
+                        </p>
+                     
+                     
+                     <pre class="screen">$ mkvextract inndata.mkv timestamps_v2 1:ts-spor1.txt 2:ts-spor2.txt</pre>
+                     </td>
+               </tr>
+            </tbody>
+         </table>
+         
+         
+         
+         <h2><a name="mkvextract.description.cues">2.8. Uttrekkingsmodus for signaler</a><a class="headerlink" href="#mkvextract.description.cues" title="Link to this heading">#</a></h2>
+         
+         
+         
+         <p>
+            Syntaks: <span class="command">mkvextract <span class="parameter">kildefilnavn</span>
+               <span class="option">cues</span>
+               [<span class="parameter">alternativer</span>]
+               <span class="parameter">TID1:målfilnavn1</span>
+               [<span class="parameter">TID2:målfilnavn2</span> ...]</span>
+            </p>
+         
+         
+         <table class="variablelist">
+            <thead>
+               <tr>
+                  <th>Option</th>
+                  <th>Description</th>
+               </tr>
+            </thead>
+            <tbody>
+               <tr>
+                  <td class="varlistoption"><a name="mkvpropedit.description.output_cues"><span class="parameter">TID:målfilnavn</span></a><a class="headerlink" href="#mkvpropedit.description.output_cues" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>
+                        Forårsaker uttrekking av signalene for sporet med ID
+                        <span class="parameter">TID</span> inn i filen <span class="parameter">utnavn</span> hvis et
+                        slikt spor finnes i kildefilen. Dette alternativet kan gis flere
+                        ganger. Spor-ID-ene er de samme som de som sendes ut av <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a>s
+                        <span class="option">--identify</span>-alternativ og ikke tallene i
+                        <span class="classname">CueTrack</span>-elementet.
+                        </p>
+                     </td>
+               </tr>
+            </tbody>
+         </table>
+         
+         
+         <p>
+            Formatutdataene er et enkelt tekstformat: én linje per
+            <span class="classname">CuePoint</span>-element med
+            <span class="literal">nøkkel=verdi</span>-par. Hvis et valgfritt element ikke finnes i
+            en <span class="classname">CuePoint</span>
+            (f.eks. <span class="classname">CueDuration</span>), vil en bindestrek sendes ut som
+            verdien.
+            </p>
+         
+         
+         <p>
+            Eksempel:
+            </p>
+         
+         
+         <pre class="screen">tidsstempel=00:00:13.305000000 varighet=- klynge_posisjon=757741 relativ_posisjon=11</pre>
+         
+         
+         <p>De mulige nøklene er:</p>
+         
+         
+         <table class="variablelist">
+            <thead>
+               <tr>
+                  <th>Option</th>
+                  <th>Description</th>
+               </tr>
+            </thead>
+            <tbody>
+               <tr>
+                  <td class="varlistoption">tidsstempel</td>
+                  <td>
+                     
+                     <p>Signalpunktets tidsstempel med nanosekundpresisjon. Formatet er
+                        <span class="literal">HH:MM:SS.nnnnnnnnn</span>. Dette elementet er alltid satt.</p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption">varighet</td>
+                  <td>
+                     
+                     <p>Signalpunktets varighet med nanosekundpresisjon. Formatet er
+                        <span class="literal">HH:MM:SS.nnnnnnnnn</span>. </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption">klynge_posisjon</td>
+                  <td>
+                     
+                     <p>Den absolutte posisjonen i byte inne i <span class="productname">Matroska</span><sup>(tm)</sup>-filen der klyngen som
+                        inneholder det refererte elementet starter.</p>
+                     
+                     
+                     <div class="note">
+                        <p class="note-title">Note:</p>
+                        
+                        <p>Inne i <span class="productname">Matroska</span><sup>(tm)</sup> filen er <span class="classname">CueClusterPosition</span> i
+                           forhold til segmentets data start forskyvning. Verdien som sendes ut av
+                           <span class="productname">mkvextract</span>(1)s signal-uttrekkingsmodus, inneholder imidlertid den
+                           forskyvningen allerede og er en absolutt forskyvning fra begynnelsen av
+                           filen.</p>
+                        </div>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption">relativ_posisjon</td>
+                  <td>
+                     
+                     <p>Den relative posisjonen i byte inne i klyngen der
+                        <span class="classname">BlockGroup</span>- eller
+                        <span class="classname">SimpleBlock</span>-elementet som signalpunktet refererer
+                        til, starter.</p>
+                     
+                     
+                     <div class="note">
+                        <p class="note-title">Note:</p>
+                        
+                        <p>Inne i <span class="productname">Matroska</span><sup>(tm)</sup> filen er <span class="classname">CueRelativePosition</span> i
+                           forhold til klyngens data start forskyvning. Verdien som sendes ut ved
+                           <span class="productname">mkvextract</span>(1)s cue-uttrekkingsmodus, er imidlertid relativ til klyngens
+                           ID. Den absolutte posisjonen inne i filen kan beregnes ved å legge til
+                           <span class="literal">cluster_position</span> og <span class="literal">relative_position</span>.</p>
+                        </div>
+                     </td>
+               </tr>
+            </tbody>
+         </table>
+         
+         
+         <p>
+            Eksempel:
+            </p>
+         
+         
+         <pre class="screen">$ mkvextract inndata.mkv cues 1:cues-spor1.txt 2:cues-spor2.txt</pre>
+         
+         
+         <h1><a name="mkvextract.examples">3. Eksempler</a><a class="headerlink" href="#mkvextract.examples" title="Link to this heading">#</a></h1>
+         
+         
+         
+         <p>
+            Trekker ut både kapitler og tagger i sine respektive <span class="abbrev">XML</span> formater
+            samtidig:
+            </p>
+         
+         
+         <pre class="screen">$ mkvextract film.mkv chapters film-kapitler.xml tags film-tagger.xml</pre>
+         
+         
+         <p>
+            Trekker ut et par spor og deres respektive tidsstempler samtidig:
+            </p>
+         
+         
+         <pre class="screen">$ mkvextract "En annen film.mkv" tracks 0:video.h265 "1:main audio.aac" "2:director's comments.aac" timestamps_v2 "0:tidsstempler video.txt" "1:ttidsstempler hovedlyd.txt" "2:tidsstempler regissørens kommentarer.txt"</pre>
+         
+         
+         <p>
+            Trekke ut kapitler i Ogg/OGM-formatet og omkode et tekst-undertekstspor til
+            et annet tegnsett:
+            </p>
+         
+         
+         <pre class="screen">$ mkvextract "Min film.mkv" chapters --simple "Mine kapitler.txt" tracks -c MS-ANSI "2:Mine undertekster.srt"</pre>
+         
+         <h1><a name="mkvextract.text_files_and_charsets">4. Tekstfiler og tegnsettkonverteringer</a><a class="headerlink" href="#mkvextract.text_files_and_charsets" title="Link to this heading">#</a></h1>
+         
+         
+         
+         <p>
+            For en grundig diskusjon om hvordan alle verktøyene i MKVToolNix-pakken
+            håndterer tegnsettkonverteringer, inndata- / utdatakoding,
+            kommandolinjekoding og konsollkoding, se delen med identisk navn i
+            <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a> manualsiden.
+            </p>
+         
+         <h1><a name="mkvextract.output_file_formats">5. Utdatafilformater</a><a class="headerlink" href="#mkvextract.output_file_formats" title="Link to this heading">#</a></h1>
+         
+         
+         
+         <p>
+            Avgjørelsen om utdataformatet er basert på sportypen, ikke på utvidelsen som
+            brukes til utdatafilnavnet. Følgende sportyper støttes for øyeblikket:
+            </p>
+         
+         
+         <table class="variablelist">
+            <thead>
+               <tr>
+                  <th>Option</th>
+                  <th>Description</th>
+               </tr>
+            </thead>
+            <tbody>
+               <tr>
+                  <td class="varlistoption">A_AAC/MPEG2/*, A_AAC/MPEG4/*, A_AAC</td>
+                  <td>
+                     
+                     <p>
+                        Alle <span class="abbrev">AAC</span>-filer vil bli skrevet inn i en
+                        <span class="abbrev">AAC</span>-fil med <span class="abbrev">ADTS</span>-datahoder før hver
+                        pakke. <span class="abbrev">ADTS</span>-datahodene inneholder ikke det avviklede
+                        uthevingsfeltet.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption">A_AC3, A_EAC3</td>
+                  <td>
+                     
+                     <p>
+                        Disse vil bli trekket ut til rå <span class="abbrev">AC-3</span>-filer.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption">A_ALAC</td>
+                  <td>
+                     
+                     <p>
+                        <span class="abbrev">ALAC</span>-spor skrives til <span class="abbrev">CAF</span>-filer.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption">A_DTS</td>
+                  <td>
+                     
+                     <p>
+                        Disse vil bli trekket ut til rå <span class="abbrev">DTS</span>-filer.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption">A_FLAC</td>
+                  <td>
+                     
+                     <p>
+                        <span class="abbrev">FLAC</span>-spor skrives til rå <span class="abbrev">FLAC</span>-filer.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption">A_MPEG/L2</td>
+                  <td>
+                     
+                     <p>
+                        MPEG-1 Audio Layer II-strømmer trekkes ut til rå <span class="abbrev">MP2</span>-filer.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption">A_MPEG/L3</td>
+                  <td>
+                     
+                     <p>
+                        Disse vil bli trekket ut til rå <span class="abbrev">MP3</span>-filer.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption">A_OPUS</td>
+                  <td>
+                     
+                     <p>
+                        <span class="productname">Opus</span><sup>(tm)</sup>-spor skrives til
+                        <span class="productname">OggOpus</span><sup>(tm)</sup>-filer.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption">A_PCM/INT/LIT, A_PCM/INT/BIG</td>
+                  <td>
+                     
+                     <p>
+                        Rå <span class="abbrev">PCM</span>-data vil bli skrevet til en
+                        <span class="abbrev">WAV</span>-fil. Big-endian heltallsdata vil bli konvertert til
+                        little-endian data i prosessen.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption">A_REAL/*</td>
+                  <td>
+                     
+                     <p>
+                        <span class="productname">RealAudio</span><sup>(tm)</sup>-spor skrives til
+                        <span class="productname">RealMedia</span><sup>(tm)</sup>-filer.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption">A_TRUEHD, A_MLP</td>
+                  <td>
+                     
+                     <p>
+                        Disse vil ble trekket ut til rå
+                        <span class="abbrev">TrueHD</span>-/<span class="abbrev">MLP</span>-filer.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption">A_TTA1</td>
+                  <td>
+                     
+                     <p>
+                        <span class="productname">TrueAudio</span><sup>(tm)</sup>-spor skrives til
+                        <span class="abbrev">TTA</span>-filer. Vær oppmerksom på at på grunn av <span class="productname">Matroska</span><sup>(tm)</sup>s
+                        begrensede tidsstempelpresisjon, vil den ekstraherte filens datahode være
+                        forskjellig angående to felt: <span class="varname">data_length</span> (totalt antall
+                        samples i filen) og <span class="abbrev">CRC</span>.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption">A_VORBIS</td>
+                  <td>
+                     
+                     <p>
+                        Vorbis-lyd vil skrives til en <span class="productname">OggVorbis</span><sup>(tm)</sup> fil.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption">A_WAVPACK4</td>
+                  <td>
+                     
+                     <p>
+                        <span class="productname">WavPack</span><sup>(tm)</sup>-spor skrives til
+                        <span class="productname">WV</span><sup>(tm)</sup>-filer.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption">S_HDMV/PGS</td>
+                  <td>
+                     
+                     <p>
+                        <span class="abbrev">PGS</span>-undertekster vil bli skrevet som
+                        <span class="abbrev">SUP</span>-filer.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption">S_HDMV/TEXTST</td>
+                  <td>
+                     
+                     <p>
+                        <span class="abbrev">TextST</span>-undertekster vil bli skrevet som et spesielt
+                        filformat oppfunnet for <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a> og <span class="productname">mkvextract</span>(1).
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption">S_KATE</td>
+                  <td>
+                     
+                     <p>
+                        <span class="productname">Kate</span><sup>(tm)</sup>-strømmer vil bli skrevet i en
+                        <span class="productname">Ogg</span><sup>(tm)</sup>-konteiner.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption">S_TEXT/SSA, S_TEXT/ASS, S_SSA, S_ASS</td>
+                  <td>
+                     
+                     <p>
+                        <span class="abbrev">SSA</span>og <span class="abbrev">ASS</span> tekst-undertekster vil bli
+                        skrevet som henholdsvis <span class="abbrev">SSA</span>-/<span class="abbrev">ASS-</span>filer.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption">S_TEXT/UTF8, S_TEXT/ASCII</td>
+                  <td>
+                     
+                     <p>
+                        Enkle tekst-undertekster vil bli skrevet som SRT-filer.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption">S_VOBSUB</td>
+                  <td>
+                     
+                     <p>
+                        <span class="productname">VobSub</span><sup>(tm)</sup>-undertekster vil bli skrevet som
+                        <span class="abbrev">SUB</span>-filer sammen med de respektive indeksfilene, som
+                        <span class="abbrev">IDX</span>-filer.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption">S_TEXT/USF</td>
+                  <td>
+                     
+                     <p>
+                        <span class="abbrev">USF</span> tekst-undertekster vil bli skrevet som
+                        <span class="abbrev">USF</span>-filer.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption">S_TEXT/WEBVTT</td>
+                  <td>
+                     
+                     <p>
+                        <span class="abbrev">WebVTT</span> tekst-undertekster vil bli skrevet som
+                        <span class="abbrev">WebVTT</span>-filer.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption">V_MPEG1, V_MPEG2</td>
+                  <td>
+                     
+                     <p>
+                        <span class="abbrev">MPEG-1</span> og <span class="abbrev">MPEG-2</span> videospor vil bli skrevet
+                        som <span class="abbrev">MPEG</span>- elementære strømmer.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption">V_MPEG4/ISO/AVC</td>
+                  <td>
+                     
+                     <p>
+                        <span class="abbrev">H.264</span>-/AVC-videospor er skrevet til
+                        <span class="abbrev">H.264</span>-elementære strømmer som kan behandles videre med for
+                        eksempel <span class="productname">MP4Box</span><sup>(tm)</sup> fra
+                        <span class="productname">GPAC</span><sup>(tm)</sup>-pakken.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption">V_MPEG4/ISO/HEVC</td>
+                  <td>
+                     
+                     <p>
+                        <span class="abbrev">H.265</span>-/HEVC-videospor er skrevet til
+                        <span class="abbrev">H.265</span>-elementære strømmer som kan behandles videre med for
+                        eksempel <span class="productname">MP4Box</span><sup>(tm)</sup> fra
+                        <span class="productname">GPAC</span><sup>(tm)</sup>-pakken.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption">V_MS/VFW/FOURCC</td>
+                  <td>
+                     
+                     <p>
+                        Faste <span class="abbrev">FPS-videospor</span> med denne
+                        <span class="classname">CodecID</span>-en skrives til <span class="abbrev">AVI-filer</span>.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption">V_REAL/*</td>
+                  <td>
+                     
+                     <p>
+                        <span class="productname">RealVideo</span><sup>(tm)</sup>-spor skrives til
+                        <span class="productname">RealMedia</span><sup>(tm)</sup>-filer.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption">V_THEORA</td>
+                  <td>
+                     
+                     <p>
+                        <span class="productname">Theora</span><sup>(tm)</sup>-strømmer vil bli skrevet i en
+                        <span class="productname">Ogg</span><sup>(tm)</sup>-konteiner.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption">V_VP8, V_VP9</td>
+                  <td>
+                     
+                     <p>
+                        <span class="abbrev">VP8</span>-/<span class="abbrev">VP9</span>-spor skrives til
+                        <span class="abbrev">IVF</span>-filer.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption">Tagger</td>
+                  <td>
+                     
+                     <p>
+                        Tagger konverteres til et <span class="abbrev">XML</span>-format. Dette formatet er det samme som
+                        <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a> støtter for lesing av tagger.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption">Vedlegg</td>
+                  <td>
+                     
+                     <p>
+                        Vedlegg skrives til utdatafilen som de er. Ingen konvertering overhodet er
+                        gjort.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption">Kapitler</td>
+                  <td>
+                     
+                     <p>
+                        Kapitler konverteres til et <span class="abbrev">XML</span>-format. Dette formatet er det samme som
+                        <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a> støtter for lesing av kapitler. Alternativt kan en nedstrippet
+                        versjon sendes ut i det enkle <span class="abbrev">OGM</span>-stilformatet.
+                        </p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption">Tidsstempler</td>
+                  <td>
+                     
+                     <p>
+                        Tidsstempler blir først sortert og deretter sendt ut som en tidsstempel
+                        v2-format kompatibel fil klar til å bli matet til <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a>. Utpakking til
+                        andre formater (v1, v3 og v4) støttes ikke.
+                        </p>
+                     </td>
+               </tr>
+            </tbody>
+         </table>
+         
+         <h1><a name="d4e1469">6. Avslutningskoder</a><a class="headerlink" href="#d4e1469" title="Link to this heading">#</a></h1>
+         
+         
+         
+         <p>
+            <span class="productname">mkvextract</span>(1) avsluttes med en av tre avslutningskoder:
+            </p>
+         
+         
+         <ul>
+            
+            <li>
+               
+               <p>
+                  <span class="constant">0</span> -- Denne avslutningskoden betyr at uttrekkingen er
+                  fullført.
+                  </p>
+               </li>
+            
+            
+            <li>
+               
+               <p>
+                  <span class="constant">1</span> -- I dette tilfellet har <span class="productname">mkvextract</span>(1)  sendt ut minst
+                  en advarsel, men uttrekkingen fortsatte. En advarsel er prefikset med
+                  teksten '<span class="literal">Advarsel:</span>'.  Avhengig av problemene som er
+                  involvert, kan de resulterende filene være ok eller ikke. Brukeren
+                  oppfordres til å sjekke både advarselen og resultatfilene.
+                  </p>
+               </li>
+            
+            
+            <li>
+               
+               <p>
+                  <span class="constant">2</span> -- Denne avslutningskoden brukes etter at det oppstod
+                  en feil. <span class="productname">mkvextract</span>(1) avbryter rett etter at feilmeldingen er sendt
+                  ut. Feilmeldinger varierer fra feil kommandolinjeargumenter over
+                  lese-/skrivefeil til ødelagte filer.
+                  </p>
+               </li>
+            </ul>
+         
+         <h1><a name="mkvextract.environment_variables">7. Miljøvariabler</a><a class="headerlink" href="#mkvextract.environment_variables" title="Link to this heading">#</a></h1>
+         
+         
+         
+         <p>
+            <span class="productname">mkvextract</span>(1) bruker standardvariablene som bestemmer systemets lokalitet
+            (for eksempel <span class="varname">LANG</span> og
+            <span class="varname">LC_*</span>-familien). Ytterligere variabler:
+            </p>
+         
+         
+         <table class="variablelist">
+            <thead>
+               <tr>
+                  <th>Option</th>
+                  <th>Description</th>
+               </tr>
+            </thead>
+            <tbody>
+               <tr>
+                  <td class="varlistoption"><a name="mkvextract.environment_variables.debug"><span class="varname">MKVINFO_DEBUG</span>, <span class="varname">MKVTOOLNIX_DEBUG</span> og
+                        dens korte form <span class="varname">MTX_DEBUG</span></a><a class="headerlink" href="#mkvextract.environment_variables.debug" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>Innholdet behandles som om det hadde blitt sendt via <a href="#mkvextract.description.debug">--debug</a>
+                        alternativet.</p>
+                     </td>
+               </tr>
+               <tr>
+                  <td class="varlistoption"><a name="mkvextract.environment_variables.engage"><span class="varname">MKVEXTRACT_ENGAGE</span>, <span class="varname">MKVTOOLNIX_ENGAGE</span>
+                        og dens korte form <span class="varname">MTX_ENGAGE</span></a><a class="headerlink" href="#mkvextract.environment_variables.engage" title="Link to this option">#</a></td>
+                  <td>
+                     
+                     <p>Innholdet behandles som om det hadde blitt sendt via <a href="#mkvextract.description.debug">--engage</a>
+                        alternativet.</p>
+                     </td>
+               </tr>
+            </tbody>
+         </table>
+         
+         <h1><a name="mkvextract.seealso">8. Se også</a><a class="headerlink" href="#mkvextract.seealso" title="Link to this heading">#</a></h1>
+         
+         
+         <p>
+            <a href="mkvmerge.html"><span class="productname">mkvmerge</span>(1)</a>, <a href="mkvinfo.html"><span class="productname">mkvinfo</span>(1)</a>, <a href="mkvpropedit.html"><span class="productname">mkvpropedit</span>(1)</a>, <a href="mkvtoolnix-gui.html"><span class="productname">mkvtoolnix-gui</span>(1)</a>
+            </p>
+         
+         <h1><a name="mkvextract.www">9. WWW</a><a class="headerlink" href="#mkvextract.www" title="Link to this heading">#</a></h1>
+         
+         
+         <p>
+            Den nyeste versjonen finner du alltid på <a href="https://mkvtoolnix.download/">MKVToolNixs hjemmeside</a>.
+            </p>
+         </div>
+   </body>
+</html>
