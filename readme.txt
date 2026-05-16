@@ -72,6 +72,15 @@ Notepad++ is suggested for editing batch files.
 
 Changelog
 
+v2.0.1
+---------------------------------
+• Update Auto-Boost-Av1an.py
+  ffvship path fix
+• Update av1an-tag.py
+  Improve svt-av1 fork version number parsing
+• Update bat-builder.py
+  Append preset number to output filename, tweak default svt-av1-essential settings.
+
 v2.0
 ---------------------------------
 • fssimu2 replaced with FFVship
