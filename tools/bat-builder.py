@@ -10,7 +10,7 @@ def main():
     print("================================================\n")
     print("This tool will create a batch script to encode your videos")
     print("Just answer the questions below and your script will be ready to run.")
-    print("SVT-AV1-HDR fork requires manually editing the .bat file for color settings.\n")    
+    print("SVT-AV1-HDR fork requires manually editing the output .bat file for color settings.\n")    
 
     # --- 1. Pass Type ---
     print("--------------------------------------------------------")
@@ -18,14 +18,13 @@ def main():
     print("--------------------------------------------------------")
     print("How should the encoder approach your video?\n")
     print("  1: Auto-Boost")
-    print("     Two pass encoding with visual metrics. The first pass is a quick")
+    print("     Two pass encoding with visual metrics. The first pass is a fast-speed")
     print("     preview to measure quality. The second pass uses those")
     print("     measurements to fine-tune the final encode automatically.")
-    print("     Takes longer, but produces the best results.\n")
-    print("  2: Single Pass")
+    print("     Takes longer, but can potentially produce better results.\n")
+    print("  2: Av1an Single Pass")
     print("     Encodes the video once, straight through.")
-    print("     Good if you want faster turnaround and are okay with")
-    print("     slightly less optimized quality.\n")
+    print("     Good if you want faster turnaround.\n")
     mode_choice = input("Select [1/2]: ").strip()
     mode = "autoboost" if mode_choice == "1" else "av1an"
 
@@ -40,7 +39,8 @@ def main():
     print("                    subtle detailed textures.\n")
     print("  2: essential   -- Best for: Anime or Live Action")
     print("                    A well-rounded profile that works great on")
-    print("                    both animated and real-world footage.\n")
+    print("                    both animated and real-world footage.")
+    print("                    User scalable detail retention.\n")
     print("  3: hdr         -- Best for: HDR or SDR Live Action")
     print("                    Specifically designed to retain live action")
     print("                    detail and grain.\n")
@@ -150,8 +150,12 @@ def main():
         final_params = "--lineart-psy-bias 4 --texture-psy-bias 2 --hbd-mds 1 --keyint 305 --noise-level-thr 16000 --tune 0 --filtering-noise-detection 4 --lp 3 --photon-noise 200"
         has_rename = False
     elif fork == "essential":
-        fast_params = f"--ac-bias 1.0 --tx-bias 3 --luminance-qp-bias 20 --enable-alt-dlf 1 --qp-scale-compress-strength 3 --complex-hvs 1{dist_preset}"
-        final_params = f"--ac-bias 1.0 --tx-bias 3 --luminance-qp-bias 20 --enable-alt-dlf 1 --qp-scale-compress-strength 3 --complex-hvs 1 --photon-noise 200{dist_preset}"
+        if mode == "autoboost":
+            fast_params = f"--ac-bias 1.0 --tx-bias 3 --luminance-qp-bias 20 --enable-alt-dlf 1 --qp-scale-compress-strength 3 --complex-hvs 1{dist_preset}"
+            final_params = f"--ac-bias 1.0 --tx-bias 3 --luminance-qp-bias 20 --enable-alt-dlf 1 --qp-scale-compress-strength 3 --complex-hvs 1 --photon-noise 200{dist_preset}"
+        else: # av1an mode
+            fast_params = f"--ac-bias 1.0 --tx-bias 3 --luminance-qp-bias 20 --enable-alt-dlf 1 --complex-hvs 1{dist_preset}"
+            final_params = f"--ac-bias 1.0 --tx-bias 3 --luminance-qp-bias 20 --enable-alt-dlf 1 --complex-hvs 1 --photon-noise 200{dist_preset}"
         film_grain_note = ":: If you'd like to use --film-grain, then --photon-noise must be set to 0, do not remove the setting.\n"
     elif fork == "hdr":
         # Keep base clean for HDR, apply tuning/noise based on user input
@@ -164,7 +168,7 @@ def main():
     autocrop_flag = " --autocrop" if fork != "5fish" else ""
 
     # --- Construct Script Content ---
-    output_filename = f"batbuilder-{mode}-{fork}-crf{crf}.bat"
+    output_filename = f"batbuilder-{mode}-{fork}-crf{crf}-p{speed}.bat"
     
     script = "@echo off\n"
     
