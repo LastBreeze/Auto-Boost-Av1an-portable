@@ -1,3 +1,4 @@
+*.dll filter=lfs diff=lfs merge=lfs -text
 tools/av1an/avcodec-62.dll filter=lfs diff=lfs merge=lfs -text
 tools/av1an/avfilter-11.dll filter=lfs diff=lfs merge=lfs -text
 tools/NVEncC/nppif64_11.dll filter=lfs diff=lfs merge=lfs -text
