@@ -8,14 +8,44 @@ import shlex
 # Runs in 'temp', tools are in ../tools
 TOOLS_DIR = os.path.join("..", "tools")
 
-def get_5fish_folder():
-    """Finds the 5fish folder name in tools/av1an."""
-    base_path = os.path.join(TOOLS_DIR, "av1an")
-    pattern = os.path.join(base_path, "5fish-svt-av1-psy*")
-    folders = glob.glob(pattern)
-    if folders:
-        return os.path.basename(folders[0])
-    return "5fish-svt-av1-psy_Unknown"
+def get_svt_av1_version():
+    """Executes SvtAv1EncApp.exe to get the precise version and formats it."""
+    exe_path = os.path.join(TOOLS_DIR, "av1an", "SvtAv1EncApp.exe")
+    if not os.path.exists(exe_path):
+        return "SVT-AV1_Unknown"
+        
+    try:
+        # Run the command and capture output
+        result = subprocess.run([exe_path, "--version"], capture_output=True, text=True, check=True)
+        output = result.stdout.strip() or result.stderr.strip()
+        
+        if not output:
+            return "SVT-AV1_Unknown"
+            
+        # Get first line and clean off the (release) tag
+        line = output.split('\n')[0].strip()
+        line = line.replace(" (release)", "").strip()
+        
+        # Format 1: svt-av1-psy 5fish fork
+        if "SVT-AV1-PSY" in line and "5fish" in line:
+            match = re.search(r"SVT-AV1-PSY \[5fish.*?\]\s+(v[0-9a-zA-Z\.\-]+)", line)
+            if match:
+                return f"svt-av1-psy 5fish fork {match.group(1)}"
+            # Fallback if pattern slightly differs
+            return re.sub(r"SVT-AV1-PSY \[5fish.*?\]", "svt-av1-psy 5fish fork", line).strip()
+            
+        # Format 2: SVT-AV1-Essential
+        if "SVT-AV1-Essential" in line:
+            match = re.search(r"(SVT-AV1-Essential)\s+(v[0-9\.]+)", line)
+            if match:
+                return f"{match.group(1)} {match.group(2)}"
+                
+        # Format 3: General Catch-all (e.g. SVT-AV1-HDR)
+        return line
+
+    except Exception as e:
+        print(f"Error fetching SVT-AV1 version: {e}")
+        return "SVT-AV1_Unknown"
 
 def get_active_batch_filename():
     """Scans tools/ for the marker file."""
@@ -139,10 +169,10 @@ def main():
     if not batch_name: return 
 
     config = parse_av1an_batch(batch_name)
-    fish_version = get_5fish_folder()
+    svt_version = get_svt_av1_version()
     
     # Construct info string
-    # Format: Av1an [Flags] 5fish... settings: "..."
+    # Format: Av1an [Flags] SVT_AV1_Version... settings: "..."
     
     # 1. Prefix
     info_parts = ["Av1an"]
@@ -151,8 +181,8 @@ def main():
     if config["PHOTON_NOISE"] and config["PHOTON_NOISE"] != "0":
         info_parts.append(f"--photon-noise {config['PHOTON_NOISE']}")
         
-    # 3. 5fish version
-    info_parts.append(fish_version)
+    # 3. SVT-AV1 version
+    info_parts.append(svt_version)
     
     # 4. Settings Block
     settings_content = []
