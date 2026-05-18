@@ -8,6 +8,10 @@ import shutil
 
 # --- CONFIGURATION ---
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+TOOLS_DIR = os.path.join(BASE_DIR, "tools")
+AV1AN_DIR = os.path.join(TOOLS_DIR, "av1an")
+FORKS_DIR = os.path.join(AV1AN_DIR, "svt-av1 forks")
+
 AV1AN_PATH = "av1an"
 SAMPLE_FILE = os.path.join(BASE_DIR, "tools", "sample.mkv")
 CONFIG_FILE = os.path.join(BASE_DIR, "tools", "workercount-config.txt")
@@ -55,10 +59,78 @@ def cleanup_temp_folders():
         if not deleted:
             print(f"   - Warning: Could not delete sample_svt-av1.mkv (File in use).", file=sys.stderr)
 
+def setup_svt_av1_fork(target_fork="5fish"):
+    """Checks for AVX-512 support and swaps the SvtAv1EncApp.exe accordingly."""
+    print(f"Setting up SVT-AV1 fork: {target_fork}", file=sys.stderr)
+    avx512_supported = False
+    try:
+        from cpuinfo import get_cpu_info
+        info = get_cpu_info()
+        if 'avx512f' in info.get('flags', []):
+            avx512_supported = True
+            print("   - CPU supports AVX-512.", file=sys.stderr)
+        else:
+            print("   - CPU does not support AVX-512.", file=sys.stderr)
+    except ImportError:
+        print("   - Warning: py-cpuinfo not installed. Assuming no AVX-512 support.", file=sys.stderr)
+
+    fork_parent = None
+    if os.path.exists(FORKS_DIR):
+        for f in os.listdir(FORKS_DIR):
+            if os.path.isdir(os.path.join(FORKS_DIR, f)) and target_fork.lower() in f.lower():
+                fork_parent = os.path.join(FORKS_DIR, f)
+                break
+
+    if fork_parent:
+        target_subfolder = None
+        subfolders = [d for d in os.listdir(fork_parent) if os.path.isdir(os.path.join(fork_parent, d))]
+
+        if avx512_supported:
+            for sub in subfolders:
+                sub_lower = sub.lower()
+                if 'icelake' in sub_lower or 'znver5' in sub_lower or 'znver4' in sub_lower:
+                    target_subfolder = sub
+                    break
+
+        if not target_subfolder:
+            for sub in subfolders:
+                if 'x86-64-v3' in sub.lower():
+                    target_subfolder = sub
+                    break
+
+        if not target_subfolder and subfolders:
+            target_subfolder = subfolders[0]
+
+        if target_subfolder:
+            src_dir = os.path.join(fork_parent, target_subfolder)
+            exe_src = os.path.join(src_dir, "SvtAv1EncApp.exe")
+            exe_dest = os.path.join(AV1AN_DIR, "SvtAv1EncApp.exe")
+
+            try:
+                if os.path.exists(exe_dest):
+                    os.remove(exe_dest)
+            except Exception as e:
+                print(f"   - Warning: Could not clean up old SVT-AV1 files: {e}", file=sys.stderr)
+
+            if os.path.exists(exe_src):
+                try:
+                    shutil.copy2(exe_src, exe_dest)
+                    print(f"   - Copied SvtAv1EncApp.exe from {target_subfolder}", file=sys.stderr)
+                except Exception as e:
+                    print(f"   - Error copying fork files: {e}", file=sys.stderr)
+            else:
+                print(f"   - Error: SvtAv1EncApp.exe not found in {src_dir}", file=sys.stderr)
+    else:
+        print(f"   - Warning: Could not find a fork directory matching '{target_fork}' in {FORKS_DIR}", file=sys.stderr)
+
+
 def get_optimal_workers():
     print(f"Running one-time RAM test on {os.path.basename(SAMPLE_FILE)}...", file=sys.stderr)
     print("Please wait while we measure memory usage...", file=sys.stderr)
     
+    # Check/swap for AVX-512 before starting process
+    setup_svt_av1_fork("5fish")
+
     # 1. Start the test process with 1 worker
     cmd = [
         AV1AN_PATH,
