@@ -18,10 +18,10 @@ def main():
     print("--------------------------------------------------------")
     print("How should the encoder approach your video?\n")
     print("  1: Auto-Boost")
-    print("     Two pass encoding with visual metrics. The first pass is a fast-speed")
-    print("     preview to measure quality. The second pass uses those")
-    print("     measurements to fine-tune the final encode automatically.")
-    print("     Takes longer, but can potentially produce better results.\n")
+    print("     Two pass encoding with visual metrics. The first pass is")
+    print("     a fast-speed preview to measure quality. The second pass")
+    print("     uses those measurements to fine-tune the final encode")
+    print("     automatically. Can potentially produce better results.\n")
     print("  2: Av1an Single Pass")
     print("     Encodes the video once, straight through.")
     print("     Good if you want faster turnaround.\n")
@@ -165,10 +165,25 @@ def main():
         fast_params = ""
         final_params = ""
 
-    autocrop_flag = " --autocrop" if fork != "5fish" else ""
+    # --- Auto Crop ---
+    print("\n--------------------------------------------------------")
+    print("Auto Crop")
+    print("--------------------------------------------------------")
+    print("Most movies and TV shows have black bars on the top and bottom")
+    print("(letterboxing). Auto crop automatically detects and removes them,")
+    print("which saves file space and avoids wasting encoding bits on black areas.\n")
+    print("  Y: Yes -- Automatically detect and crop black bars (recommended)")
+    print("  N: No  -- Keep the video as-is, no cropping\n")
+    print("Tip: If auto crop removes too much or too little, you can open")
+    print("settings.txt in Notepad++ and switch to manual crop mode instead.\n")
+    autocrop_input = input("Enable auto crop? [Y/N] (Press Enter for Yes): ").strip().lower()
+    use_autocrop = autocrop_input != "n"
+
+    autocrop_flag = " --autocrop" if use_autocrop else ""
 
     # --- Construct Script Content ---
-    output_filename = f"batbuilder-{mode}-{fork}-crf{crf}-p{speed}.bat"
+    autocrop_suffix = "-autocrop" if use_autocrop else ""
+    output_filename = f"batbuilder-{mode}-{fork}-crf{crf}-p{speed}{autocrop_suffix}.bat"
     
     script = "@echo off\n"
     

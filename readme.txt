@@ -72,6 +72,13 @@ Notepad++ is suggested for editing batch files.
 
 Changelog
 
+v2.1
+---------------------------------
+• Update bat-builder.py
+  Ask if auto crop should be used
+• Update av1an-dispatch.py
+  av1an scripts can now use vapoursynth filtering
+
 v2.0.1
 ---------------------------------
 • Update Auto-Boost-Av1an.py
