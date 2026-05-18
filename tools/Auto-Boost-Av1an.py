@@ -43,7 +43,7 @@ import csv
 import numpy as np
 import concurrent.futures
 
-ver_str = "v2.0.1"
+ver_str = "v2.1"
 
 # --- TOOL PATHS HELPER ---
 def resolve_tool(portable_path_str: str, binary_name: str) -> Path:
