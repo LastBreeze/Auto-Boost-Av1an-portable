@@ -19,7 +19,9 @@ VERBOSE = False  # Set to True to see all raw output for troubleshooting
 
 BASE_DIR = Path(__file__).parent.parent.resolve()
 TOOLS_DIR = BASE_DIR / "tools"
-AV1AN_EXE = TOOLS_DIR / "av1an" / "av1an.exe"
+AV1AN_DIR = TOOLS_DIR / "av1an"
+AV1AN_EXE = AV1AN_DIR / "av1an.exe"
+FORKS_DIR = AV1AN_DIR / "svt-av1 forks"
 SAMPLE_FILE = TOOLS_DIR / "sample.mkv"
 CONFIG_FILE = TOOLS_DIR / "workercount-ssimu2.txt"
 TEMP_DIR = TOOLS_DIR / "ssimu2_bench_temp"
@@ -84,6 +86,69 @@ def cleanup_temp_files():
             f.unlink(missing_ok=True)
         except:
             pass
+
+def setup_svt_av1_fork(target_fork="5fish"):
+    """Checks for AVX-512 support and swaps the SvtAv1EncApp.exe accordingly."""
+    print(f"Setting up SVT-AV1 fork: {target_fork}", file=sys.stderr)
+    avx512_supported = False
+    try:
+        from cpuinfo import get_cpu_info
+        info = get_cpu_info()
+        if 'avx512f' in info.get('flags', []):
+            avx512_supported = True
+            print("   - CPU supports AVX-512.", file=sys.stderr)
+        else:
+            print("   - CPU does not support AVX-512.", file=sys.stderr)
+    except ImportError:
+        print("   - Warning: py-cpuinfo not installed. Assuming no AVX-512 support.", file=sys.stderr)
+
+    fork_parent = None
+    if FORKS_DIR.exists():
+        for f in FORKS_DIR.iterdir():
+            if f.is_dir() and target_fork.lower() in f.name.lower():
+                fork_parent = f
+                break
+
+    if fork_parent:
+        target_subfolder = None
+        subfolders = [d for d in fork_parent.iterdir() if d.is_dir()]
+
+        if avx512_supported:
+            for sub in subfolders:
+                sub_lower = sub.name.lower()
+                if 'icelake' in sub_lower or 'znver5' in sub_lower or 'znver4' in sub_lower:
+                    target_subfolder = sub
+                    break
+
+        if not target_subfolder:
+            for sub in subfolders:
+                if 'x86-64-v3' in sub.name.lower():
+                    target_subfolder = sub
+                    break
+
+        if not target_subfolder and subfolders:
+            target_subfolder = subfolders[0]
+
+        if target_subfolder:
+            exe_src = target_subfolder / "SvtAv1EncApp.exe"
+            exe_dest = AV1AN_DIR / "SvtAv1EncApp.exe"
+
+            try:
+                if exe_dest.exists():
+                    exe_dest.unlink()
+            except Exception as e:
+                print(f"   - Warning: Could not clean up old SVT-AV1 files: {e}", file=sys.stderr)
+
+            if exe_src.exists():
+                try:
+                    shutil.copy2(exe_src, exe_dest)
+                    print(f"   - Copied SvtAv1EncApp.exe from {target_subfolder.name}", file=sys.stderr)
+                except Exception as e:
+                    print(f"   - Error copying fork files: {e}", file=sys.stderr)
+            else:
+                print(f"   - Error: SvtAv1EncApp.exe not found in {target_subfolder}", file=sys.stderr)
+    else:
+        print(f"   - Warning: Could not find a fork directory matching '{target_fork}' in {FORKS_DIR}", file=sys.stderr)
 
 def run_fast_pass():
     print("Generating benchmark assets (Fast Pass)...", file=sys.stderr)
@@ -582,6 +647,10 @@ def update_auto_boost_script(winning_streams):
 if __name__ == "__main__":
     try:
         cleanup_temp_files()
+        
+        # Setup specific SVT-AV1 fork with AVX-512 detection before pass
+        setup_svt_av1_fork(target_fork="5fish")
+
         encoded_file = run_fast_pass()
         if not encoded_file:
             raise RuntimeError("Fast pass failed")
