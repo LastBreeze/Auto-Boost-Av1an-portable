@@ -72,6 +72,11 @@ Notepad++ is suggested for editing batch files.
 
 Changelog
 
+v2.11
+---------------------------------
+• Update ssimu2-workercount.py & workercount.py
+  Added avx512 detection so worker count tests can complete successfully on non-avx512 CPUs
+
 v2.1
 ---------------------------------
 • Update bat-builder.py
