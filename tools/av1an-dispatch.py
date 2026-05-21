@@ -1,11 +1,34 @@
 import sys
 import subprocess
 import os
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import glob
 import shutil
 import shlex
-import csv
 from wakepy import keep
+from svt_fork_setup import setup_svt_av1_fork
+
+def set_settings_value(settings_path, key, value):
+    """Set key=value in settings.txt, preserving the rest of the file."""
+    key_l = key.lower()
+    lines = []
+    found = False
+    if os.path.exists(settings_path):
+        with open(settings_path, "r", encoding="utf-8", errors="replace") as f:
+            lines = f.read().splitlines()
+    for idx, line in enumerate(lines):
+        stripped = line.strip()
+        if not stripped or stripped.startswith(("#", ";", "[")) or "=" not in line:
+            continue
+        k, _ = line.split("=", 1)
+        if k.strip().lower() == key_l:
+            lines[idx] = f"{k.strip()}={value}"
+            found = True
+            break
+    if not found:
+        lines.append(f"{key}={value}")
+    with open(settings_path, "w", encoding="utf-8", newline="\r\n") as f:
+        f.write("\n".join(lines) + "\n")
 
 def main():
     # --- Configuration ---
@@ -35,41 +58,6 @@ def main():
     if not os.path.exists(temp_dir):
         os.makedirs(temp_dir)
         
-    # --- Settings Parsing ---
-    settings_path = os.path.join(root_dir, "settings.txt")
-    
-    def get_setting(key, default):
-        if not os.path.exists(settings_path): return default
-        try:
-            with open(settings_path, 'r', encoding='utf-8') as f:
-                for line in f:
-                    line = line.strip()
-                    if line.startswith('#') or line.startswith(';'): continue
-                    if '=' in line:
-                        k, v = line.split('=', 1)
-                        if k.strip().lower() == key.lower():
-                            return v.strip()
-        except: pass
-        return default
-
-    s_downscale = get_setting("downscale", "False")
-    s_target_res = get_setting("target_resolution", "1920x1080")
-    s_kernel = get_setting("kernel_type", "Hermite")
-    s_denoise = get_setting("denoise", "False")
-    s_denoise_setting = get_setting("denoise_setting", "src = DFTTest().denoise(src, {0.00:0.30, 0.40:0.30, 0.60:0.60, 0.80:1.50, 1.00:2.00}, planes=[0, 1, 2])")
-    s_deband = get_setting("deband", "False")
-    s_deband_setting = get_setting("deband_setting", "src = core.placebo.Deband(src, threshold=1.5, planes=1)")
-    s_crop_mode = get_setting("crop", "auto").lower()
-    s_crop_top = int(get_setting("top", "0"))
-    s_crop_bottom = int(get_setting("bottom", "0"))
-
-    do_downscale = s_downscale.lower() == "true"
-    do_denoise = s_denoise.lower() == "true"
-    do_deband = s_deband.lower() == "true"
-    do_manual_crop = s_crop_mode == "manual" and (s_crop_top > 0 or s_crop_bottom > 0)
-
-    is_filtering_active = do_downscale or do_denoise or do_deband or do_manual_crop
-
     # --- Argument Parsing ---
     args = sys.argv[1:]
     
@@ -79,12 +67,24 @@ def main():
     final_speed = "4"
     final_params = ""
     resume = False
-    autocrop = False
+    selected_fork = "essential"
+    avx512 = False
+    denoise_setting = None
     
     i = 0
     while i < len(args):
         arg = args[i]
-        if arg == "--quality":
+        if arg == "--fork" and i + 1 < len(args):
+            selected_fork = args[i+1]
+            i += 2
+        elif arg == "--avx512":
+            avx512 = True
+            i += 1
+        elif arg == "--denoise" and i + 1 < len(args):
+            val = args[i+1].strip().lower()
+            denoise_setting = "True" if val in ("1", "true", "yes", "y", "on") else "False"
+            i += 2
+        elif arg == "--quality":
             quality = args[i+1]
             i += 2
         elif arg == "--workers":
@@ -103,39 +103,18 @@ def main():
         elif arg == "--resume":
             resume = True
             i += 1
-        elif arg == "--autocrop":
-            autocrop = True
-            is_filtering_active = True
-            i += 1
         else:
             i += 1
 
-    # --- Display Active Filters ---
-    print("\n" + "="*80)
-    print("Active VapourSynth Filters:")
-    print("="*80)
-    filters_active_display = False
+    if denoise_setting is not None:
+        settings_path = os.path.join(root_dir, "settings.txt")
+        try:
+            set_settings_value(settings_path, "denoise", denoise_setting)
+            print(f"[Dispatch] Set settings.txt denoise={denoise_setting}")
+        except Exception as e:
+            print(f"[Dispatch] Warning: Failed to update settings.txt denoise: {e}")
 
-    if do_downscale:
-        print(f"- Downscale: True | Target: {s_target_res}, Kernel: {s_kernel}")
-        filters_active_display = True
-    if do_denoise:
-        print(f"- Denoise:   True | Setting: {s_denoise_setting}")
-        filters_active_display = True
-    if do_deband:
-        print(f"- Deband:    True | Setting: {s_deband_setting}")
-        filters_active_display = True
-    
-    if do_manual_crop:
-        print(f"- Crop:      True | Mode: manual, Top: {s_crop_top}, Bottom: {s_crop_bottom}")
-        filters_active_display = True
-    elif autocrop:
-        print(f"- Crop:      True | Mode: auto (Detection per file)")
-        filters_active_display = True
-
-    if not filters_active_display:
-        print("- None")
-    print("="*80 + "\n")
+    setup_svt_av1_fork(tools_dir, selected_fork, avx512=avx512, verbose=True)
             
     # --- Gather Input Files ---
     extensions = ("*.mkv", "*.mp4", "*.m2ts")
@@ -188,136 +167,6 @@ def main():
                 except subprocess.CalledProcessError:
                     print("[Dispatch] Scene detection failed. Proceeding anyway.")
 
-            # 1.5. VapourSynth Generation (If Active)
-            av1an_input = filename
-            
-            crop_t = s_crop_top if do_manual_crop else 0
-            crop_b = s_crop_bottom if do_manual_crop else 0
-            
-            if autocrop:
-                cropdetect_script = os.path.join(tools_dir, "cropdetect.py")
-                csv_output = os.path.join(video_input_dir, f"{basename}_crop.csv")
-                if os.path.exists(cropdetect_script):
-                    print("[Dispatch] Detecting crop values via cropdetect.py...")
-                    try:
-                        subprocess.run([sys.executable, cropdetect_script, input_abspath_origin, "--out", csv_output, "--samples", "3"], check=False)
-                        if os.path.exists(csv_output):
-                            with open(csv_output, newline='', encoding='utf-8') as f:
-                                reader = csv.DictReader(f)
-                                rows = list(reader)
-                                if rows:
-                                    orig_h = int(rows[0]['height'])
-                                    c_h = int(rows[0]['crop_h'])
-                                    c_y = int(rows[0]['crop_y'])
-                                    crop_t = c_y
-                                    crop_b = orig_h - (c_y + c_h)
-                                    if crop_t % 2 != 0: crop_t -= 1
-                                    if crop_b % 2 != 0: crop_b -= 1
-                                    print(f"[Dispatch] Autocrop found: Top={crop_t}, Bottom={crop_b}")
-                    except Exception as e:
-                        print(f"[Dispatch] Autocrop failed: {e}")
-
-            if is_filtering_active:
-                vpy_filename = f"{basename}.vpy"
-                vpy_abspath = os.path.join(video_input_dir, vpy_filename)
-                cache_file_path = os.path.join(temp_dir, f"{basename}.ffindex")
-                
-                print(f"[Dispatch] VapourSynth filtering active based on settings.txt. Generating {vpy_filename}...")
-                
-                vpy_template = """from vstools import vs, core, initialize_clip, finalize_clip
-core.max_cache_size = 1024
-
-# Load Source
-src = core.ffms2.Source(source=r"{source}", cachefile=r"{cache}")
-
-# Initialize (Fixes Placebo bitdepth error by ensuring 16-bit)
-src = initialize_clip(src)
-
-# 1. CROP
-if {ct} > 0 or {cb} > 0:
-    src = src.std.Crop(top={ct}, bottom={cb})
-
-# 2. DOWNSCALE
-should_downscale = {downscale}
-target_res_str = "{target_res}"
-user_kernel = "{kernel}"
-
-if should_downscale:
-    # Kernel Map
-    k_map = {{
-        "hermite": "hermite",
-        "bilinear": "triangle",
-        "bicubic": "catmull_rom",
-        "gaussian": "gaussian",
-        "catmull_rom": "catmull_rom",
-        "mitchell": "mitchell",
-        "lanczos": "lanczos",
-        "spline36": "spline36"
-    }}
-    pl_filter = k_map.get(user_kernel.lower(), "spline36")
-
-    # Parse Target Resolution
-    target_w = 0
-    target_h = 0
-    
-    if "x" in target_res_str.lower():
-        try:
-            w_str, h_str = target_res_str.lower().split("x")
-            target_w = int(w_str)
-            target_h = int(h_str)
-        except:
-            pass
-    else:
-        try:
-            target_w = int(target_res_str)
-        except:
-            pass
-            
-    # Calculate Height
-    if target_w > 0:
-        if target_h == 0:
-            target_h = int(target_w * src.height / src.width)
-            if target_h % 2 != 0:
-                target_h -= 1
-        
-        if target_w % 2 != 0:
-            target_w -= 1
-            
-        if target_w < src.width or target_h < src.height:
-             src = core.placebo.Resample(src, target_w, target_h, filter=pl_filter)
-
-# 3. DENOISE
-should_denoise = {denoise_enabled}
-if should_denoise:
-    from vsdenoise import DFTTest
-    {denoise_setting}
-
-# 4. DEBAND
-should_deband = {deband_enabled}
-if should_deband:
-    {deband_setting}
-
-# Finalize (Sets 10-bit output)
-final = finalize_clip(src)
-final.set_output(0)
-"""
-                with open(vpy_abspath, "w", encoding="utf-8") as file:
-                    file.write(vpy_template.format(
-                        source=input_abspath_origin, 
-                        cache=cache_file_path, 
-                        ct=crop_t, 
-                        cb=crop_b,
-                        downscale=str(do_downscale),
-                        target_res=s_target_res,
-                        kernel=s_kernel,
-                        denoise_enabled=str(do_denoise),
-                        denoise_setting=s_denoise_setting,
-                        deband_enabled=str(do_deband),
-                        deband_setting=s_deband_setting
-                    ))
-                
-                av1an_input = vpy_filename
-
             # 2. Encoding (Direct Av1an Call)
             av1_output = f"{basename}-av1.mkv"
             
@@ -332,7 +181,7 @@ final.set_output(0)
             # We pass json_abspath because the json is in temp.
             cmd_av1an = [
                 av1an_exe,
-                "-i", av1an_input, # Could be .mkv or .vpy
+                "-i", filename, # filename is sufficient as cwd will be video_input_dir
                 "-e", "svt-av1",
                 "--no-defaults",
                 "--photon-noise", photon_noise,

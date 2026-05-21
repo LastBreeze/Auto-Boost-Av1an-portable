@@ -9,16 +9,17 @@ import shlex
 TOOLS_DIR = os.path.join("..", "tools")
 
 def get_script_version():
-    """Extracts the latest version number from readme.txt in root."""
-    readme_path = os.path.join("..", "readme.txt")
+    """Extracts the latest version number from Auto-Boost-Av1an.py."""
+    script_path = os.path.join(TOOLS_DIR, "Auto-Boost-Av1an.py")
     version = "Unknown"
-    if os.path.exists(readme_path):
+    if os.path.exists(script_path):
         try:
-            with open(readme_path, "r", encoding="utf-8") as f:
+            with open(script_path, "r", encoding="utf-8") as f:
                 content = f.read()
-                match = re.search(r"v(\d+\.\d+)", content)
+                # Looks for pattern like: ver_str = "v2.2"
+                match = re.search(r'ver_str\s*=\s*["\'](v[0-9\.]+)["\']', content)
                 if match:
-                    version = "v" + match.group(1)
+                    version = match.group(1)
         except Exception as e:
             pass
     return version

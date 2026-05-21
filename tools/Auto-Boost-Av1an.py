@@ -11,8 +11,8 @@
 # Av1an:             Native Windows Version (in VapourSynth folder OR in PATH)
 # SVT-AV1:           Native Windows Version
 # FFmpeg:            Windows version
-# FFVship:           Native Windows Version (in tools folder) for metrics
-# vs-zip:            Required for XPSNR (Default metric)
+# FFVship:           Native Windows Version (portable FFVship_nvidia/FFVship_Vulkan folders) for SSIMU2 metrics
+# vs-zip:            Required for XPSNR (Default metric) and SSIMU2 fallback
 
 # Auto-Boost-Essential
 # Modified for Av1an + Standard SVT-AV1 flow + FFVship + Zones Support
@@ -37,24 +37,29 @@ import glob
 import sys
 import gc
 import os
+import filecmp
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import re
 import json
 import csv
 import numpy as np
 import concurrent.futures
+from svt_fork_setup import setup_svt_av1_fork
 
-ver_str = "v2.11"
+ver_str = "v2.2"
 
 # --- TOOL PATHS HELPER ---
 def resolve_tool(portable_path_str: str, binary_name: str) -> Path:
     """
-    Checks for the tool in the specified portable folder first (relative to this script).
+    Checks for the tool in the specified portable folder first.
     If not found, checks the system PATH.
     Returns the Path object to the executable.
     """
-    # 1. Check Portable Path relative to the script directory
-    script_dir = Path(__file__).parent.resolve()
-    p_path = (script_dir / portable_path_str).resolve()
+    # 1. Check Portable Path relative to this script's tools/ folder.
+    p_path = Path(portable_path_str)
+    if not p_path.is_absolute():
+        p_path = Path(__file__).parent / p_path
+    p_path = p_path.resolve()
     if p_path.exists():
         return p_path
     
@@ -70,8 +75,12 @@ def resolve_tool(portable_path_str: str, binary_name: str) -> Path:
 # Auto-detects between portable folder or system installed versions
 av1an_exe = resolve_tool(r"av1an\av1an.exe", "av1an")
 
-ffvship_nvidia_exe = resolve_tool(r"FFVship\FFVship_nvidia\FFVship.exe", "FFVship")
-ffvship_vulkan_exe = resolve_tool(r"FFVship\FFVship_Vulkan\FFVship.exe", "FFVship")
+# FFVship replaces fssimu2 for SSIMULACRA2 metrics.
+# Benchmarking writes the selected backend/gpuThreads to tools/workercount-ssimu2.txt.
+tools_dir = Path(__file__).parent.resolve()
+ffvship_nvidia_exe = resolve_tool(r"FFVship\FFVship_nvidia\FFVship.exe", "FFVship.exe")
+ffvship_vulkan_exe = resolve_tool(r"FFVship\FFVship_Vulkan\FFVship.exe", "FFVship.exe")
+ffvship_config_file = tools_dir / "workercount-ssimu2.txt"
 
 # Cropdetect remains a script path, usually local to the toolset
 cropdetect_script = (Path(__file__).parent / "cropdetect.py").resolve()
@@ -89,8 +98,8 @@ parser.add_argument("-a", "--aggressive", action='store_true', help = "More aggr
 parser.add_argument("-u", "--unshackle", action='store_true', help = "Less restrictive boosting | Default: not active")
 parser.add_argument("--fast-params", help="Custom fast encoding parameters (SVT flags)")
 parser.add_argument("--final-params", help="Custom final encoding parameters (SVT flags passed to Av1an)")
-parser.add_argument("--ssimu2", help = "SSIMU2 mode: auto, gpu, vs-hip, ffvship_nvidia, ffvship_vulkan, vs-zip | If omitted, defaults to XPSNR", default=None)
-parser.add_argument("--ssimu2-cpu-workers", help = "Number of workers/streams for SSIMU2 | Default: 4", default="4")
+parser.add_argument("--ssimu2", help = "SSIMU2 mode: auto, gpu, vs-hip, ffvship, ffvship_nvidia, ffvship_vulkan, vs-zip | If omitted, defaults to XPSNR", default=None)
+parser.add_argument("--ssimu2-cpu-workers", help = "GPU streams for FFVship or CPU workers for vs-zip | Default: 4", default="4")
 parser.add_argument("--workers", help="Number of Av1an workers | Default: 1", default=None)
 parser.add_argument("--photon-noise", help="Photon noise strength | Default: 2", default="2")
 parser.add_argument("--zones", help="Path to specific zones file override", default=None)
@@ -101,6 +110,8 @@ parser.add_argument("--autocrop", action='store_true', help = "Enable automatic 
 parser.add_argument("--convert-to-YUV420P10", action='store_true', help = "Convert to YUV420P10 during processing for sources such as 422 or 444 etc | Default: not active")
 parser.add_argument("-v", "--version", action='version', version = f"Auto-Boost-Essential {ver_str}")
 parser.add_argument("--debug", action='store_true', help = "Checks the installation and provides relevant information for troubleshooting | Default: not active")
+parser.add_argument("--fork", help="SVT-AV1 fork to copy before encoding: 5fish, essential, hdr, custom | Default: essential", default="essential")
+parser.add_argument("--avx512", action='store_true', help="Use AVX-512 SVT-AV1 build when the selected fork provides one")
 
 args = parser.parse_args()
 
@@ -120,10 +131,16 @@ def obscure_user_path(text: str) -> str:
 
 # --- SETTINGS PARSER ---
 def get_script_setting(key_name: str, default_value: str) -> str:
+    """
+    Parses settings.txt from the script's directory (or current dir) for specific keys.
+    Does not rely on line numbers, searches for 'key=value'.
+    """
+    # Look for settings.txt in same folder as script
     script_dir = Path(__file__).parent.resolve()
     settings_path = script_dir / "settings.txt"
     
     if not settings_path.exists():
+        # Fallback to current working directory
         settings_path = Path.cwd() / "settings.txt"
     
     if not settings_path.exists():
@@ -133,6 +150,7 @@ def get_script_setting(key_name: str, default_value: str) -> str:
         with open(settings_path, "r", encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
+                # Skip comments
                 if line.startswith("#") or line.startswith(";"):
                     continue
                 if "=" in line:
@@ -144,22 +162,18 @@ def get_script_setting(key_name: str, default_value: str) -> str:
         
     return default_value
 
+# Load Settings
 s_downscale = get_script_setting("downscale", "False")
 s_target_res = get_script_setting("target_resolution", "1920x1080")
 s_kernel = get_script_setting("kernel_type", "Hermite")
 
-s_denoise = get_script_setting("denoise", "True")
-s_denoise_setting = get_script_setting("denoise_setting", "src = DFTTest().denoise(src, {0.00:0.30, 0.40:0.30, 0.60:0.60, 0.80:1.50, 1.00:2.00}, planes=[0, 1, 2])")
-
-s_deband = get_script_setting("deband", "True")
-s_deband_setting = get_script_setting("deband_setting", "src = core.placebo.Deband(src, threshold=1.5, planes=1)")
-
+# Normalize boolean string
 do_downscale_bool = s_downscale.lower() == "true"
-do_denoise_bool = s_denoise.lower() == "true"
-do_deband_bool = s_deband.lower() == "true"
 # -----------------------
 
 stage = int(args.stage)
+# Make direct Auto-Boost invocations behave like the generated .bat dispatchers.
+setup_svt_av1_fork(tools_dir, args.fork, avx512=args.avx512, verbose=True)
 src_file = Path(args.input).resolve()
 if platform.system() == 'Windows':
     src_file = type(src_file)(r"\\?" + rf"\{src_file}")
@@ -172,9 +186,12 @@ if args.temp is not None:
 else:
     tmp_dir = output_dir / src_file.stem
 
+# Files
 vpy_file = tmp_dir / f"{src_file.stem}.vpy"
 cache_file = tmp_dir / f"{src_file.stem}.ffindex"
+# Fast pass is now MKV
 fast_output_file = tmp_dir / f"{src_file.stem}_fastpass.mkv"
+# Final output
 final_output_file = output_dir / f"{src_file.stem}-av1.mkv"
 tmp_final_output_file = tmp_dir / f"{src_file.stem}-av1.mkv" 
 
@@ -184,6 +201,7 @@ scenes_file = tmp_dir / f"{src_file.stem}_scenes.json"
 stage_file = tmp_dir / f"{src_file.stem}_stage.txt"
 stage_resume = 0
 
+# Handle external scenes path
 external_scenes_file = None
 if args.scenes:
     external_scenes_file = Path(args.scenes).resolve()
@@ -191,10 +209,12 @@ if args.scenes:
         print(f"Warning: External scenes file {external_scenes_file} not found. Will fallback to internal detection.")
         external_scenes_file = None
 
+# Handle zones override
 zones_override_path = None
 if args.zones:
     zones_override_path = Path(args.zones).resolve()
 
+# Speed Mapping
 speed_map = {
     "slower": "2",
     "slow": "4",
@@ -218,14 +238,11 @@ unshackle = args.unshackle
 fast_params = args.fast_params if args.fast_params is not None else ""
 final_params = args.final_params if args.final_params is not None else ""
 
+# Handle ssimu2 default
 if args.ssimu2 is None:
     ssimu2 = ""
 else:
     ssimu2 = args.ssimu2.lower()
-    
-# Backward compat handling if old bat specifies fssimu2
-if ssimu2 == "fssimu2":
-    ssimu2 = "auto"
 
 ssimu2_cpu_workers = int(args.ssimu2_cpu_workers)
 verbose = args.verbose
@@ -233,13 +250,16 @@ resume = args.resume
 no_boosting = args.no_boosting
 convert_yuv420p10 = args.convert_to_YUV420P10
 
+# Worker Logic
 av1an_workers_arg = args.workers
 workers_specified = True
 if av1an_workers_arg is None:
+    # Default behavior if not specified
     final_pass_workers = "1"
     fast_pass_workers = "2"
     workers_specified = False
 else:
+    # User specified behavior
     final_pass_workers = av1an_workers_arg
     fast_pass_workers = av1an_workers_arg
 
@@ -256,10 +276,10 @@ if args.debug:
     print("=" * 54)
     print(f"Av1an Path:   {av1an_exe}")
     print(f"Av1an Exists: {av1an_exe.exists()}")
-    print(f"FFVship NVIDIA Path:   {ffvship_nvidia_exe}")
+    print(f"FFVship NVIDIA Path: {ffvship_nvidia_exe}")
     print(f"FFVship NVIDIA Exists: {ffvship_nvidia_exe.exists()}")
-    print(f"FFVship VULKAN Path:   {ffvship_vulkan_exe}")
-    print(f"FFVship VULKAN Exists: {ffvship_vulkan_exe.exists()}")
+    print(f"FFVship Vulkan Path: {ffvship_vulkan_exe}")
+    print(f"FFVship Vulkan Exists: {ffvship_vulkan_exe.exists()}")
     print(f"Cropdetect Path: {cropdetect_script}")
     print(f"Cropdetect Exists: {cropdetect_script.exists()}")
     raise SystemExit(1)
@@ -317,26 +337,14 @@ if not os.path.exists(tmp_dir):
 core.max_cache_size = 1024
 console = Console()
 
-def get_ssimu2_config() -> dict:
-    config_path = Path(__file__).parent / "workercount-ssimu2.txt"
-    config = {"tool": "", "workercount": "", "downscale-tool": "vs-zip"}
-    if config_path.exists():
-        with open(config_path, "r", encoding="utf-8") as f:
-            for line in f:
-                if "=" in line:
-                    k, v = line.strip().split("=", 1)
-                    config[k.strip().lower()] = v.strip()
-    return config
-
-if do_downscale_bool and ("ffvship" in ssimu2 or ssimu2 == "auto"):
-    ssimu2_config = get_ssimu2_config()
-    ds_tool = ssimu2_config.get("downscale-tool", "vs-zip")
-    if ds_tool:
-        console.print(f"[yellow]Downscaling enabled: Overriding SSIMU2 tool from '{ssimu2}' to '{ds_tool}'[/yellow]")
-        ssimu2 = ds_tool
-
 def detect_crop_values(source_path: Path) -> tuple[int, int]:
+    """
+    Uses external tools/cropdetect.py to detect crop values.
+    Saves the CSV to the source directory (next to the input file/bat file).
+    Retries with aggressive mode if standard mode yields 0 crop.
+    """
     console.print("Detecting crop values via cropdetect.py...")
+    # Just show filename, not the scary long path
     console.print(f"[cyan]{source_path.name}[/cyan]")
     
     if not cropdetect_script.exists():
@@ -346,6 +354,7 @@ def detect_crop_values(source_path: Path) -> tuple[int, int]:
     csv_output = source_path.parent / f"{source_path.stem}_crop.csv"
     
     def run_crop_process(aggressive_mode: bool) -> bool:
+        # We use --progress-mode to get machine-readable updates
         cmd = [
             sys.executable,
             str(cropdetect_script),
@@ -360,6 +369,7 @@ def detect_crop_values(source_path: Path) -> tuple[int, int]:
             cmd.append("--aggressive")
             mode_label = "Aggressive"
             
+        # Run process and stream output to update progress bar
         try:
             with Progress(
                 SpinnerColumn(),
@@ -371,6 +381,7 @@ def detect_crop_values(source_path: Path) -> tuple[int, int]:
             ) as progress:
                 task = progress.add_task(f"[green]Sampling ({mode_label})...", total=100)
                 
+                # Popen allows real-time output reading
                 with subprocess.Popen(
                     cmd, 
                     stdout=subprocess.PIPE, 
@@ -382,13 +393,17 @@ def detect_crop_values(source_path: Path) -> tuple[int, int]:
                         line = line.strip()
                         if line.startswith("PROGRESS:"):
                             try:
+                                # Parse PROGRESS:X
                                 percent = int(line.split(":")[1])
                                 progress.update(task, completed=percent)
                             except (IndexError, ValueError):
                                 pass
                         elif verbose:
+                            # Only show other lines if verbose is on
+                            # This keeps the main UI clean
                             console.print(f"[dim]{line}[/dim]")
                     
+                    # Check return code
                     if proc.wait() != 0:
                         console.print(f"[red]Crop detection ({mode_label}) finished with errors.[/red]")
                         return False
@@ -403,6 +418,7 @@ def detect_crop_values(source_path: Path) -> tuple[int, int]:
             console.print(f"[yellow]Crop CSV not found after execution.[/yellow]")
             return 0, 0, ""
             
+        # Read the CSV to get final values
         try:
             with open(csv_output, newline='', encoding='utf-8') as f:
                 reader = csv.DictReader(f)
@@ -418,6 +434,7 @@ def detect_crop_values(source_path: Path) -> tuple[int, int]:
                 crop_top = c_y
                 crop_bottom = orig_h - (c_y + c_h)
                 
+                # Ensure mod2
                 if crop_top % 2 != 0: crop_top -= 1
                 if crop_bottom % 2 != 0: crop_bottom -= 1
                 
@@ -427,11 +444,13 @@ def detect_crop_values(source_path: Path) -> tuple[int, int]:
             console.print(f"[red]Failed to parse crop CSV: {e}[/red]")
             return 0, 0, ""
 
+    # Attempt 1: Standard
     if not run_crop_process(aggressive_mode=False):
         return 0, 0
         
     t, b, crop_str = parse_csv_result()
     
+    # Attempt 2: Aggressive if Standard failed (0,0)
     if t == 0 and b == 0:
         console.print("[yellow]No crop found. Retrying with --aggressive mode...[/yellow]")
         if run_crop_process(aggressive_mode=True):
@@ -444,12 +463,14 @@ def detect_crop_values(source_path: Path) -> tuple[int, int]:
 
     return t, b
 
+# Generate VPY file
 if not os.path.exists(vpy_file):
     
     crop_top, crop_bottom = 0, 0
     if args.autocrop:
         crop_top, crop_bottom = detect_crop_values(src_file)
     
+    # Template
     vpy_template = """
 from vstools import vs, core, initialize_clip, finalize_clip
 core.max_cache_size = 1024
@@ -517,22 +538,12 @@ if should_downscale:
         if target_w < src.width or target_h < src.height:
              src = core.placebo.Resample(src, target_w, target_h, filter=pl_filter)
 
-# 3. DENOISE
-should_denoise = {denoise_enabled}
-if should_denoise:
-    from vsdenoise import DFTTest
-    {denoise_setting}
-
-# 4. DEBAND
-should_deband = {deband_enabled}
-if should_deband:
-    {deband_setting}
-
 # Finalize (Sets 10-bit output)
 final = finalize_clip(src)
 final.set_output(0)
 """
 
+    # Write Windows VPY (Absolute paths okay here for local python)
     with open(vpy_file, 'w') as file:
         file.write(vpy_template.format(
             source=src_file, 
@@ -542,12 +553,9 @@ final.set_output(0)
             downscale=str(do_downscale_bool),
             target_res=s_target_res,
             kernel=s_kernel,
-            convert=convert_yuv420p10,
-            denoise_enabled=str(do_denoise_bool),
-            denoise_setting=s_denoise_setting,
-            deband_enabled=str(do_deband_bool),
-            deband_setting=s_deband_setting
+            convert=convert_yuv420p10
         ))
+
 
 def get_file_info(vfile: Path, mode: str) -> tuple[list[int], bool, int, int, int, int, int]:
     if mode == "src":
@@ -561,12 +569,15 @@ def get_file_info(vfile: Path, mode: str) -> tuple[list[int], bool, int, int, in
             lines = file.readlines()
             return [int(line.strip()) for line in lines[1:-3]], lines[0].strip() == "True", int(lines[-5].strip()) , int(lines[-4].strip()) , int(lines[-3].strip()), int(lines[-2].strip()), int(lines[-1].strip())
     
+    # Setup VPY environment to get src info from Windows VPY
     vpy_vars = {}
     exec(open(vpy_file).read(), globals(), vpy_vars)
     
     if mode == "src":
+        # Prefer "final" (10-bit) if available, otherwise "src"
         src = vpy_vars.get("final", vpy_vars["src"])
     else:
+        # For encoded file (MKV/IVF), we use FFMS2
         src = core.ffms2.Source(source=vfile, cache=False)
 
     nframe = len(src)
@@ -583,16 +594,19 @@ def get_file_info(vfile: Path, mode: str) -> tuple[list[int], bool, int, int, in
 
     iframe_list = []
     
+    # If external scenes are provided, use them instead of scanning
     if mode == "src" and external_scenes_file is not None:
         console.print(f"[green]Using external scenes: {external_scenes_file.name}[/green]")
         try:
             with open(external_scenes_file, 'r') as f:
                 scene_data = json.load(f)
+            # Progressive-Scene-Detection outputs "scenes" list with "start_frame"
             if "scenes" in scene_data:
                 for s in scene_data["scenes"]:
                     iframe_list.append(s["start_frame"])
             else:
                 console.print("[red]Invalid external scenes JSON format. Falling back to detection.[/red]")
+                # Fallback logic handled below by checking if iframe_list is empty
         except Exception as e:
             console.print(f"[red]Error reading external scenes: {e}. Falling back to detection.[/red]")
     
@@ -613,6 +627,7 @@ def get_file_info(vfile: Path, mode: str) -> tuple[list[int], bool, int, int, in
             def progress_func(n: int, num_frames: int) -> None:
                 progress.update(task, completed=n)
 
+            # Create a lightweight analysis clip (360p, 8-bit) for fast SCDetect
             analysis_clip = src.resize.Bilinear(640, 360, format=vs.YUV420P8)
             analysis_clip = analysis_clip.misc.SCDetect(threshold=0.1)
 
@@ -637,22 +652,29 @@ def get_file_info(vfile: Path, mode: str) -> tuple[list[int], bool, int, int, in
     return iframe_list, hr, nframe, fwidth, fheight, ffpsnum, ffpsden
 
 def fast_pass() -> None:
+    """
+    Fast pass using Av1an to generate an MKV file.
+    """
     encoder_params = f'--preset {fast_speed} '
     
+    # Check if CRF is manually specified in fast_params
     needs_crf = True
     if fast_params and "--crf" in fast_params:
         needs_crf = False
     
     if needs_crf:
+        # Load VPY to check for HR content (High Resolution)
         try:
             vpy_vars = {}
             exec(open(vpy_file).read(), globals(), vpy_vars)
+            # Use 'final' if available to get correct resolution if downscaled
             src = vpy_vars.get("final", vpy_vars["src"])
             hr = src.width * src.height > 1920 * 1080
         except Exception as e:
             if verbose: console.print(f"[yellow]Warning: Could not determine resolution from VPY, defaulting hr=False. Error: {e}[/yellow]")
             hr = False
             
+        # Match CRF based on user quality setting
         match quality:
             case "low": crf = 40 if hr else 35
             case "medium": crf = 35 if hr else 30
@@ -671,15 +693,16 @@ def fast_pass() -> None:
     if verbose:
         console.print(f'Fast params: "{encoder_params}"')
 
+    # Av1an command
     av1an_cmd = [
         str(av1an_exe),
-        '-i', vpy_file.name,
+        '-i', vpy_file.name,  # Just the filename
         '-e', 'svt-av1',
         '-m', 'bestsource',
         '--cache-mode', 'temp',
         '-c', 'mkvmerge',
         '--resume',
-        '-w', str(fast_pass_workers)
+        '-w', str(fast_pass_workers) # Use calculated workers (2 or user-defined)
     ]
 
     if external_scenes_file:
@@ -687,7 +710,7 @@ def fast_pass() -> None:
 
     av1an_cmd.extend([
         '-v', encoder_params,
-        '-o', fast_output_file.name
+        '-o', fast_output_file.name # Just the filename
     ])
     
     print("-" * 50)
@@ -696,19 +719,23 @@ def fast_pass() -> None:
     print("-" * 50)
 
     try:
+        # Run in tmp_dir so it picks up files from current dir
         subprocess.run(av1an_cmd, check=True, cwd=tmp_dir)
     except subprocess.CalledProcessError as e:
         console.print(f"[red]Fast pass failed:[/red]\n{e}")
         raise SystemExit(1)
 
 def final_pass() -> None:
+    """
+    Final encoding pass using Av1an.
+    """
     if not scenes_file.exists() and not no_boosting:
         console.print("[red]Scenes file not found![/red]")
         raise SystemExit(1)
 
     av1an_cmd = [
         str(av1an_exe),
-        '-i', vpy_file.name,
+        '-i', vpy_file.name, # Just the filename
         '-y',
         '--workers', str(final_pass_workers),
         '--resume',
@@ -717,6 +744,7 @@ def final_pass() -> None:
         '--keep',
     ]
 
+    # Only add photon noise if strictly greater than 0
     if photon_noise_val > 0:
         av1an_cmd.extend(['--photon-noise', str(photon_noise_val)])
 
@@ -724,33 +752,254 @@ def final_pass() -> None:
         '-e', 'svt-av1',
         '-m', 'bestsource',
         '--cache-mode', 'temp',
-        '-o', tmp_final_output_file.name
+        '-o', tmp_final_output_file.name # Just the filename
     ])
 
     if not no_boosting:
+        # Use generated scenes
         av1an_cmd.extend(['-s', scenes_file.name])
     else:
         v_params = f"--preset {final_speed} --crf {quality} {final_params}"
         av1an_cmd.extend(['-v', v_params])
 
+    # Show command ALWAYS per user request
     print("-" * 50)
     print(f"Running Final Pass in: {obscure_user_path(str(tmp_dir))}")
     print(f"Command:\n{obscure_user_path(' '.join(av1an_cmd))}")
     print("-" * 50)
 
     try:
+        # Run in tmp_dir so it picks up files from current dir
         subprocess.run(av1an_cmd, check=True, cwd=tmp_dir)
     except subprocess.CalledProcessError as e:
         console.print(f"[red]Final pass failed:[/red]\n{e}")
         raise SystemExit(1)
 
-def calculate_metric() -> None:
-    import concurrent.futures
+def _load_ffvship_config(default_gpu_threads: int) -> tuple[str, int]:
+    """
+    Reads tools/workercount-ssimu2.txt if present.
+    The batch files only consume the first two lines (tool/workercount), so the
+    selected FFVship backend is stored on later key/value lines for this script.
+    """
+    variant = "nvidia"
+    gpu_threads = max(1, default_gpu_threads)
 
+    if not ffvship_config_file.exists():
+        return variant, gpu_threads
+
+    try:
+        with open(ffvship_config_file, "r", encoding="utf-8") as f:
+            for raw_line in f:
+                line = raw_line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                key = key.strip().lower()
+                value = value.strip()
+                if key == "workercount":
+                    try:
+                        gpu_threads = max(1, int(value))
+                    except ValueError:
+                        pass
+                elif key in ("ffvship_variant", "variant", "backend"):
+                    value_l = value.lower()
+                    if value_l in ("nvidia", "vulkan"):
+                        variant = value_l
+    except Exception as e:
+        if verbose:
+            console.print(f"[yellow]Could not read FFVship config: {e}[/yellow]")
+
+    return variant, gpu_threads
+
+
+def _get_ffvship_exe(variant: str) -> Path:
+    if variant.lower() == "vulkan":
+        return ffvship_vulkan_exe
+    return ffvship_nvidia_exe
+
+
+def _load_ssimu2_config(default_workers: int) -> dict:
+    """Read tools/workercount-ssimu2.txt key/value config."""
+    cfg = {
+        "tool": "auto",
+        "filter_tool": "vs-zip",
+        "workercount": max(1, default_workers),
+        "variant": "nvidia",
+        "streams": max(1, default_workers),
+    }
+    if not ffvship_config_file.exists():
+        return cfg
+    try:
+        for raw_line in ffvship_config_file.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            key = key.strip().lower().replace("_", "-")
+            value = value.strip()
+            value_l = value.lower()
+            if key == "tool":
+                cfg["tool"] = value_l
+                if value_l in ("libvship_nvidia.dll", "libvship-nvidia.dll", "vs-hip-nvidia"):
+                    cfg["tool"] = "vs-hip"
+                    cfg["variant"] = "nvidia"
+                elif value_l in ("libvship_vulkan.dll", "libvship-vulkan.dll", "vs-hip-vulkan"):
+                    cfg["tool"] = "vs-hip"
+                    cfg["variant"] = "vulkan"
+                elif value_l in ("ffvship-nvidia", "ffvship_nvidia") or ("ffvship" in value_l and "nvidia" in value_l):
+                    cfg["tool"] = "ffvship"
+                    cfg["variant"] = "nvidia"
+                elif value_l in ("ffvship-vulkan", "ffvship_vulkan") or ("ffvship" in value_l and "vulkan" in value_l):
+                    cfg["tool"] = "ffvship"
+                    cfg["variant"] = "vulkan"
+            elif key in ("filter-tool", "downscale-tool"):
+                cfg["filter_tool"] = value_l
+            elif key == "workercount":
+                try:
+                    cfg["workercount"] = max(1, int(value))
+                    cfg["streams"] = cfg["workercount"]
+                except ValueError:
+                    pass
+            elif key in ("streams", "numstream", "num-stream"):
+                try:
+                    cfg["streams"] = max(1, int(value))
+                except ValueError:
+                    pass
+            elif key in ("variant", "backend", "ffvship-variant", "vship-variant"):
+                if value_l in ("nvidia", "vulkan"):
+                    cfg["variant"] = value_l
+    except Exception as e:
+        if verbose:
+            console.print(f"[yellow]Could not read SSIMU2 config: {e}[/yellow]")
+    return cfg
+
+
+def _activate_vship_plugin(variant: str) -> str | None:
+    """
+    Ensure the selected libvship DLL is available to VapourSynth and return its name.
+
+    VapourSynth auto-loads DLLs from vs-plugins during startup. On Windows that keeps
+    the DLL file open for the lifetime of the Python process, so a fresh run can have
+    libvship_NVIDIA.dll already loaded before this function is called. In that case,
+    deleting/re-copying the same DLL raises WinError 32. Treat an already-loaded vship
+    plugin as success instead of trying to overwrite a locked file.
+    """
+    dll_name = "libvship_VULKAN.dll" if variant.lower() == "vulkan" else "libvship_NVIDIA.dll"
+    base_dir = tools_dir.parent
+    src = tools_dir / "vs-hip" / dll_name
+    dst_dir = base_dir / "VapourSynth" / "vs-plugins"
+    dst = dst_dir / dll_name
+
+    if hasattr(core, "vship") and hasattr(core.vship, "SSIMULACRA2") and dst.exists():
+        if verbose:
+            console.print(f"[yellow]Using already-loaded vs-hip DLL {dll_name}.[/yellow]")
+        return dll_name
+
+    if not src.exists():
+        console.print(f"[yellow]vs-hip DLL not found at {src}[/yellow]")
+        return None
+
+    try:
+        dst_dir.mkdir(parents=True, exist_ok=True)
+
+        # Do not delete libvship*.dll files here. They may already be auto-loaded by
+        # VapourSynth and locked by this process. Only refresh the requested DLL when
+        # it is absent or different and Windows allows the replacement.
+        needs_copy = not dst.exists()
+        if dst.exists():
+            try:
+                needs_copy = not filecmp.cmp(src, dst, shallow=False)
+            except OSError:
+                needs_copy = True
+
+        if needs_copy:
+            try:
+                shutil.copy2(src, dst)
+            except PermissionError as e:
+                if dst.exists():
+                    if verbose:
+                        console.print(f"[yellow]{dll_name} is locked; trying the existing vs-plugins copy: {e}[/yellow]")
+                else:
+                    raise
+
+        try:
+            if not hasattr(core, "vship"):
+                core.std.LoadPlugin(str(dst))
+        except Exception as e:
+            if verbose:
+                console.print(f"[yellow]Could not explicit-load {dll_name}: {e}[/yellow]")
+
+        if hasattr(core, "vship") and hasattr(core.vship, "SSIMULACRA2"):
+            return dll_name
+
+        console.print(f"[yellow]vs-hip DLL {dll_name} is present but VapourSynth did not expose core.vship.SSIMULACRA2[/yellow]")
+        return None
+    except Exception as e:
+        console.print(f"[yellow]Could not activate vs-hip DLL {dll_name}: {e}[/yellow]")
+        return None
+
+
+def _calculate_ssimu2_vship(cut_source_clip, cut_encoded_clip, skip: int, nframe: int, streams: int) -> None:
+    if not hasattr(core, "vship") or not hasattr(core.vship, "SSIMULACRA2"):
+        raise RuntimeError("VapourSynth vship plugin not loaded")
+    ref = cut_source_clip.resize.Bicubic(format=vs.RGB24, matrix_in_s="709")
+    dist = cut_encoded_clip.resize.Bicubic(format=vs.RGB24, matrix_in_s="709")
+    result = core.vship.SSIMULACRA2(ref, dist, numStream=streams)
+    score_list = [None] * cut_source_clip.num_frames
+
+    def get_ssimprops(n, f):
+        val = f.props.get("_SSIMULACRA2")
+        if val is None:
+            val = f.props.get("SSIMULACRA2")
+        if val is None:
+            val = f.props.get("float_ssimulacra2")
+        score_list[n] = 0.0 if val is None else float(val)
+
+    with Progress(SpinnerColumn(), BarColumn(), FPSColumn(), console=console) as p:
+        task = p.add_task("Calculating SSIMULACRA2 (vs-hip)", total=cut_source_clip.num_frames * skip)
+        def update_p(n, t):
+            p.update(task, advance=skip)
+        clip_async_render(result, progress=update_p, callback=get_ssimprops)
+
+    _write_metric_log_from_scores([score if score is not None else 0.0 for score in score_list], ssimu2_log_file, skip, nframe)
+
+
+def _write_metric_log_from_scores(scores: list[float], log_path: Path, skip: int, nframe: int) -> None:
+    """
+    FFVship --every N returns one score for frames 0, N, 2N, ... .
+    The rest of Auto-Boost expects one metric line per original frame, so each
+    sampled score is expanded across the skipped frame interval.
+    """
+    with open(log_path, "w", encoding="utf-8") as file:
+        for sample_index, score in enumerate(scores):
+            start_frame = sample_index * skip
+            end_frame = min(start_frame + skip, nframe)
+            for frame_num in range(start_frame, end_frame):
+                file.write(f"{frame_num}: {score}\n")
+
+
+def _load_ffvship_scores(json_path: Path) -> list[float]:
+    with open(json_path, "r", encoding="utf-8") as f:
+        raw_scores = json.load(f)
+
+    scores: list[float] = []
+    for item in raw_scores:
+        if isinstance(item, list) and item:
+            scores.append(float(item[0]))
+        elif isinstance(item, (int, float)):
+            scores.append(float(item))
+    return scores
+
+
+def calculate_metric() -> None:
+    # Use Windows VPY for source information and XPSNR / vs-zip paths.
     vpy_vars = {}
     exec(open(vpy_file).read(), globals(), vpy_vars)
+    # Use 'final' (10-bit) if available, falling back to 'src'
+    # This prevents "XPSNR only supports 8 or 10 bit clips" if src is 16-bit
     source_clip = vpy_vars.get("final", vpy_vars["src"])
     
+    # Read Fast Pass MKV
     try:
         if not fast_output_file.exists():
              console.print("[red]Fast pass output file not found. Did the fast pass fail?[/red]")
@@ -776,17 +1025,20 @@ def calculate_metric() -> None:
     if ssimu2 == "":
         console.print("[yellow]Calculating XPSNR (Default)...[/yellow]")
         try:
+            # Check for vszip
             if not hasattr(core, 'vszip'):
                  console.print("[red]vs-zip plugin not found! Required for XPSNR.[/red]")
                  raise SystemExit(1)
             
             result = core.vszip.XPSNR(cut_source_clip, cut_encoded_clip, temporal=False, verbose=False)
             
+            # XPSNR requires storing Y, U, V separately
             score_list = [[None] * cut_source_clip.num_frames for _ in range(3)]
             
             def get_xpsnrprops(n: int, f: vs.VideoFrame) -> None:
                 for i, plane in enumerate(["Y", "U", "V"]):
                     val = f.props.get(f"XPSNR_{plane}")
+                    # inf = perfect match
                     if str(val) == "inf":
                         score_list[i][n] = "100.0"
                     else:
@@ -799,6 +1051,7 @@ def calculate_metric() -> None:
                 
                 clip_async_render(result, progress=update_p, callback=get_xpsnrprops)
                 
+            # Write Log
             with open(xpsnr_log_file, "w") as file:
                 skip_offset = 0
                 for index in range(len(score_list[0])):
@@ -820,161 +1073,130 @@ def calculate_metric() -> None:
             raise SystemExit(1)
 
     # ----------------------------------------------------
-    # 2. SSIMULACRA2 BRANCH
+    # 2. SSIMULACRA2 VIA vs-hip / FFVship, WITH VS-ZIP FALLBACK
     # ----------------------------------------------------
-    
-    score_list = [None] * cut_source_clip.num_frames
-    
-    tried_vship = False
     metric_calculated = False
     fallback_needed = False
-    
-    # ATTEMPT GPU (VS-HIP)
-    if ssimu2 in ['auto', 'gpu', 'vs-hip']:
-        tried_vship = True
-        console.print("[yellow]SSIMULACRA2 via VS-HIP (GPU)...[/yellow]")
-        
-        try:
-            if not hasattr(core, 'vship'):
-                 raise ImportError("Vship plugin (vs-hip) not found in VapourSynth.")
-                 
-            result = core.vship.SSIMULACRA2(cut_source_clip, cut_encoded_clip, numStream = 4)
-            
-            def get_ssimu2props_vship(n, f):
-                val = f.props.get('_SSIMULACRA2')
-                if val is None:
-                    val = f.props.get('SSIMULACRA2')
-                if val is None:
-                    score_list[n] = 0.0
-                else:
-                    score_list[n] = float(val)
+    cfg = _load_ssimu2_config(ssimu2_cpu_workers)
 
-            with Progress(SpinnerColumn(), BarColumn(), FPSColumn(), console=console) as p:
-                task = p.add_task("Calculating SSIMULACRA2 (VS-HIP)", total=cut_source_clip.num_frames*skip)
-                def update_p(n, t):
-                     p.update(task, advance=skip)
-                
-                clip_async_render(result, progress=update_p, callback=get_ssimu2props_vship)
-            
-            metric_calculated = True
-            
-        except Exception as e:
-            if ssimu2 == 'auto':
-                console.print(f"[yellow]VS-HIP failed or not found ({e}). Falling back to next method.[/yellow]")
-            else:
-                console.print(f"[red]VS-HIP failed: {e}.[/red]")
-                raise SystemExit(1)
+    requested_tool = ssimu2
+    if requested_tool in ("auto", "gpu"):
+        requested_tool = cfg.get("tool", "auto")
+    if requested_tool in ("libvship_nvidia.dll", "libvship-nvidia.dll", "vs-hip-nvidia"):
+        requested_tool = "vs-hip"
+        cfg["variant"] = "nvidia"
+    elif requested_tool in ("libvship_vulkan.dll", "libvship-vulkan.dll", "vs-hip-vulkan"):
+        requested_tool = "vs-hip"
+        cfg["variant"] = "vulkan"
+    elif requested_tool in ("ffvship_nvidia", "ffvship-nvidia") or ("ffvship" in requested_tool and "nvidia" in requested_tool):
+        requested_tool = "ffvship"
+        cfg["variant"] = "nvidia"
+    elif requested_tool in ("ffvship_vulkan", "ffvship-vulkan") or ("ffvship" in requested_tool and "vulkan" in requested_tool):
+        requested_tool = "ffvship"
+        cfg["variant"] = "vulkan"
 
-    if metric_calculated:
-        with open(ssimu2_log_file, "w") as file:
-            skip_offset = 0
-            for index, score in enumerate(score_list):
-                final_score = score if score is not None else 0.0
-                for i in range(skip):
-                    file.write(f"{index+skip_offset+i}: {final_score}\n")
-                skip_offset += skip - 1
-        return
-
-    # ATTEMPT FFVSHIP (NVIDIA OR VULKAN BINARY)
-    if ssimu2 in ['auto', 'ffvship_nvidia', 'ffvship_vulkan']:
-        exe_to_use = None
-        if ssimu2 == 'ffvship_vulkan' and ffvship_vulkan_exe.exists():
-            exe_to_use = ffvship_vulkan_exe
-        elif ssimu2 == 'ffvship_nvidia' and ffvship_nvidia_exe.exists():
-            exe_to_use = ffvship_nvidia_exe
-        elif ssimu2 == 'auto':
-            if ffvship_nvidia_exe.exists(): 
-                exe_to_use = ffvship_nvidia_exe
-                console.print(f"[yellow]FFVship (NVIDIA) selected for SSIMULACRA2...[/yellow]")
-            elif ffvship_vulkan_exe.exists(): 
-                exe_to_use = ffvship_vulkan_exe
-                console.print(f"[yellow]FFVship (VULKAN) selected for SSIMULACRA2...[/yellow]")
-                
-        if not exe_to_use:
-            if ssimu2 == 'auto':
-                console.print(f"[yellow]FFVship binary not found! Switching to fallback.[/yellow]")
+    if requested_tool == "vs-hip":
+        dll_name = _activate_vship_plugin(cfg.get("variant", "nvidia"))
+        if not dll_name:
+            if ssimu2 == "auto":
                 fallback_needed = True
             else:
-                console.print(f"[red]FFVship binary not found! Cannot calculate metrics.[/red]")
                 raise SystemExit(1)
-        
         if not fallback_needed:
-            console.print(f"[yellow]Calculating SSIMULACRA2 via FFVship (GPU | {ssimu2_cpu_workers} streams)...[/yellow]")
-            
-            # Fetch potential VPY crop values for FFVship compatibility
-            crop_top_src = 0
-            crop_bot_src = 0
             try:
-                with open(vpy_file, 'r', encoding='utf-8') as f:
-                    vpy_content = f.read()
-                crop_match = re.search(r"src = src\.std\.Crop\(top=(\d+),\s*bottom=(\d+)\)", vpy_content)
-                if crop_match:
-                    crop_top_src = int(crop_match.group(1))
-                    crop_bot_src = int(crop_match.group(2))
-            except Exception:
-                pass
-            
-            temp_json = tmp_dir / f"{src_file.stem}_ffvship_out.json"
-            if temp_json.exists(): temp_json.unlink()
-            
-            cmd = [
-                str(exe_to_use),
-                "--source", str(src_file).replace("\\\\?\\", ""),
-                "--encoded", str(fast_output_file).replace("\\\\?\\", ""),
-                "-t", "3",
-                "-g", str(ssimu2_cpu_workers),
-                "--every", str(skip),
-                "--json", str(temp_json).replace("\\\\?\\", "")
-            ]
-            
-            if crop_top_src > 0:
-                cmd.extend(["--cropTopSource", str(crop_top_src)])
-            if crop_bot_src > 0:
-                cmd.extend(["--cropBottomSource", str(crop_bot_src)])
-            
-            try:
-                with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"), console=console) as p:
-                    task = p.add_task(f"Calculating SSIMULACRA2 (FFVship)", total=None)
-                    
-                    # Run without check=True to allow non-zero exit codes (like the benchmark does)
-                    proc = subprocess.run(cmd, capture_output=True, text=True, cwd=str(exe_to_use.parent))
-                
-                if temp_json.exists():
-                    with open(temp_json, 'r') as f:
-                        ffvship_data = json.load(f)
-                        
-                    for i, score_arr in enumerate(ffvship_data):
-                        if i < len(score_list):
-                            score_list[i] = float(score_arr[0])
-                    metric_calculated = True
-                    try: temp_json.unlink()
-                    except: pass
-                else:
-                    err_out = proc.stderr if proc.stderr else proc.stdout
-                    raise RuntimeError(f"JSON output not generated. Exit code: {proc.returncode}\nFFVship Output:\n{err_out}")
-                    
+                streams = int(cfg.get("streams", ssimu2_cpu_workers))
+                console.print(f"[yellow]Calculating SSIMULACRA2 via vs-hip ({dll_name} | streams: {streams} | every {skip})...[/yellow]")
+                _calculate_ssimu2_vship(cut_source_clip, cut_encoded_clip, skip, len(source_clip), streams)
+                metric_calculated = True
             except Exception as e:
-                if ssimu2 == 'auto':
-                    console.print(f"[yellow]FFVship failed: {e}\nFallback triggered.[/yellow]")
+                if ssimu2 == "auto":
+                    console.print(f"[yellow]vs-hip failed ({e}). Falling back to vs-zip.[/yellow]")
                     fallback_needed = True
                 else:
-                    console.print(f"[red]FFVship failed:\n{e}[/red]")
+                    console.print(f"[red]vs-hip failed: {e}[/red]")
+                    raise SystemExit(1)
+
+    if (not metric_calculated) and (not fallback_needed) and requested_tool in ['auto', 'gpu', 'ffvship']:
+        variant = cfg.get("variant", "nvidia")
+        gpu_threads = int(cfg.get("workercount", ssimu2_cpu_workers))
+        ffvship_exe = _get_ffvship_exe(variant)
+
+        if not ffvship_exe.exists():
+            msg = f"FFVship {variant} binary not found at {ffvship_exe}"
+            if ssimu2 == 'auto':
+                console.print(f"[yellow]{msg}. Falling back to vs-zip.[/yellow]")
+                fallback_needed = True
+            else:
+                console.print(f"[red]{msg}. Cannot calculate metrics.[/red]")
+                raise SystemExit(1)
+
+        if not fallback_needed:
+            console.print(f"[yellow]Calculating SSIMULACRA2 via FFVship ({variant} | GPU streams: {gpu_threads} | every {skip})...[/yellow]")
+            ffvship_json_file = tmp_dir / f"{src_file.stem}_ffvship.json"
+            if ffvship_json_file.exists():
+                try:
+                    ffvship_json_file.unlink()
+                except Exception:
+                    pass
+
+            cmd = [
+                str(ffvship_exe),
+                "--source", str(src_file),
+                "--encoded", str(fast_output_file),
+                "-m", "SSIMULACRA2",
+                "--every", str(skip),
+                "-t", "3",
+                "-g", str(gpu_threads),
+                "--json", str(ffvship_json_file)
+            ]
+
+            if verbose:
+                console.print(f"[dim]FFVship command: {' '.join(cmd)}[/dim]")
+
+            try:
+                with Progress(SpinnerColumn(), BarColumn(), TimeElapsedColumn(), console=console) as p:
+                    task = p.add_task("Calculating SSIMULACRA2 (FFVship)", total=None)
+                    proc = subprocess.run(
+                        cmd,
+                        cwd=tmp_dir,
+                        text=True,
+                        encoding="utf-8",
+                        errors="replace",
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT
+                    )
+                    p.update(task, completed=1)
+
+                if verbose and proc.stdout:
+                    console.print(proc.stdout)
+
+                if proc.returncode != 0:
+                    raise RuntimeError(f"FFVship exited with code {proc.returncode}")
+                if not ffvship_json_file.exists():
+                    raise RuntimeError(f"FFVship did not create JSON output at {ffvship_json_file}")
+
+                scores = _load_ffvship_scores(ffvship_json_file)
+                if not scores:
+                    raise RuntimeError("FFVship JSON did not contain any SSIMULACRA2 scores")
+
+                _write_metric_log_from_scores(scores, ssimu2_log_file, skip, len(source_clip))
+                metric_calculated = True
+
+            except Exception as e:
+                if ssimu2 == 'auto':
+                    console.print(f"[yellow]FFVship failed ({e}). Falling back to vs-zip.[/yellow]")
+                    fallback_needed = True
+                else:
+                    console.print(f"[red]FFVship failed: {e}[/red]")
                     raise SystemExit(1)
 
     if metric_calculated:
-        with open(ssimu2_log_file, "w") as file:
-            skip_offset = 0
-            for index, score in enumerate(score_list):
-                final_score = score if score is not None else 0.0
-                for i in range(skip):
-                    file.write(f"{index+skip_offset+i}: {final_score}\n")
-                skip_offset += skip - 1
         return
 
     # FALLBACK CPU (VS-ZIP)
     console.print(f"[yellow]Calculating SSIMULACRA2 (VS-ZIP | {ssimu2_cpu_workers} workers)...[/yellow]")
     
-    core.num_threads = int(ssimu2_cpu_workers)
+    core.num_threads = ssimu2_cpu_workers
     
     try:
         if not hasattr(core, 'vszip') or not hasattr(core.vszip, "SSIMULACRA2"):
@@ -1009,16 +1231,10 @@ def calculate_metric() -> None:
             clip_async_render(result, progress=update_p, callback=get_ssimprops)
             
     except Exception as e:
-        console.print(f"[red]Fallback failed: {e}[/red]")
+        console.print(f"Fallback failed: {e}")
         raise SystemExit(1)
 
-    with open(ssimu2_log_file, "w") as file:
-        skip_offset = 0
-        for index, score in enumerate(score_list):
-            final_score = score if score is not None else 0.0
-            for i in range(skip):
-                file.write(f"{index+skip_offset+i}: {final_score}\n")
-            skip_offset += skip - 1
+    _write_metric_log_from_scores([score if score is not None else 0.0 for score in score_list], ssimu2_log_file, skip, len(source_clip))
 
 def metrics_aggregation(score_list: list[float]) -> tuple[float, float, float]:
     filtered_score_list = [score if score >= 0 else 0.0 for score in score_list]
@@ -1029,6 +1245,7 @@ def metrics_aggregation(score_list: list[float]) -> tuple[float, float, float]:
     
     average = sum(filtered_score_list)/len(filtered_score_list)
     
+    # Handle single-frame or extremely short scenes where quantiles fails (needs >=2 points)
     if len(sorted_score_list) < 2:
         return (average, sorted_score_list[0], sorted_score_list[0])
     
@@ -1039,7 +1256,12 @@ def metrics_aggregation(score_list: list[float]) -> tuple[float, float, float]:
 # --- ZONES HELPERS ---
 
 def find_zones_file(video_path: Path) -> Path | None:
+    """
+    Looks for a zones file matching sXXeXX pattern.
+    Example: Awesome.Show.S01E02.mkv matches s01e02-zones.txt
+    """
     stem = video_path.stem
+    # Match S01E02 or s01e02 case insensitive
     match = re.search(r"([sS]\d{2}[eE]\d{2})", stem)
     if not match:
         return None
@@ -1053,18 +1275,26 @@ def find_zones_file(video_path: Path) -> Path | None:
     return None
 
 def parse_param_string_to_dict(param_list: list[str]) -> dict:
+    """
+    Converts a list of params ['--crf', '20', '--enable-cdef', '1'] 
+    into a dict {'--crf': '20', '--enable-cdef': '1'}.
+    Handles boolean flags (no value) if necessary, though SVT usually has values.
+    """
     d = {}
     i = 0
     while i < len(param_list):
         key = param_list[i]
         if key.startswith('--'):
+            # Check if next item exists and is not a flag
             if i + 1 < len(param_list) and not param_list[i+1].startswith('--'):
                 d[key] = param_list[i+1]
                 i += 2
             else:
+                # Boolean flag or flag at end
                 d[key] = None
                 i += 1
         else:
+            # stray value? ignore
             i += 1
     return d
 
@@ -1077,21 +1307,30 @@ def dict_to_param_list(d: dict) -> list[str]:
     return l
 
 def merge_params(base_params: list[str], zone_params_str: str) -> tuple[list[str], int | None]:
+    """
+    Merges base params with zone params. 
+    Returns (new_param_list, photon_noise_override).
+    """
     base_dict = parse_param_string_to_dict(base_params)
+    
+    # Split zone params string into list
     zone_list = zone_params_str.strip().split()
     zone_dict = parse_param_string_to_dict(zone_list)
     
     photon_noise_val = None
     
+    # Update base with zone
     for k, v in zone_dict.items():
         if k == '--photon-noise':
             try:
                 photon_noise_val = int(v)
             except:
                 pass
+            # Do not add photon noise to video_params dict
         else:
             base_dict[k] = v
             
+    # Reconstruct list
     return dict_to_param_list(base_dict), photon_noise_val
 
 # ---------------------
@@ -1099,6 +1338,7 @@ def merge_params(base_params: list[str], zone_params_str: str) -> tuple[list[str
 def calculate_zones_json(ranges: list[float], hr: bool, nframe: int, override_zones: Path | None = None) -> None:
     metric_scores = []
     
+    # If using XPSNR (Default behavior if ssimu2 string is empty)
     if ssimu2 == "":
         if not xpsnr_log_file.exists():
             console.print("[red]XPSNR log file missing! Did stage 2 finish?[/red]")
@@ -1106,24 +1346,30 @@ def calculate_zones_json(ranges: list[float], hr: bool, nframe: int, override_zo
             
         with open(xpsnr_log_file, "r") as file:
             for line in file:
+                # Format: "frame: y u v"
                 match = re.search(r"([0-9]+): ([0-9]+\.[0-9]+) ([0-9]+\.[0-9]+) ([0-9]+\.[0-9]+)", line)
                 if match:
                     score_y, score_u, score_v = float(match.group(2)), float(match.group(3)), float(match.group(4))
                     maxval = 255
+                    # Convert PSNR to MSE
+                    # avoid div by zero if perfect match
                     try:
                         mse_y = (maxval**2) / (10 ** (score_y / 10))
                         mse_u = (maxval**2) / (10 ** (score_u / 10))
                         mse_v = (maxval**2) / (10 ** (score_v / 10))
                     except OverflowError:
-                        mse_y, mse_u, mse_v = 0.0001, 0.0001, 0.0001 
+                        mse_y, mse_u, mse_v = 0.0001, 0.0001, 0.0001 # approx 0
                         
+                    # 4:1:1 weighted average (Y is dominant)
                     w_mse = ((4.0 * mse_y) + mse_u + mse_v) / 6.0
                     
                     if w_mse <= 0: w_mse = 0.000001
                     
+                    # Convert back to Logarithmic Score (Similar to PSNR but weighted)
                     score_weighted = 10.0 * log10((maxval**2) / w_mse)
                     metric_scores.append(score_weighted)
     else:
+         # SSIMU2 read
          with open(ssimu2_log_file, "r") as file:
             for line in file:
                 match = re.search(r"([0-9]+): (-?[0-9eE\.\-\+]+)", line)
@@ -1162,6 +1408,7 @@ def calculate_zones_json(ranges: list[float], hr: bool, nframe: int, override_zo
         case "breeze": crf = 18 if hr else 18
         case _: crf = float(quality)
 
+    # 1. Generate Base Auto-Boost Scenes
     base_scenes = []
     
     for index in range(len(ranges)):
@@ -1187,15 +1434,17 @@ def calculate_zones_json(ranges: list[float], hr: bool, nframe: int, override_zo
         extra_params = final_params.split() if final_params else []
         scene_params = ["--preset", final_speed, "--crf", f"{new_crf:.2f}"] + extra_params
         
+        # Handle 0 -> None for JSON
         pn_val = photon_noise_val if photon_noise_val > 0 else None
         
         base_scenes.append({
             "start_frame": start_frame,
             "end_frame": end_frame,
-            "photon_noise": pn_val,
+            "photon_noise": pn_val, # Use global argument or None
             "video_params": scene_params
         })
         
+    # 2. Check for Zones File
     if override_zones:
         zones_file = override_zones
     else:
@@ -1210,35 +1459,53 @@ def calculate_zones_json(ranges: list[float], hr: bool, nframe: int, override_zo
             console.print(f"[green]Zones file found: {zones_file.name}[/green]")
             console.print("[yellow]Applying zones overrides...[/yellow]")
             
+            # Read zones
             zones = []
             with open(zones_file, 'r') as f:
                 for line in f:
                     if not line.strip() or line.strip().startswith('#'): continue
-                    parts = line.split(maxsplit=3)
+                    parts = line.split(maxsplit=3) # start, end, enc, params
                     if len(parts) < 4: continue
                     try:
                         z_start = int(parts[0])
                         z_end_raw = int(parts[1])
                         
+                        # Handle -1 as final frame
                         if z_end_raw == -1:
                             z_end = nframe - 1
                         else:
                             z_end = z_end_raw
 
+                        # parts[2] is encoder (ignored mostly), parts[3] is params
                         z_params = parts[3]
                         zones.append((z_start, z_end, z_params))
                     except ValueError:
                         console.print(f"[red]Invalid zone line: {line.strip()}[/red]")
             
+            # Apply zones iteratively (Cookie Cutter)
             for z_start, z_end, z_params_str in zones:
                 new_list = []
+                
+                # z_end in zones.txt is typically inclusive in user intent
+                # e.g., "0 270" includes frame 270.
+                # Av1an internal scene logic is usually [Start, End) (exclusive end)
+                # So the scene logic split point should be z_end + 1
+                
                 z_end_exclusive = z_end + 1
                 
                 for scene in final_scenes:
                     s_start = scene["start_frame"]
                     s_end = scene["end_frame"]
                     
+                    # Check for overlap
+                    # Overlap if: start1 < end2 AND start2 < end1
                     if s_start < z_end_exclusive and z_start < s_end:
+                        # Overlap exists. We might need to split into 3 parts:
+                        # 1. Pre-zone (Original)
+                        # 2. Zone (Modified)
+                        # 3. Post-zone (Original)
+                        
+                        # 1. Pre-zone
                         if s_start < z_start:
                             new_list.append({
                                 "start_frame": s_start,
@@ -1247,12 +1514,17 @@ def calculate_zones_json(ranges: list[float], hr: bool, nframe: int, override_zo
                                 "video_params": scene["video_params"]
                             })
                         
+                        # 2. Zone Intersection
+                        # Intersection start: max(s_start, z_start)
+                        # Intersection end: min(s_end, z_end_exclusive)
                         int_start = max(s_start, z_start)
                         int_end = min(s_end, z_end_exclusive)
                         
+                        # Merge params
                         merged_params, merged_pn = merge_params(scene["video_params"], z_params_str)
                         pn = merged_pn if merged_pn is not None else scene["photon_noise"]
                         
+                        # Ensure consistency if zone overrides to 0
                         if pn == 0: pn = None
                         
                         new_list.append({
@@ -1262,6 +1534,7 @@ def calculate_zones_json(ranges: list[float], hr: bool, nframe: int, override_zo
                             "video_params": merged_params
                         })
                         
+                        # 3. Post-zone
                         if s_end > z_end_exclusive:
                             new_list.append({
                                 "start_frame": z_end_exclusive,
@@ -1271,11 +1544,14 @@ def calculate_zones_json(ranges: list[float], hr: bool, nframe: int, override_zo
                             })
                             
                     else:
+                        # No overlap, keep original
                         new_list.append(scene)
                 
                 final_scenes = new_list
+                # Sort by start frame to be safe
                 final_scenes.sort(key=lambda x: x["start_frame"])
 
+    # 3. Construct Final JSON
     scenes_data_output = []
     for s in final_scenes:
         scenes_data_output.append({
@@ -1304,22 +1580,26 @@ def calculate_zones_json(ranges: list[float], hr: bool, nframe: int, override_zo
 
 console.print("[bold]Auto-Boost-Av1an start!\n")
 
+# --- ZONES CHECK FOR DISPLAY ---
 current_zones_file = None
 zones_msg = ""
 
 if zones_override_path:
+    # User specified
     current_zones_file = zones_override_path
     if current_zones_file.exists():
         zones_msg = f"Final-pass zones file specified: {current_zones_file.name}"
     else:
         zones_msg = f"Final-pass zones file specified: {current_zones_file.name} (Not found)"
 else:
+    # Auto-detect
     current_zones_file = find_zones_file(src_file)
     if current_zones_file:
         zones_msg = f"Final-pass zones file found: {current_zones_file.name}"
 
 if zones_msg:
     console.print(f"[cyan]{zones_msg}[/cyan]\n")
+# -------------------------------
 
 if no_boosting:
     stage = 4
