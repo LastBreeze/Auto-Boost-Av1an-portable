@@ -52,6 +52,29 @@ def main():
     fork_map = {"1": "5fish", "2": "essential", "3": "hdr", "4": "custom"}
     fork = fork_map.get(fork_choice, "essential")
 
+    avx512_flag = ""
+    if fork in ("5fish", "essential"):
+        print("\n--------------------------------------------------------")
+        print("AVX-512 CPU Support")
+        print("--------------------------------------------------------")
+        print("Some 5fish/essential SVT-AV1 builds have an AVX-512 optimized exe.")
+        print("Only select Yes if you are sure your CPU supports AVX-512.")
+        print("If you are not sure, press Enter for the default: No.\n")
+        avx_choice = input("Does your CPU support AVX-512? [Y/N] (Press Enter for No): ").strip().lower()
+        if avx_choice == "y":
+            avx512_flag = " --avx512"
+
+    denoise_value = "True" if fork == "5fish" else "False"
+    if fork == "5fish":
+        print("\n--------------------------------------------------------")
+        print("5fish Denoise Recommendation")
+        print("--------------------------------------------------------")
+        print("For 5fish, denoise=True will be enabled in settings.txt.")
+        print("This is highly recommended with:")
+        print("denoise_setting=src = DFTTest().denoise(src, {0.00:0.30, 0.40:0.30, 0.60:0.60, 0.80:1.50, 1.00:2.00}, planes=[0, 1, 2])\n")
+    else:
+        print("\nDenoise will be set to False in settings.txt for this generated batch file.")
+
     # --- 3. CRF ---
     print("\n--------------------------------------------------------")
     print("STEP 3 OF 5: Choose a Quality Level (CRF)")
@@ -172,7 +195,7 @@ def main():
     print("Most movies and TV shows have black bars on the top and bottom")
     print("(letterboxing). Auto crop automatically detects and removes them,")
     print("which saves file space and avoids wasting encoding bits on black areas.\n")
-    print("  Y: Yes -- Automatically detect and crop black bars (recommended)")
+    print("  Y: Yes -- Automatically detect and crop black bars")
     print("  N: No  -- Keep the video as-is, no cropping\n")
     print("Tip: If auto crop removes too much or too little, you can open")
     print("settings.txt in Notepad++ and switch to manual crop mode instead.\n")
@@ -200,7 +223,11 @@ def main():
     script += f'set "QUALITY={crf}"\n'
     script += ":: Set photon noise to 0 if using film-grain\n"
     script += f'set "fork={fork}"\n'
-    script += ":: example forks: 5fish, essential, hdr, custom\n\n"
+    script += ":: example forks: 5fish, essential, hdr, custom\n"
+    script += f'set "DENOISE={denoise_value}"\n'
+    script += ":: DENOISE updates denoise=True/False in settings.txt before dispatch. 5fish defaults to True; all other forks default to False.\n"
+    script += 'set "AVX512_FLAG=' + avx512_flag.strip() + '"\n'
+    script += ":: Leave AVX512_FLAG empty unless you are sure your CPU supports AVX-512.\n\n"
     
     script += "del tools\\bat*.txt\n"
     script += "move *.mkv video-input\nmove *.mp4 video-input\nmove *.m2ts video-input\n"
@@ -237,26 +264,20 @@ def main():
         script += ":: --- STEP 1B: WORKER COUNT CHECK (SSIMU2) ---\n"
         script += "if exist \"tools\\workercount-ssimu2.txt\" (\n"
         script += "    REM Read config\n"
-        script += "    for /f \"usebackq tokens=2 delims==\" %%a in (\"tools\\workercount-ssimu2.txt\") do (\n"
-        script += "        if \"%%a\" NEQ \"\" (\n"
-        script += "            if not defined SSIMU2_TOOL (\n"
-        script += "                set \"SSIMU2_TOOL=%%a\"\n"
-        script += "            ) else (\n"
-        script += "                set \"SSIMU2_WORKERS=%%a\"\n"
-        script += "            )\n        )\n    )\n) else (\n"
+        script += "    for /f \"usebackq tokens=1,2 delims==\" %%a in (\"tools\\workercount-ssimu2.txt\") do (\n"
+        script += "        if /I \"%%a\"==\"tool\" set \"SSIMU2_TOOL=%%b\"\n"
+        script += "        if /I \"%%a\"==\"workercount\" set \"SSIMU2_WORKERS=%%b\"\n"
+        script += "    )\n) else (\n"
         script += "    echo.\n    echo -------------------------------------------------------------------------------\n"
         script += "    echo First Run Detected: Calculating optimal SSIMU2 settings...\n"
         script += "    echo -------------------------------------------------------------------------------\n"
         script += "    echo Checking GPU support ^(vs-hip^) and CPU benchmarks...\n"
         script += "    \"VapourSynth\\python.exe\" \"tools\\ssimu2-workercount.py\"\n    \n"
         script += "    REM Read config after generation\n"
-        script += "    for /f \"usebackq tokens=2 delims==\" %%a in (\"tools\\workercount-ssimu2.txt\") do (\n"
-        script += "        if \"%%a\" NEQ \"\" (\n"
-        script += "            if not defined SSIMU2_TOOL (\n"
-        script += "                set \"SSIMU2_TOOL=%%a\"\n"
-        script += "            ) else (\n"
-        script += "                set \"SSIMU2_WORKERS=%%a\"\n"
-        script += "            )\n        )\n    )\n  \n"
+        script += "    for /f \"usebackq tokens=1,2 delims==\" %%a in (\"tools\\workercount-ssimu2.txt\") do (\n"
+        script += "        if /I \"%%a\"==\"tool\" set \"SSIMU2_TOOL=%%b\"\n"
+        script += "        if /I \"%%a\"==\"workercount\" set \"SSIMU2_WORKERS=%%b\"\n"
+        script += "    )\n  \n"
         script += "    REM Pause so user can see benchmark results, then continue\n"
         script += "    echo.\n    echo av1an worker count and SSIMU2 benchmark complete.\n"
         script += "    echo You may edit workercount-config.txt and workercount-ssimu2.txt, or delete these .txt files if you want to run the\n"
@@ -266,6 +287,10 @@ def main():
         script += "    echo CPU oversaturated and PC is unusable during encoding or out of ram errors?\n"
         script += "\techo Decrease worker count.\n"
         script += "    pause\n)\n\n"
+
+    if mode == "autoboost":
+        script += "if not defined SSIMU2_TOOL set \"SSIMU2_TOOL=vs-hip\"\n"
+        script += "if not defined SSIMU2_WORKERS set \"SSIMU2_WORKERS=1\"\n\n"
 
     step_num = 2
 
@@ -290,9 +315,9 @@ def main():
         script += film_grain_note
         
     if mode == "autoboost":
-        script += f"\"VapourSynth\\python.exe\" \"tools\\dispatch.py\" --quality %QUALITY%{autocrop_flag} --ssimu2 %SSIMU2_TOOL% --verbose --ssimu2-cpu-workers %SSIMU2_WORKERS% --resume --fast-speed 8 --final-speed %FINAL_SPEED% --workers %WORKER_COUNT% --fast-params \"%FAST_PARAMS%\" --final-params \"%FINAL_PARAMS%\"\n\n"
+        script += f"\"VapourSynth\\python.exe\" \"tools\\dispatch.py\" --fork %fork% %AVX512_FLAG% --denoise %DENOISE% --quality %QUALITY%{autocrop_flag} --ssimu2 %SSIMU2_TOOL% --verbose --ssimu2-cpu-workers %SSIMU2_WORKERS% --resume --fast-speed 8 --final-speed %FINAL_SPEED% --workers %WORKER_COUNT% --fast-params \"%FAST_PARAMS%\" --final-params \"%FINAL_PARAMS%\"\n\n"
     else:
-        script += f"\"VapourSynth\\python.exe\" \"tools\\av1an-dispatch.py\"{autocrop_flag} --quality %QUALITY% --workers %WORKER_COUNT% --final-speed %FINAL_SPEED% --final-params \"%av1an_settings%\"\n\n"
+        script += f"\"VapourSynth\\python.exe\" \"tools\\av1an-dispatch.py\" --fork %fork% %AVX512_FLAG% --denoise %DENOISE%{autocrop_flag} --quality %QUALITY% --workers %WORKER_COUNT% --final-speed %FINAL_SPEED% --final-params \"%av1an_settings%\"\n\n"
 
     script += "echo.\necho All tasks finished.\npause\n\n"
     step_num += 1

@@ -19,19 +19,17 @@ FILES_TO_DELETE = [
 # =========================================================
 
 def cleanup_workspace():
+    # Get the current working directory (root folder where .bat was run)
+    cwd = os.getcwd()
     # Get the directory where this script is located (e.g., tools/)
     script_dir = os.path.dirname(os.path.abspath(__file__))
     
-    # Determine the root directory (Auto-Boost-Av1an-portable) robustly
-    # by going one level up from the script's directory.
-    root_dir = os.path.dirname(script_dir)
-    
-    print(f"Cleaning workspace in: {root_dir}")
+    print(f"Cleaning workspace in: {cwd}")
 
     # 1. Delete files matching the User Configuration list above (Root Directory)
     for pattern in FILES_TO_DELETE:
-        # Create full path pattern
-        full_pattern = os.path.join(root_dir, pattern)
+        # Create full path pattern (e.g., C:\Path\*.jpg)
+        full_pattern = os.path.join(cwd, pattern)
         files = glob.glob(full_pattern)
         
         for file_path in files:
@@ -42,7 +40,7 @@ def cleanup_workspace():
                 print(f"Error deleting {os.path.basename(file_path)}: {e}")
 
     # 2. Delete 'logs' directory (Root)
-    logs_dir = os.path.join(root_dir, 'logs')
+    logs_dir = os.path.join(cwd, 'logs')
     if os.path.exists(logs_dir) and os.path.isdir(logs_dir):
         try:
             shutil.rmtree(logs_dir)
@@ -53,10 +51,13 @@ def cleanup_workspace():
     # 3. Delete Temp Folders based on naming convention
     # Looks for folders ending in "-source", "-source_scenedetect.scene-detection.tmp", ".tmp"
     # OR folders that start with a period (e.g., .temp, .cache)
-    for item in os.listdir(root_dir):
-        item_path = os.path.join(root_dir, item)
+    
+    # Iterate over all items in the current directory
+    for item in os.listdir(cwd):
+        item_path = os.path.join(cwd, item)
         
         if os.path.isdir(item_path):
+            # Check for the specific temp folder suffixes or prefix
             if (item.endswith("-source") or 
                 item.endswith("-source_scenedetect.scene-detection.tmp") or 
                 item.endswith(".tmp") or
@@ -79,21 +80,33 @@ def cleanup_workspace():
         except OSError as e:
             print(f"Error deleting {os.path.basename(ssimu2_temp_dir)}: {e}")
 
-    # 5. Delete 'temp' folder unconditionally
-    temp_dir = os.path.join(root_dir, 'temp')
+    # 5. Delete 'temp' folder with 'fastpass' exception logic
+    # This corresponds to the dispatch.py temp directory
+    temp_dir = os.path.join(cwd, 'temp')
     
     if os.path.exists(temp_dir) and os.path.isdir(temp_dir):
-        try:
-            shutil.rmtree(temp_dir)
-            print("Deleted folder: temp")
-        except OSError as e:
-            print(f"Error deleting temp folder: {e}")
+        # Check for any .mkv files inside
+        mkv_files = glob.glob(os.path.join(temp_dir, "*.mkv"))
+        
+        # Filter files: We only want to preserve the folder if it contains "real" encodes.
+        # If a file does NOT have "fastpass" in the name, it is considered important.
+        files_to_preserve = [f for f in mkv_files if "fastpass" not in os.path.basename(f).lower()]
+        
+        # If there are no files to preserve (meaning empty, or only "fastpass" files exist), delete the folder.
+        if not files_to_preserve:
+            try:
+                shutil.rmtree(temp_dir)
+                print(f"Deleted folder: temp (Cleaned 'fastpass' or empty)")
+            except OSError as e:
+                print(f"Error deleting temp folder: {e}")
+        else:
+            print(f"Skipping deletion of 'temp' folder (contains {len(files_to_preserve)} essential .mkv files).")
 
     # 6. Delete *.ffindex from 'video-input' and 'filter' directories
     dirs_to_clean_ffindex = ['video-input', 'filter']
     
     for folder_name in dirs_to_clean_ffindex:
-        folder_path = os.path.join(root_dir, folder_name)
+        folder_path = os.path.join(cwd, folder_name)
         
         if os.path.exists(folder_path) and os.path.isdir(folder_path):
             ffindex_pattern = os.path.join(folder_path, '*.ffindex')
@@ -107,7 +120,7 @@ def cleanup_workspace():
                     print(f"Error deleting {os.path.basename(file_path)}: {e}")
 
     # 7. Specific Cleanup for 'video-input' (logs and *.bsindex)
-    video_input_dir = os.path.join(root_dir, 'video-input')
+    video_input_dir = os.path.join(cwd, 'video-input')
     
     if os.path.exists(video_input_dir) and os.path.isdir(video_input_dir):
         

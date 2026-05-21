@@ -7,6 +7,10 @@ set "QUALITY=30"
 :: Set photon noise to 0 if using film-grain
 set "fork=essential"
 :: example forks: 5fish, essential, hdr, custom
+set "DENOISE=False"
+:: DENOISE updates denoise=True/False in settings.txt before dispatch. 5fish should use True; other forks default to False.
+set "AVX512_FLAG="
+:: Optional: set AVX512_FLAG=--avx512 only if your CPU supports AVX-512 and the fork has an AVX-512 build.
 
 del tools\bat*.txt
 move *.mkv video-input
@@ -47,14 +51,9 @@ if exist "tools\workercount-config.txt" (
 :: --- STEP 1B: WORKER COUNT CHECK (SSIMU2) ---
 if exist "tools\workercount-ssimu2.txt" (
     REM Read config
-    for /f "usebackq tokens=2 delims==" %%a in ("tools\workercount-ssimu2.txt") do (
-        if "%%a" NEQ "" (
-            if not defined SSIMU2_TOOL (
-                set "SSIMU2_TOOL=%%a"
-            ) else (
-                set "SSIMU2_WORKERS=%%a"
-            )
-        )
+    for /f "usebackq tokens=1,2 delims==" %%a in ("tools\workercount-ssimu2.txt") do (
+        if /I "%%a"=="tool" set "SSIMU2_TOOL=%%b"
+        if /I "%%a"=="workercount" set "SSIMU2_WORKERS=%%b"
     )
 ) else (
     echo.
@@ -65,14 +64,9 @@ if exist "tools\workercount-ssimu2.txt" (
     "VapourSynth\python.exe" "tools\ssimu2-workercount.py"
     
     REM Read config after generation
-    for /f "usebackq tokens=2 delims==" %%a in ("tools\workercount-ssimu2.txt") do (
-        if "%%a" NEQ "" (
-            if not defined SSIMU2_TOOL (
-                set "SSIMU2_TOOL=%%a"
-            ) else (
-                set "SSIMU2_WORKERS=%%a"
-            )
-        )
+    for /f "usebackq tokens=1,2 delims==" %%a in ("tools\workercount-ssimu2.txt") do (
+        if /I "%%a"=="tool" set "SSIMU2_TOOL=%%b"
+        if /I "%%a"=="workercount" set "SSIMU2_WORKERS=%%b"
     )
   
     REM Pause so user can see benchmark results, then continue
@@ -85,6 +79,9 @@ if exist "tools\workercount-ssimu2.txt" (
     pause
 )
 
+if not defined SSIMU2_TOOL set "SSIMU2_TOOL=vs-hip"
+if not defined SSIMU2_WORKERS set "SSIMU2_WORKERS=1"
+
 :: --- STEP 2: RENAMING ---
 echo Starting Renaming Process...
 "VapourSynth\python.exe" "tools\rename.py"
@@ -95,7 +92,7 @@ echo Encoding inputs from: video-input
 echo Outputs will go to:   video-output
 echo.
 :: If you'd like to use --film-grain, then --photon-noise must be set to 0, do not remove the setting.
-"VapourSynth\python.exe" "tools\dispatch.py" --quality %QUALITY% --autocrop --ssimu2 %SSIMU2_TOOL% --verbose --ssimu2-cpu-workers %SSIMU2_WORKERS% --resume --fast-speed 8 --final-speed %FINAL_SPEED% --workers %WORKER_COUNT% --fast-params "%FAST_PARAMS%" --final-params "%FINAL_PARAMS%"
+"VapourSynth\python.exe" "tools\dispatch.py" --fork %fork% %AVX512_FLAG% --denoise %DENOISE% --quality %QUALITY% --autocrop --ssimu2 %SSIMU2_TOOL% --verbose --ssimu2-cpu-workers %SSIMU2_WORKERS% --resume --fast-speed 8 --final-speed %FINAL_SPEED% --workers %WORKER_COUNT% --fast-params "%FAST_PARAMS%" --final-params "%FINAL_PARAMS%"
 
 echo.
 echo All tasks finished.

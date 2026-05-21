@@ -47,6 +47,40 @@ except ImportError:
     print("Error: vstools not found.", file=sys.stderr)
     sys.exit(1)
 
+
+FILTER_SETTING_KEYS = ("downscale", "denoise", "deband")
+
+def read_settings_values() -> dict:
+    settings_paths = [BASE_DIR / "settings.txt", TOOLS_DIR / "settings.txt"]
+    values = {}
+    for settings_path in settings_paths:
+        if not settings_path.exists():
+            continue
+        try:
+            for raw_line in settings_path.read_text(encoding="utf-8", errors="replace").splitlines():
+                line = raw_line.strip()
+                if not line or line.startswith(("#", ";", "[")) or "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                values[key.strip().lower()] = value.strip()
+        except Exception:
+            pass
+    return values
+
+def settings_filters_enabled() -> bool:
+    values = read_settings_values()
+    return any(values.get(key, "false").lower() == "true" for key in FILTER_SETTING_KEYS)
+
+def write_ssimu2_config(tool="vs-hip", filter_tool="vs-hip", workercount=1, variant="nvidia", streams=1):
+    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+        f.write(f"tool={tool}\n")
+        f.write(f"filter-tool={filter_tool}\n")
+        f.write(f"workercount={max(1, int(workercount))}\n")
+        if variant:
+            f.write(f"variant={variant}\n")
+        if streams:
+            f.write(f"streams={max(1, int(streams))}\n")
+
 def force_remove(path: Path):
     if not path.exists():
         return
@@ -695,10 +729,11 @@ if __name__ == "__main__":
             print(f"   [vs-zip]        FPS: {fps_zip:.2f} | Workers: {w_zip} | Time: {time_zip:.2f}s", file=sys.stderr)
             results.append({"tool": "vs-zip", "variant": "cpu", "fps": fps_zip, "workers": w_zip, "streams": 0, "time": time_zip})
 
+        filters_enabled = settings_filters_enabled()
+
         if not results:
-            print("All benchmarks failed. Defaulting to ffvship_nvidia.", file=sys.stderr)
-            with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-                f.write("tool=ffvship_nvidia\ndownscale-tool=vs-zip\nworkercount=3\n")
+            print("All benchmarks failed. Defaulting to vs-hip config so filtered runs do not select FFVship.", file=sys.stderr)
+            write_ssimu2_config(tool="vs-hip", filter_tool="vs-hip", workercount=1, variant="nvidia", streams=1)
             sys.exit(0)
 
         winner = max(results, key=lambda x: x['fps'])
@@ -706,13 +741,17 @@ if __name__ == "__main__":
         stream_str = f"| Streams: {winner['streams']}" if winner['streams'] > 0 else ""
         print(f"\nWinner: {winner['tool']} ({variant_str}) | FPS: {winner['fps']:.2f} | Time: {winner['time']:.2f}s {stream_str}", file=sys.stderr)
 
-        # Determine best downscale tool (vs-hip or vs-zip)
-        downscale_candidates = [r for r in results if r['tool'] in ['vs-hip', 'vs-zip']]
-        if downscale_candidates:
-            ds_winner = max(downscale_candidates, key=lambda x: x['fps'])
-            ds_tool = ds_winner['tool']
+        # Determine best filter tool (must be vs-hip or vs-zip when filtering is enabled).
+        filter_candidates = [r for r in results if r['tool'] in ['vs-hip', 'vs-zip']]
+        vs_hip_candidates = [r for r in filter_candidates if r['tool'] == 'vs-hip']
+        if filters_enabled and vs_hip_candidates:
+            # Prefer vs-hip for any filtering in settings.txt, even if vs-zip benchmarks faster.
+            filter_winner = max(vs_hip_candidates, key=lambda x: x['fps'])
+        elif filter_candidates:
+            filter_winner = max(filter_candidates, key=lambda x: x['fps'])
         else:
-            ds_tool = 'vs-zip'
+            filter_winner = {'tool': 'vs-hip', 'variant': 'nvidia', 'streams': 1}
+        filter_tool = filter_winner['tool']
 
         # POST-WINNER SETUP
         if winner['tool'] == "vs-hip":
@@ -728,14 +767,22 @@ if __name__ == "__main__":
                 force_remove(f)
 
         # WRITE CONFIG
-        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-            f.write(f"tool={winner['tool']}\n")
-            f.write(f"downscale-tool={ds_tool}\n")
-            f.write(f"workercount={winner['workers']}\n")
+        config_variant = winner.get('variant', 'nvidia')
+        config_streams = winner.get('streams', winner.get('workers', 1))
+        if winner['tool'] == 'vs-hip':
+            config_streams = winner.get('streams', 1)
+        write_ssimu2_config(
+            tool=winner['tool'],
+            filter_tool=filter_tool,
+            workercount=winner['workers'],
+            variant=config_variant,
+            streams=config_streams,
+        )
+        if filters_enabled and filter_tool not in ('vs-hip', 'vs-zip'):
+            print("   [Config] Filtering is enabled; forced filter-tool to vs-hip/vs-zip.", file=sys.stderr)
 
     except Exception as e:
         print(f"Fatal error: {e}", file=sys.stderr)
-        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-            f.write("tool=ffvship_nvidia\ndownscale-tool=vs-zip\nworkercount=3\n")
+        write_ssimu2_config(tool="vs-hip", filter_tool="vs-hip", workercount=1, variant="nvidia", streams=1)
     finally:
         cleanup_temp_files()

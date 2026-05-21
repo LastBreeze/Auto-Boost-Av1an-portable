@@ -8,6 +8,22 @@ import shlex
 # Runs in 'temp', tools are in ../tools
 TOOLS_DIR = os.path.join("..", "tools")
 
+def get_script_version():
+    """Extracts the latest version number from Auto-Boost-Av1an.py."""
+    script_path = os.path.join(TOOLS_DIR, "Auto-Boost-Av1an.py")
+    version = "Unknown"
+    if os.path.exists(script_path):
+        try:
+            with open(script_path, "r", encoding="utf-8") as f:
+                content = f.read()
+                # Looks for pattern like: ver_str = "v2.2"
+                match = re.search(r'ver_str\s*=\s*["\'](v[0-9\.]+)["\']', content)
+                if match:
+                    version = match.group(1)
+        except Exception as e:
+            pass
+    return version
+
 def get_svt_av1_version():
     """Executes SvtAv1EncApp.exe to get the precise version and formats it."""
     exe_path = os.path.join(TOOLS_DIR, "av1an", "SvtAv1EncApp.exe")
@@ -170,12 +186,13 @@ def main():
 
     config = parse_av1an_batch(batch_name)
     svt_version = get_svt_av1_version()
+    script_version = get_script_version()
     
     # Construct info string
-    # Format: Av1an [Flags] SVT_AV1_Version... settings: "..."
+    # Format: Auto-Boost-Av1an [Version] [Flags] SVT_AV1_Version... settings: "..."
     
     # 1. Prefix
-    info_parts = ["Av1an"]
+    info_parts = [f"Auto-Boost-Av1an {script_version}"]
     
     # 2. Photon Noise (if > 0)
     if config["PHOTON_NOISE"] and config["PHOTON_NOISE"] != "0":

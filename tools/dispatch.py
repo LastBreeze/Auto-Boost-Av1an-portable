@@ -1,10 +1,33 @@
 import sys
 import subprocess
 import os
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import glob
 import shutil
-import re
 from wakepy import keep
+from svt_fork_setup import setup_svt_av1_fork
+
+def set_settings_value(settings_path, key, value):
+    """Set key=value in settings.txt, preserving the rest of the file."""
+    key_l = key.lower()
+    lines = []
+    found = False
+    if os.path.exists(settings_path):
+        with open(settings_path, "r", encoding="utf-8", errors="replace") as f:
+            lines = f.read().splitlines()
+    for idx, line in enumerate(lines):
+        stripped = line.strip()
+        if not stripped or stripped.startswith(("#", ";", "[")) or "=" not in line:
+            continue
+        k, _ = line.split("=", 1)
+        if k.strip().lower() == key_l:
+            lines[idx] = f"{k.strip()}={value}"
+            found = True
+            break
+    if not found:
+        lines.append(f"{key}={value}")
+    with open(settings_path, "w", encoding="utf-8", newline="\r\n") as f:
+        f.write("\n".join(lines) + "\n")
 
 def main():
     # --- Configuration ---
@@ -17,8 +40,6 @@ def main():
     video_input_dir = os.path.join(root_dir, "video-input")
     video_output_dir = os.path.join(root_dir, "video-output")
     temp_dir = os.path.join(root_dir, "temp")
-    av1an_dir = os.path.join(tools_dir, "av1an")
-    forks_dir = os.path.join(av1an_dir, "svt-av1 forks")
     
     # Scripts
     av1an_script = os.path.join(tools_dir, "Auto-Boost-Av1an.py")
@@ -41,152 +62,71 @@ def main():
     if not os.path.exists(temp_dir):
         os.makedirs(temp_dir)
 
+    # --- Argument Parsing (settings + dispatcher-only options) ---
+    args = sys.argv[1:]
+    denoise_setting = None
+    initial_args = []
+    idx = 0
+    while idx < len(args):
+        if args[idx] == "--denoise" and idx + 1 < len(args):
+            val = args[idx + 1].strip().lower()
+            denoise_setting = "True" if val in ("1", "true", "yes", "y", "on") else "False"
+            idx += 2
+        else:
+            initial_args.append(args[idx])
+            idx += 1
+    args = initial_args
+
     # --- Copy settings.txt to Temp ---
     # Auto-Boost-Av1an.py searches CWD (temp) for settings.txt
     settings_src = os.path.join(root_dir, "settings.txt")
     settings_dst = os.path.join(temp_dir, "settings.txt")
 
+    if denoise_setting is not None:
+        try:
+            set_settings_value(settings_src, "denoise", denoise_setting)
+            print(f"[Dispatch] Set settings.txt denoise={denoise_setting}")
+        except Exception as e:
+            print(f"[Dispatch] Warning: Failed to update settings.txt denoise: {e}")
+
     if os.path.exists(settings_src):
         try:
             shutil.copy2(settings_src, settings_dst)
+            if denoise_setting is not None:
+                set_settings_value(settings_dst, "denoise", denoise_setting)
             print(f"[Dispatch] Copied settings.txt to temp folder.")
         except Exception as e:
             print(f"[Dispatch] Warning: Failed to copy settings.txt: {e}")
     else:
         print(f"[Dispatch] Warning: settings.txt not found at {settings_src}")
-
-    # --- Fork Selection & AVX-512 Check ---
-    print("\n[Dispatch] Checking SVT-AV1 fork settings...")
-    bat_marker_files = glob.glob(os.path.join(tools_dir, "bat-used-*.txt"))
-    selected_fork = None
-
-    if bat_marker_files:
-        marker_file = bat_marker_files[0]
-        bat_filename = os.path.basename(marker_file).replace("bat-used-", "").replace(".txt", "")
-        bat_path = os.path.join(root_dir, bat_filename)
-
-        if os.path.exists(bat_path):
-            try:
-                with open(bat_path, 'r', encoding='utf-8', errors='ignore') as f:
-                    content = f.read()
-                    match = re.search(r'set\s+"fork=([^"]+)"', content, re.IGNORECASE)
-                    if match:
-                        selected_fork = match.group(1).lower().strip()
-                        print(f"[Dispatch] Found fork '{selected_fork}' configured in {bat_filename}")
-
-                        # --- HDR Fork Color Space Warning ---
-                        if "hdr" in selected_fork:
-                            has_primaries = "--color-primaries" in content
-                            has_transfer = "--transfer-characteristics" in content
-                            has_matrix = "--matrix-coefficients" in content
-
-                            if not (has_primaries and has_transfer and has_matrix):
-                                print("\n\033[93m[WARNING] Missing color space settings for HDR fork!\033[0m")
-                                print("With the svt-av1-hdr fork, color settings must be set manually in your bat file.")
-                                print("It is up to you to choose SDR or HDR specific settings.")
-                                print("Please ensure these parameters are set manually in your bat file:")
-                                print("  --color-primaries --transfer-characteristics --matrix-coefficients\n")
-                                print(r'If you want a guide, you can goto "tools\av1an\svt-av1 forks" and do "SvtAv1EncApp.exe --color-help"')
-                                print("")
-                                os.system("pause")
-
-            except Exception as e:
-                print(f"[Dispatch] Error reading batch file for fork: {e}")
-        else:
-            print(f"[Dispatch] Warning: Batch file {bat_path} not found.")
-    else:
-        print("[Dispatch] Warning: No bat-used-*.txt marker found in tools dir.")
-
-    if selected_fork and os.path.exists(forks_dir):
-        # Determine AVX-512 Support
-        avx512_supported = False
-        try:
-            from cpuinfo import get_cpu_info
-            info = get_cpu_info()
-            if 'avx512f' in info.get('flags', []):
-                avx512_supported = True
-                print("[Dispatch] CPU supports AVX-512.")
-            else:
-                print("[Dispatch] CPU does not support AVX-512.")
-        except ImportError:
-            print("[Dispatch] Warning: py-cpuinfo not installed. Assuming no AVX-512 support.")
-
-        # Find matching fork parent directory
-        fork_parent = None
-        for f in os.listdir(forks_dir):
-            if os.path.isdir(os.path.join(forks_dir, f)) and selected_fork in f.lower():
-                fork_parent = os.path.join(forks_dir, f)
-                break
-
-        if fork_parent:
-            target_subfolder = None
-            subfolders = [d for d in os.listdir(fork_parent) if os.path.isdir(os.path.join(fork_parent, d))]
-
-            if avx512_supported:
-                # Look for AVX-512 optimized builds
-                for sub in subfolders:
-                    sub_lower = sub.lower()
-                    if 'icelake' in sub_lower or 'znver5' in sub_lower or 'znver4' in sub_lower:
-                        target_subfolder = sub
-                        break
-
-            if not target_subfolder:
-                # Fallback to x86-64-v3
-                for sub in subfolders:
-                    if 'x86-64-v3' in sub.lower():
-                        target_subfolder = sub
-                        break
-
-            if not target_subfolder and subfolders:
-                target_subfolder = subfolders[0]  # Fallback to first available
-
-            if target_subfolder:
-                src_dir = os.path.join(fork_parent, target_subfolder)
-                exe_src = os.path.join(src_dir, "SvtAv1EncApp.exe")
-                dll_src = os.path.join(src_dir, "ffms2.dll")
-                
-                exe_dest = os.path.join(av1an_dir, "SvtAv1EncApp.exe")
-                dll_dest = os.path.join(av1an_dir, "ffms2.dll")
-
-                # Clean up existing files in tools/av1an
-                try:
-                    if os.path.exists(exe_dest):
-                        os.remove(exe_dest)
-                    if os.path.exists(dll_dest):
-                        os.remove(dll_dest)
-                except Exception as e:
-                    print(f"[Dispatch] Warning: Could not clean up old SVT-AV1 files: {e}")
-
-                # Copy new binaries
-                if os.path.exists(exe_src):
-                    try:
-                        shutil.copy2(exe_src, exe_dest)
-                        print(f"[Dispatch] Copied SvtAv1EncApp.exe from {target_subfolder}")
-                        
-                        # Copy ffms2.dll if fork is "essential"
-                        if "essential" in selected_fork and os.path.exists(dll_src):
-                            shutil.copy2(dll_src, dll_dest)
-                            print(f"[Dispatch] Copied ffms2.dll from {target_subfolder}")
-                    except Exception as e:
-                        print(f"[Dispatch] Error copying fork files: {e}")
-                else:
-                    print(f"[Dispatch] Error: SvtAv1EncApp.exe not found in {src_dir}")
-        else:
-            print(f"[Dispatch] Warning: Could not find a fork directory matching '{selected_fork}'")
-            
-    print("-" * 80)
-
-    # --- Argument Parsing (Settings only) ---
-    args = sys.argv[1:]
-    
-    # Extract worker count for logic checks
+        
+    # Extract dispatcher-only options and worker count for logic checks
     worker_count = None
-    for idx, arg in enumerate(args):
+    selected_fork = "essential"
+    avx512 = False
+    passthrough_args = []
+    idx = 0
+    while idx < len(args):
+        arg = args[idx]
         if arg == "--workers" and idx + 1 < len(args):
             try:
                 worker_count = int(args[idx + 1])
             except ValueError:
                 pass
+            passthrough_args.extend([arg, args[idx + 1]])
+            idx += 2
+        elif arg == "--fork" and idx + 1 < len(args):
+            selected_fork = args[idx + 1]
+            idx += 2
+        elif arg == "--avx512":
+            avx512 = True
+            idx += 1
+        else:
+            passthrough_args.append(arg)
+            idx += 1
+    args = passthrough_args
+
+    setup_svt_av1_fork(tools_dir, selected_fork, avx512=avx512, verbose=True)
 
     # --- Worker Safety Check ---
     strip_lp_3 = False
@@ -278,7 +218,15 @@ def main():
                     pass
 
             # 3. Encoding
-            final_cmd = [sys.executable, av1an_script, "-i", input_abspath_origin, "--scenes", json_file]
+            final_cmd = [
+                sys.executable,
+                av1an_script,
+                "--fork", selected_fork,
+                "-i", input_abspath_origin,
+                "--scenes", json_file,
+            ]
+            if avx512:
+                final_cmd.append("--avx512")
             
             bt709_flags = " --color-primaries 1 --transfer-characteristics 1 --matrix-coefficients 1"
             bt601_flags = " --color-primaries 6 --transfer-characteristics 6 --matrix-coefficients 6"

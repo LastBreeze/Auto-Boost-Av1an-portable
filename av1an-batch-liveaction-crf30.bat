@@ -7,6 +7,10 @@ set "QUALITY=30"
 :: Set photon noise to 0 if using film-grain
 set "fork=essential"
 :: example forks: 5fish, essential, hdr, custom
+set "DENOISE=False"
+:: DENOISE updates denoise=True/False in settings.txt before dispatch. 5fish should use True; other forks default to False.
+set "AVX512_FLAG="
+:: Optional: set AVX512_FLAG=--avx512 only if your CPU supports AVX-512 and the fork has an AVX-512 build.
 
 del tools\bat*.txt
 move *.mkv video-input
@@ -49,7 +53,7 @@ echo Encoding inputs from: video-input
 echo Outputs will go to:   video-output
 echo.
 :: If you'd like to use --film-grain, then --photon-noise must be set to 0, do not remove the setting.
-"VapourSynth\python.exe" "tools\av1an-dispatch.py" --autocrop --quality %QUALITY% --workers %WORKER_COUNT% --final-speed %FINAL_SPEED% --final-params "%av1an_settings%"
+"VapourSynth\python.exe" "tools\av1an-dispatch.py" --fork %fork% %AVX512_FLAG% --denoise %DENOISE% --autocrop --quality %QUALITY% --workers %WORKER_COUNT% --final-speed %FINAL_SPEED% --final-params "%av1an_settings%"
 
 echo.
 echo All tasks finished.
