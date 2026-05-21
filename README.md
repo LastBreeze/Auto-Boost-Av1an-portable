@@ -17,7 +17,7 @@ Built on [Av1an](https://github.com/master-of-zen/Av1an), [SVT-AV1-PSY](https://
 - **Resume support** — interruptions are handled gracefully; re-run the `.bat` to continue
 - **First-run hardware benchmarking** — automatically determines the optimal worker count and SSIMU2 configuration for your CPU and GPU
 - **Automatic bt709/bt601 color space detection** to prevent color shifts on HD and DVD sources
-- **Auto-crop detection** — removes black bars from widescreen content (live action scripts)
+- **Auto-crop detection** — removes black bars from widescreen content
 - **AVX-512 support** — optional faster encoding on supported Intel and AMD CPUs
 - **Zones support** — per-scene encoding overrides using a `zones.txt` file
 
