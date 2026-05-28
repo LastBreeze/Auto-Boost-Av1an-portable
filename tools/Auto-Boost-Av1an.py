@@ -46,7 +46,7 @@ import numpy as np
 import concurrent.futures
 from svt_fork_setup import setup_svt_av1_fork
 
-ver_str = "v2.2"
+ver_str = "v2.21"
 
 # --- TOOL PATHS HELPER ---
 def resolve_tool(portable_path_str: str, binary_name: str) -> Path:
@@ -101,7 +101,7 @@ parser.add_argument("--final-params", help="Custom final encoding parameters (SV
 parser.add_argument("--ssimu2", help = "SSIMU2 mode: auto, gpu, vs-hip, ffvship, ffvship_nvidia, ffvship_vulkan, vs-zip | If omitted, defaults to XPSNR", default=None)
 parser.add_argument("--ssimu2-cpu-workers", help = "GPU streams for FFVship or CPU workers for vs-zip | Default: 4", default="4")
 parser.add_argument("--workers", help="Number of Av1an workers | Default: 1", default=None)
-parser.add_argument("--photon-noise", help="Photon noise strength | Default: 2", default="2")
+parser.add_argument("--photon-noise", help="Av1an photon noise strength | Default: 0", default="0")
 parser.add_argument("--zones", help="Path to specific zones file override", default=None)
 parser.add_argument("--verbose", action='store_true', help = "Enable more verbosity | Default: not active")
 parser.add_argument("-r", "--resume", action='store_true', help = "Resume the process from the last (un)completed stage | Default: not active")

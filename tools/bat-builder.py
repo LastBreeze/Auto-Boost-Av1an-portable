@@ -1,9 +1,26 @@
 import os
 
+BLUE = "\033[94m"
+RESET = "\033[0m"
+
+def enable_ansi_colors():
+    if os.name != "nt":
+        return
+    try:
+        import ctypes
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.GetStdHandle(-11)
+        mode = ctypes.c_uint()
+        if kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
+            kernel32.SetConsoleMode(handle, mode.value | 0x0004)
+    except Exception:
+        pass
+
 def clear_screen():
     os.system('cls' if os.name == 'nt' else 'clear')
 
 def main():
+    enable_ansi_colors()
     clear_screen()
     print("================================================")
     print("       Auto-Boost / Av1an Batch Builder         ")
@@ -66,10 +83,11 @@ def main():
 
     denoise_value = "True" if fork == "5fish" else "False"
     if fork == "5fish":
-        print("\n--------------------------------------------------------")
+        print(f"\n{BLUE}--------------------------------------------------------")
         print("5fish Denoise Recommendation")
-        print("--------------------------------------------------------")
+        print(f"--------------------------------------------------------{RESET}")
         print("For 5fish, denoise=True will be enabled in settings.txt.")
+        print("The .bat scripts have the ability to edit denoise= in settings.txt")
         print("This is highly recommended with:")
         print("denoise_setting=src = DFTTest().denoise(src, {0.00:0.30, 0.40:0.30, 0.60:0.60, 0.80:1.50, 1.00:2.00}, planes=[0, 1, 2])\n")
     else:
@@ -199,8 +217,8 @@ def main():
     print("  N: No  -- Keep the video as-is, no cropping\n")
     print("Tip: If auto crop removes too much or too little, you can open")
     print("settings.txt in Notepad++ and switch to manual crop mode instead.\n")
-    autocrop_input = input("Enable auto crop? [Y/N] (Press Enter for Yes): ").strip().lower()
-    use_autocrop = autocrop_input != "n"
+    autocrop_input = input("Enable auto crop? [Y/N] (Press Enter for No): ").strip().lower()
+    use_autocrop = autocrop_input in ("y", "yes")
 
     autocrop_flag = " --autocrop" if use_autocrop else ""
 

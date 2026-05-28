@@ -40,7 +40,9 @@ target_resolution=1920
 kernel_type=Spline36
 
 [denoise]
-# Options available: True, False
+# Options available: True, False.
+# .bat files can overwrite this setting. This is useful for 5fish where a light denoise
+# is ideal due to the 5fish high level of detail retention
 denoise=True
 # Anime setting example:
 denoise_setting=src = DFTTest().denoise(src, {0.00:0.30, 0.40:0.30, 0.60:0.60, 0.80:1.50, 1.00:2.00}, planes=[0, 1, 2])
@@ -49,5 +51,5 @@ denoise_setting=src = DFTTest().denoise(src, {0.00:0.30, 0.40:0.30, 0.60:0.60, 0
 
 [deband]
 # Options available: True, False
-deband=True
+deband=False
 deband_setting=src = core.placebo.Deband(src, threshold=1.5, planes=1)
