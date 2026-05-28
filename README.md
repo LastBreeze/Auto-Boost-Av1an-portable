@@ -4,8 +4,6 @@ A fully automated AV1 encoding workflow for Windows. **One double-click** takes 
 
 Built on [Av1an](https://github.com/master-of-zen/Av1an), [SVT-AV1-PSY](https://github.com/gianni-rosato/svt-av1-psy), and [VapourSynth](https://www.vapoursynth.com/).
 
-Linux fork: [Auto-Boost-Av1an-Linux](https://github.com/abdalrahmanx9/Auto-Boost-Av1an-Linux)
-
 ---
 
 ## ✨ Features

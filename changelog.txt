@@ -1,5 +1,10 @@
 Changelog
 
+v2.21
+---------------------------------
+• auto crop implementation rewrite and code cleanup
+• av1an photon noise defaults to 0 since svt-av1 forks now have photon noise built in.
+
 v2.2
 ---------------------------------
 • Restored and improved SSIMU2 metric backend support
@@ -25,7 +30,7 @@ v2.2
   dispatch.py, av1an-dispatch.py, and Auto-Boost-Av1an.py now add their tools folder to sys.path before importing svt_fork_setup.py.
 • Fixed Auto-Boost fork handoff during encoding
   dispatch.py now forwards the selected fork and AVX-512 flag into Auto-Boost-Av1an.py so a 5fish batch file does not get overwritten by the default essential fork during the encode stage.
-• Improved vs-hip DLL activation after a fresh Windows reboot
+• Improved vs-hip DLL activation
   Auto-Boost no longer deletes/re-copies locked libvship DLLs from VapourSynth\vs-plugins while they are already loaded.
   If core.vship.SSIMULACRA2 is already available, the existing loaded plugin is treated as valid and encoding can continue.
 
