@@ -1,5 +1,0 @@
-Metadata-Version: 2.1
-Name: WWXD
-Version: 1.0
-Summary: WWXD is basically Xvid's frame type decision code stuffed into a VapourSynth plugin. The output is somewhat different from Scxvid's, because Xvid's decisions are also affected by data calculated while encoding frames. 
-Platform: All
