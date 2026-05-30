@@ -1,5 +1,16 @@
 Changelog
 
+v2.22
+---------------------------------
+• If FFVship fails, Auto-Boost now tries the vs-hip fallback automatically.
+  This can help an encode continue instead of stopping right away.
+• Added a clear message when this happens:
+  FFVship failed, using vs-hip fallback
+• The GitHub repo no longer includes the full VapourSynth folder.
+  The repo now only has VapourSynth\README.md.
+  If you need the ready-to-use VapourSynth files, get them from a release zip.
+• Added a small test to help make sure the FFVship fallback stays working in future updates.
+
 v2.21
 ---------------------------------
 • auto crop implementation rewrite and code cleanup
