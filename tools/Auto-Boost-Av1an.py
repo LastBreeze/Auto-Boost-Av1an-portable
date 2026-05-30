@@ -163,6 +163,11 @@ def get_script_setting(key_name: str, default_value: str) -> str:
     return default_value
 
 # Load Settings
+s_crop_mode = get_script_setting("crop", "auto")
+s_crop_top = get_script_setting("top", "0")
+s_crop_bottom = get_script_setting("bottom", "0")
+s_crop_left = get_script_setting("left", "0")
+s_crop_right = get_script_setting("right", "0")
 s_downscale = get_script_setting("downscale", "False")
 s_target_res = get_script_setting("target_resolution", "1920x1080")
 s_kernel = get_script_setting("kernel_type", "Hermite")
@@ -337,7 +342,50 @@ if not os.path.exists(tmp_dir):
 core.max_cache_size = 1024
 console = Console()
 
-def detect_crop_values(source_path: Path) -> tuple[int, int]:
+def _read_crop_int(value: str, key_name: str) -> int:
+    try:
+        crop_value = int(value)
+    except (TypeError, ValueError):
+        console.print(f"[yellow]Invalid manual crop {key_name}={value!r}; using 0.[/yellow]")
+        return 0
+    if crop_value < 0:
+        console.print(f"[yellow]Invalid manual crop {key_name}={crop_value}; using 0.[/yellow]")
+        return 0
+    if crop_value % 2 != 0:
+        adjusted = crop_value - 1
+        console.print(f"[yellow]Manual crop {key_name}={crop_value} is not mod2; using {adjusted}.[/yellow]")
+        return adjusted
+    return crop_value
+
+def report_crop_status(mode: str, top: int, bottom: int, left: int, right: int) -> None:
+    normalized_mode = mode.lower()
+    active = any((top, bottom, left, right))
+    if normalized_mode == "off":
+        console.print("[cyan]Crop:[/cyan] off")
+    elif active:
+        console.print(
+            f"[cyan]Crop:[/cyan] {normalized_mode} active "
+            f"(top={top}, bottom={bottom}, left={left}, right={right})"
+        )
+    else:
+        console.print(f"[cyan]Crop:[/cyan] {normalized_mode} selected, no crop values active")
+
+def parse_crop_values_from_vpy(vpy_path: Path) -> tuple[int, int, int, int] | None:
+    if not vpy_path.exists():
+        return None
+    try:
+        text = vpy_path.read_text(encoding="utf-8", errors="replace")
+    except Exception:
+        return None
+    match = re.search(r"std\.Crop\(([^)]*)\)", text)
+    if not match:
+        return 0, 0, 0, 0
+    values = {"top": 0, "bottom": 0, "left": 0, "right": 0}
+    for key, value in re.findall(r"(top|bottom|left|right)\s*=\s*(-?\d+)", match.group(1)):
+        values[key] = int(value)
+    return values["top"], values["bottom"], values["left"], values["right"]
+
+def detect_crop_values(source_path: Path) -> tuple[int, int, int, int]:
     """
     Uses external tools/cropdetect.py to detect crop values.
     Saves the CSV to the source directory (next to the input file/bat file).
@@ -349,7 +397,7 @@ def detect_crop_values(source_path: Path) -> tuple[int, int]:
     
     if not cropdetect_script.exists():
         console.print(f"[red]cropdetect.py not found at {cropdetect_script}. Proceeding with 0 crop.[/red]")
-        return 0, 0
+        return 0, 0, 0, 0
     
     csv_output = source_path.parent / f"{source_path.stem}_crop.csv"
     
@@ -413,10 +461,10 @@ def detect_crop_values(source_path: Path) -> tuple[int, int]:
             console.print(f"[red]Error during crop detection execution: {e}[/red]")
             return False
 
-    def parse_csv_result() -> tuple[int, int, str]:
+    def parse_csv_result() -> tuple[int, int, int, int, str]:
         if not csv_output.exists():
             console.print(f"[yellow]Crop CSV not found after execution.[/yellow]")
-            return 0, 0, ""
+            return 0, 0, 0, 0, ""
             
         # Read the CSV to get final values
         try:
@@ -424,51 +472,73 @@ def detect_crop_values(source_path: Path) -> tuple[int, int]:
                 reader = csv.DictReader(f)
                 rows = list(reader)
                 if not rows:
-                    return 0, 0, ""
+                    return 0, 0, 0, 0, ""
                 
                 row = rows[0]
+                orig_w = int(row.get('width', '0'))
                 orig_h = int(row['height'])
+                c_w = int(row.get('crop_w', orig_w))
                 c_h = int(row['crop_h'])
+                c_x = int(row.get('crop_x', '0'))
                 c_y = int(row['crop_y'])
                 
                 crop_top = c_y
                 crop_bottom = orig_h - (c_y + c_h)
+                crop_left = c_x
+                crop_right = orig_w - (c_x + c_w) if orig_w else 0
                 
                 # Ensure mod2
                 if crop_top % 2 != 0: crop_top -= 1
                 if crop_bottom % 2 != 0: crop_bottom -= 1
+                if crop_left % 2 != 0: crop_left -= 1
+                if crop_right % 2 != 0: crop_right -= 1
                 
-                return crop_top, crop_bottom, row.get('crop', '')
+                return crop_top, crop_bottom, crop_left, crop_right, row.get('crop', '')
                 
         except Exception as e:
             console.print(f"[red]Failed to parse crop CSV: {e}[/red]")
-            return 0, 0, ""
+            return 0, 0, 0, 0, ""
 
     # Attempt 1: Standard
     if not run_crop_process(aggressive_mode=False):
-        return 0, 0
+        return 0, 0, 0, 0
         
-    t, b, crop_str = parse_csv_result()
+    t, b, l, r, crop_str = parse_csv_result()
     
-    # Attempt 2: Aggressive if Standard failed (0,0)
-    if t == 0 and b == 0:
+    # Attempt 2: Aggressive if Standard failed (0 on all sides)
+    if t == 0 and b == 0 and l == 0 and r == 0:
         console.print("[yellow]No crop found. Retrying with --aggressive mode...[/yellow]")
         if run_crop_process(aggressive_mode=True):
-            t, b, crop_str = parse_csv_result()
+            t, b, l, r, crop_str = parse_csv_result()
 
-    if t != 0 or b != 0:
-        console.print(f"[bold green]Crop Found:[/bold green] Top={t}, Bottom={b} [dim](Based on {crop_str})[/dim]")
+    if t != 0 or b != 0 or l != 0 or r != 0:
+        console.print(f"[bold green]Crop Found:[/bold green] Top={t}, Bottom={b}, Left={l}, Right={r} [dim](Based on {crop_str})[/dim]")
     else:
-        console.print("[yellow]No crop detected (0 top/bottom).[/yellow]")
+        console.print("[yellow]No crop detected (0 on all sides).[/yellow]")
 
-    return t, b
+    return t, b, l, r
 
 # Generate VPY file
+requested_crop_mode = s_crop_mode.strip().lower()
+if not args.autocrop:
+    crop_mode = "off"
+elif requested_crop_mode in ("auto", "manual", "off"):
+    crop_mode = requested_crop_mode
+else:
+    console.print(f"[yellow]Unknown crop mode {s_crop_mode!r}; using auto.[/yellow]")
+    crop_mode = "auto"
+
 if not os.path.exists(vpy_file):
     
-    crop_top, crop_bottom = 0, 0
-    if args.autocrop:
-        crop_top, crop_bottom = detect_crop_values(src_file)
+    crop_top, crop_bottom, crop_left, crop_right = 0, 0, 0, 0
+    if crop_mode == "auto":
+        crop_top, crop_bottom, crop_left, crop_right = detect_crop_values(src_file)
+    elif crop_mode == "manual":
+        crop_top = _read_crop_int(s_crop_top, "top")
+        crop_bottom = _read_crop_int(s_crop_bottom, "bottom")
+        crop_left = _read_crop_int(s_crop_left, "left")
+        crop_right = _read_crop_int(s_crop_right, "right")
+    report_crop_status(crop_mode, crop_top, crop_bottom, crop_left, crop_right)
     
     # Template
     vpy_template = """
@@ -486,8 +556,8 @@ if {convert}:
 src = initialize_clip(src)
 
 # 1. CROP
-if {ct} > 0 or {cb} > 0:
-    src = src.std.Crop(top={ct}, bottom={cb})
+if {ct} > 0 or {cb} > 0 or {cl} > 0 or {cr} > 0:
+    src = src.std.Crop(top={ct}, bottom={cb}, left={cl}, right={cr})
 
 # 2. DOWNSCALE
 should_downscale = {downscale}
@@ -550,11 +620,18 @@ final.set_output(0)
             cache=cache_file, 
             ct=crop_top, 
             cb=crop_bottom,
+            cl=crop_left,
+            cr=crop_right,
             downscale=str(do_downscale_bool),
             target_res=s_target_res,
             kernel=s_kernel,
             convert=convert_yuv420p10
         ))
+else:
+    existing_crop_values = parse_crop_values_from_vpy(vpy_file)
+    if existing_crop_values is None:
+        existing_crop_values = (0, 0, 0, 0)
+    report_crop_status(crop_mode, *existing_crop_values)
 
 
 def get_file_info(vfile: Path, mode: str) -> tuple[list[int], bool, int, int, int, int, int]:
@@ -964,6 +1041,24 @@ def _calculate_ssimu2_vship(cut_source_clip, cut_encoded_clip, skip: int, nframe
     _write_metric_log_from_scores([score if score is not None else 0.0 for score in score_list], ssimu2_log_file, skip, nframe)
 
 
+def _try_ffvship_vs_hip_fallback(cut_source_clip, cut_encoded_clip, skip: int, nframe: int, cfg: dict) -> bool:
+    """Fallback from external FFVship to in-process vs-hip/libvship metrics."""
+    console.print("[yellow]FFVship failed, using vs-hip fallback[/yellow]")
+    variant = cfg.get("variant", "nvidia")
+    dll_name = _activate_vship_plugin(variant)
+    if not dll_name:
+        console.print("[yellow]vs-hip fallback is unavailable; falling back to vs-zip.[/yellow]")
+        return False
+    try:
+        streams = int(cfg.get("streams", cfg.get("workercount", ssimu2_cpu_workers)))
+        console.print(f"[yellow]Calculating SSIMULACRA2 via vs-hip ({dll_name} | streams: {streams} | every {skip})...[/yellow]")
+        _calculate_ssimu2_vship(cut_source_clip, cut_encoded_clip, skip, nframe, streams)
+        return True
+    except Exception as e:
+        console.print(f"[yellow]vs-hip fallback failed ({e}); falling back to vs-zip.[/yellow]")
+        return False
+
+
 def _write_metric_log_from_scores(scores: list[float], log_path: Path, skip: int, nframe: int) -> None:
     """
     FFVship --every N returns one score for frames 0, N, 2N, ... .
@@ -1123,14 +1218,12 @@ def calculate_metric() -> None:
 
         if not ffvship_exe.exists():
             msg = f"FFVship {variant} binary not found at {ffvship_exe}"
-            if ssimu2 == 'auto':
-                console.print(f"[yellow]{msg}. Falling back to vs-zip.[/yellow]")
+            console.print(f"[yellow]{msg}[/yellow]")
+            metric_calculated = _try_ffvship_vs_hip_fallback(cut_source_clip, cut_encoded_clip, skip, len(source_clip), cfg)
+            if not metric_calculated:
                 fallback_needed = True
-            else:
-                console.print(f"[red]{msg}. Cannot calculate metrics.[/red]")
-                raise SystemExit(1)
 
-        if not fallback_needed:
+        if (not metric_calculated) and (not fallback_needed):
             console.print(f"[yellow]Calculating SSIMULACRA2 via FFVship ({variant} | GPU streams: {gpu_threads} | every {skip})...[/yellow]")
             ffvship_json_file = tmp_dir / f"{src_file.stem}_ffvship.json"
             if ffvship_json_file.exists():
@@ -1183,12 +1276,10 @@ def calculate_metric() -> None:
                 metric_calculated = True
 
             except Exception as e:
-                if ssimu2 == 'auto':
-                    console.print(f"[yellow]FFVship failed ({e}). Falling back to vs-zip.[/yellow]")
+                console.print(f"[yellow]FFVship failed: {e}[/yellow]")
+                metric_calculated = _try_ffvship_vs_hip_fallback(cut_source_clip, cut_encoded_clip, skip, len(source_clip), cfg)
+                if not metric_calculated:
                     fallback_needed = True
-                else:
-                    console.print(f"[red]FFVship failed: {e}[/red]")
-                    raise SystemExit(1)
 
     if metric_calculated:
         return
