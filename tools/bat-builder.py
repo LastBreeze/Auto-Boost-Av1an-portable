@@ -122,7 +122,9 @@ def main():
         print("  1 -- Slightly more detail preserved.")
         print("  2 -- Noticeably more detail (may increase file size a bit).")
         print("  3 -- High fidelity. Good for very detailed scenes.")
-        print("  4 -- Maximum fidelity. Can significantly increase file size.\n")
+        print("  4 -- Maximum fidelity. Can significantly increase file size.")
+        print("       Mimics SVT-AV1-HDR's tune grain for absolute grain")
+        print("       retention with no regard to distortion at all.\n")
         print("Tip: Start at 0. If textures or fine lines look soft or blurry,")
         print("try bumping this up by 1 and compare.\n")
         val = input("Select a fidelity level [0-4] (Press Enter for 0): ").strip()
@@ -191,12 +193,8 @@ def main():
         final_params = "--lineart-psy-bias 4 --texture-psy-bias 2 --hbd-mds 1 --keyint 305 --noise-level-thr 16000 --tune 0 --filtering-noise-detection 4 --lp 3 --photon-noise 200"
         has_rename = False
     elif fork == "essential":
-        if mode == "autoboost":
-            fast_params = f"--ac-bias 1.0 --tx-bias 3 --luminance-qp-bias 20 --enable-alt-dlf 1 --qp-scale-compress-strength 3 --complex-hvs 1{dist_preset}"
-            final_params = f"--ac-bias 1.0 --tx-bias 3 --luminance-qp-bias 20 --enable-alt-dlf 1 --qp-scale-compress-strength 3 --complex-hvs 1 --photon-noise 200{dist_preset}"
-        else: # av1an mode
-            fast_params = f"--ac-bias 1.0 --tx-bias 3 --luminance-qp-bias 20 --enable-alt-dlf 1 --complex-hvs 1{dist_preset}"
-            final_params = f"--ac-bias 1.0 --tx-bias 3 --luminance-qp-bias 20 --enable-alt-dlf 1 --complex-hvs 1 --photon-noise 200{dist_preset}"
+        fast_params = f"--scd 0{dist_preset}"
+        final_params = f"--scd 0 --photon-noise 200{dist_preset}"
         film_grain_note = ":: If you'd like to use --film-grain, then --photon-noise must be set to 0, do not remove the setting.\n"
     elif fork == "hdr":
         # Keep base clean for HDR, apply tuning/noise based on user input
@@ -335,7 +333,7 @@ def main():
     if mode == "autoboost":
         script += f"\"VapourSynth\\python.exe\" \"tools\\dispatch.py\" --fork %fork% %AVX512_FLAG% --denoise %DENOISE% --quality %QUALITY%{autocrop_flag} --ssimu2 %SSIMU2_TOOL% --verbose --ssimu2-cpu-workers %SSIMU2_WORKERS% --resume --fast-speed 8 --final-speed %FINAL_SPEED% --workers %WORKER_COUNT% --fast-params \"%FAST_PARAMS%\" --final-params \"%FINAL_PARAMS%\"\n\n"
     else:
-        script += f"\"VapourSynth\\python.exe\" \"tools\\av1an-dispatch.py\" --fork %fork% %AVX512_FLAG% --denoise %DENOISE%{autocrop_flag} --quality %QUALITY% --workers %WORKER_COUNT% --final-speed %FINAL_SPEED% --final-params \"%av1an_settings%\"\n\n"
+        script += f"\"VapourSynth\\python.exe\" \"tools\\av1an-dispatch.py\" --resume --fork %fork% %AVX512_FLAG% --denoise %DENOISE%{autocrop_flag} --quality %QUALITY% --workers %WORKER_COUNT% --final-speed %FINAL_SPEED% --final-params \"%av1an_settings%\"\n\n"
 
     script += "echo.\necho All tasks finished.\npause\n\n"
     step_num += 1

@@ -1,7 +1,7 @@
 @echo off
 :: Notepad++ is suggested for editing this file.
 :: This batch file uses av1an-dispatch.py to call av1an.exe directly.
-set "av1an_settings=--ac-bias 1.0 --tx-bias 3 --luminance-qp-bias 20 --enable-alt-dlf 1 --qp-scale-compress-strength 3 --complex-hvs 1 --photon-noise 200"
+set "av1an_settings=--scd 0 --distortion-bias-preset 1 --photon-noise 400"
 set "FINAL_SPEED=4"
 set "QUALITY=30"
 :: Set photon noise to 0 if using film-grain
@@ -53,7 +53,7 @@ echo Encoding inputs from: video-input
 echo Outputs will go to:   video-output
 echo.
 :: If you'd like to use --film-grain, then --photon-noise must be set to 0, do not remove the setting.
-"VapourSynth\python.exe" "tools\av1an-dispatch.py" --fork %fork% %AVX512_FLAG% --denoise %DENOISE% --autocrop --quality %QUALITY% --workers %WORKER_COUNT% --final-speed %FINAL_SPEED% --final-params "%av1an_settings%"
+"VapourSynth\python.exe" "tools\av1an-dispatch.py" --resume --fork %fork% %AVX512_FLAG% --denoise %DENOISE% --autocrop --quality %QUALITY% --workers %WORKER_COUNT% --final-speed %FINAL_SPEED% --final-params "%av1an_settings%"
 
 echo.
 echo All tasks finished.

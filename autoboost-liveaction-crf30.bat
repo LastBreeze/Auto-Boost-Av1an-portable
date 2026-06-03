@@ -1,7 +1,7 @@
 @echo off
 :: Notepad++ is suggested for editing this file. Never add --film-grain to fast params, this will break metrics.
-set "FAST_PARAMS=--ac-bias 1.0 --tx-bias 3 --luminance-qp-bias 20 --enable-alt-dlf 1 --qp-scale-compress-strength 3 --complex-hvs 1"
-set "FINAL_PARAMS=--ac-bias 1.0 --tx-bias 3 --luminance-qp-bias 20 --enable-alt-dlf 1 --qp-scale-compress-strength 3 --complex-hvs 1 --photon-noise 200"
+set "FAST_PARAMS=--scd 0 --distortion-bias-preset 1"
+set "FINAL_PARAMS=--scd 0 --distortion-bias-preset 1 --photon-noise 400"
 set "FINAL_SPEED=4"
 set "QUALITY=30"
 :: Set photon noise to 0 if using film-grain
