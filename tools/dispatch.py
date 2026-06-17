@@ -115,6 +115,33 @@ def warn_and_pause_if_paths_too_long(input_files, video_output_dir, temp_dir):
                 unique_long_paths.append(path)
         pause_for_long_paths(unique_long_paths)
 
+
+def sanitize_input_filenames(video_input_dir, extensions):
+    """Replace parentheses in supported video filenames with safe inner spaces before processing."""
+    supported_exts = {pattern[1:].lower() for pattern in extensions if pattern.startswith("*")}
+    renamed = 0
+    for filename in sorted(os.listdir(video_input_dir)):
+        src_path = os.path.join(video_input_dir, filename)
+        if not os.path.isfile(src_path):
+            continue
+        stem, ext = os.path.splitext(filename)
+        if ext.lower() not in supported_exts or ("(" not in stem and ")" not in stem):
+            continue
+
+        safe_stem = " ".join(stem.replace("(", " ").replace(")", " ").split()) or "video"
+        dst_path = os.path.join(video_input_dir, f"{safe_stem}{ext}")
+        suffix = 1
+        while os.path.exists(dst_path):
+            dst_path = os.path.join(video_input_dir, f"{safe_stem}_{suffix}{ext}")
+            suffix += 1
+
+        os.rename(src_path, dst_path)
+        renamed += 1
+        print(f"[Dispatch] Renamed input file for Python-safe filename: {filename} -> {os.path.basename(dst_path)}")
+
+    return renamed
+
+
 def main():
     # --- Configuration ---
     # Paths relative to this script (tools/dispatch.py)
@@ -222,6 +249,7 @@ def main():
 
     # --- Gather Input Files ---
     extensions = ("*.mkv", "*.mp4", "*.m2ts")
+    sanitize_input_filenames(video_input_dir, extensions)
     input_files = []
     for ext in extensions:
         input_files.extend(glob.glob(os.path.join(video_input_dir, ext)))
