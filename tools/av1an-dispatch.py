@@ -30,6 +30,72 @@ def set_settings_value(settings_path, key, value):
     with open(settings_path, "w", encoding="utf-8", newline="\r\n") as f:
         f.write("\n".join(lines) + "\n")
 
+WINDOWS_MAX_PATH = 260
+
+
+def display_path_for_length(path):
+    """Return the Windows-style path users see, so length warnings match Windows tools."""
+    abs_path = os.path.abspath(path)
+    normalized = abs_path.replace("/", "\\")
+    lower = normalized.lower()
+    if lower.startswith("\\mnt\\") and len(normalized) > 6 and normalized[5].isalpha() and normalized[6:7] == "\\":
+        return f"{normalized[5].upper()}:\\{normalized[7:]}"
+    return normalized
+
+
+def pause_for_long_paths(long_paths):
+    print("\n" + "=" * 80)
+    print("[Dispatch] ERROR: One or more backend file paths exceed the Windows 260-character limit.")
+    print("[Dispatch] Processing has been paused/stopped before encoding to avoid tool failures.")
+    print("[Dispatch] The full filename + folder path is too long for Windows tools.")
+    print("[Dispatch] Please rename your input filenames to be shorter and/or move the")
+    print("[Dispatch] Auto-Boost-Av1an-portable folder to a lower drive path, then run this again.")
+    print("-" * 80)
+    for path in long_paths:
+        print(f"[Dispatch] {len(path)} characters: {path}")
+    print("=" * 80)
+    try:
+        input("Press Enter to exit...")
+    except EOFError:
+        pass
+    sys.exit(1)
+
+
+def warn_and_pause_if_paths_too_long(input_files, video_output_dir, temp_dir):
+    long_paths = []
+    for input_path in input_files:
+        filename = os.path.basename(input_path)
+        basename = os.path.splitext(filename)[0]
+        video_input_dir = os.path.dirname(input_path)
+        backend_artifact_dir = os.path.join(video_input_dir, basename)
+        paths_to_check = [
+            input_path,
+            os.path.join(video_output_dir, basename + "-output.mkv"),
+            os.path.join(temp_dir, f"{basename}.vpy"),
+            os.path.join(temp_dir, f"{basename}.ffindex"),
+            os.path.join(temp_dir, f"{basename}_scenedetect.json"),
+            os.path.join(temp_dir, f"{basename}-output.mkv"),
+            os.path.join(video_input_dir, f"{basename}-av1.mkv"),
+            backend_artifact_dir,
+            os.path.join(backend_artifact_dir, f"{basename}.vpy"),
+            os.path.join(backend_artifact_dir, f"{basename}.ffindex"),
+            os.path.join(backend_artifact_dir, f"{basename}-av1.mkv"),
+        ]
+        for path in paths_to_check:
+            display_path = display_path_for_length(path)
+            if len(display_path) > WINDOWS_MAX_PATH:
+                long_paths.append(display_path)
+
+    if long_paths:
+        seen = set()
+        unique_long_paths = []
+        for path in long_paths:
+            if path not in seen:
+                seen.add(path)
+                unique_long_paths.append(path)
+        pause_for_long_paths(unique_long_paths)
+
+
 def main():
     # --- Configuration ---
     script_path = os.path.abspath(__file__)
@@ -125,6 +191,8 @@ def main():
     if not input_files:
         print(f"[Dispatch] No video files found in {video_input_dir}")
         sys.exit(0)
+
+    warn_and_pause_if_paths_too_long(input_files, video_output_dir, temp_dir)
         
     print(f"[Dispatch] Found {len(input_files)} files to process.")
 
