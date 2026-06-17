@@ -7,6 +7,8 @@ v2.24
 • extras\vspreview will lanczos resize source video to align with av1 encode if resolution differs.
 • Added settings.txt support to av1an mode for filtering.
 • Add warning if path+filename exceed Windows 260 character limit.
+• Updated extras\photon-noise-test to use svt-av1-essential built-in photon noise
+• Remove parentheses from input video filenames to be python safe
 
 v2.23
 ---------------------------------
