@@ -193,8 +193,8 @@ def main():
         final_params = "--lineart-psy-bias 4 --texture-psy-bias 2 --hbd-mds 1 --keyint 305 --noise-level-thr 16000 --tune 0 --filtering-noise-detection 4 --lp 3 --photon-noise 200"
         has_rename = False
     elif fork == "essential":
-        fast_params = f"--scd 0{dist_preset}"
-        final_params = f"--scd 0 --photon-noise 200{dist_preset}"
+        fast_params = f"--scd 0 --enable-dlf 3{dist_preset}"
+        final_params = f"--scd 0 --enable-dlf 3 --photon-noise 200{dist_preset}"
         film_grain_note = ":: If you'd like to use --film-grain, then --photon-noise must be set to 0, do not remove the setting.\n"
     elif fork == "hdr":
         # Keep base clean for HDR, apply tuning/noise based on user input
@@ -237,7 +237,6 @@ def main():
 
     script += f'set "FINAL_SPEED={speed}"\n'
     script += f'set "QUALITY={crf}"\n'
-    script += ":: Set photon noise to 0 if using film-grain\n"
     script += f'set "fork={fork}"\n'
     script += ":: example forks: 5fish, essential, hdr, custom\n"
     script += f'set "DENOISE={denoise_value}"\n'

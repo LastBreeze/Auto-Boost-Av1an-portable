@@ -46,7 +46,7 @@ import numpy as np
 import concurrent.futures
 from svt_fork_setup import setup_svt_av1_fork
 
-ver_str = "v2.21"
+ver_str = "v2.23"
 
 # --- TOOL PATHS HELPER ---
 def resolve_tool(portable_path_str: str, binary_name: str) -> Path:
@@ -171,9 +171,15 @@ s_crop_right = get_script_setting("right", "0")
 s_downscale = get_script_setting("downscale", "False")
 s_target_res = get_script_setting("target_resolution", "1920x1080")
 s_kernel = get_script_setting("kernel_type", "Hermite")
+s_denoise = get_script_setting("denoise", "False")
+s_denoise_setting = get_script_setting("denoise_setting", "")
+s_deband = get_script_setting("deband", "False")
+s_deband_setting = get_script_setting("deband_setting", "")
 
 # Normalize boolean string
 do_downscale_bool = s_downscale.lower() == "true"
+do_denoise_bool = s_denoise.lower() == "true"
+do_deband_bool = s_deband.lower() == "true"
 # -----------------------
 
 stage = int(args.stage)
@@ -361,14 +367,31 @@ def report_crop_status(mode: str, top: int, bottom: int, left: int, right: int) 
     normalized_mode = mode.lower()
     active = any((top, bottom, left, right))
     if normalized_mode == "off":
-        console.print("[cyan]Crop:[/cyan] off")
+        console.print("[blue]Crop:[/blue] off")
     elif active:
         console.print(
-            f"[cyan]Crop:[/cyan] {normalized_mode} active "
+            f"[blue]Crop:[/blue] {normalized_mode} active "
             f"(top={top}, bottom={bottom}, left={left}, right={right})"
         )
     else:
-        console.print(f"[cyan]Crop:[/cyan] {normalized_mode} selected, no crop values active")
+        console.print(f"[blue]Crop:[/blue] {normalized_mode} selected, no crop values active")
+
+
+def report_filter_status() -> None:
+    active_filters = []
+    if do_downscale_bool:
+        active_filters.append(f"downscale: target_resolution={s_target_res}, kernel_type={s_kernel}")
+    if do_denoise_bool:
+        active_filters.append(f"denoise: denoise_setting={s_denoise_setting or 'enabled'}")
+    if do_deband_bool:
+        active_filters.append(f"deband: deband_setting={s_deband_setting or 'enabled'}")
+
+    if not active_filters:
+        console.print("[blue]Filters active:[/blue] none")
+        return
+
+    for filter_status in active_filters:
+        console.print(f"[blue]Filter active:[/blue] {filter_status}")
 
 def parse_crop_values_from_vpy(vpy_path: Path) -> tuple[int, int, int, int] | None:
     if not vpy_path.exists():
@@ -539,6 +562,7 @@ if not os.path.exists(vpy_file):
         crop_left = _read_crop_int(s_crop_left, "left")
         crop_right = _read_crop_int(s_crop_right, "right")
     report_crop_status(crop_mode, crop_top, crop_bottom, crop_left, crop_right)
+    report_filter_status()
     
     # Template
     vpy_template = """
@@ -632,6 +656,7 @@ else:
     if existing_crop_values is None:
         existing_crop_values = (0, 0, 0, 0)
     report_crop_status(crop_mode, *existing_crop_values)
+    report_filter_status()
 
 
 def get_file_info(vfile: Path, mode: str) -> tuple[list[int], bool, int, int, int, int, int]:

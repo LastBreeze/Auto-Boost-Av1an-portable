@@ -7,6 +7,17 @@ import shutil
 from wakepy import keep
 from svt_fork_setup import setup_svt_av1_fork
 
+def scene_detection_env():
+    """Environment for scene detection subprocesses.
+
+    Forces unbuffered Python output so live progress lines from
+    Progressive-Scene-Detection.py are visible in the parent console.
+    """
+    env = os.environ.copy()
+    env["PYTHONUNBUFFERED"] = "1"
+    env["AUTOBOOST_SCENE_X264_PROGRESS"] = "1"
+    return env
+
 def set_settings_value(settings_path, key, value):
     """Set key=value in settings.txt, preserving the rest of the file."""
     key_l = key.lower()
@@ -28,6 +39,18 @@ def set_settings_value(settings_path, key, value):
         lines.append(f"{key}={value}")
     with open(settings_path, "w", encoding="utf-8", newline="\r\n") as f:
         f.write("\n".join(lines) + "\n")
+
+def svt_fork_display_name(fork):
+    fork_key = (fork or "essential").strip().lower()
+    if fork_key in ("svt-av1-essential", "essential"):
+        return "Essential"
+    if fork_key in ("svt-av1-hdr", "hdr"):
+        return "HDR"
+    if fork_key in ("5fish", "svt-av1-psy", "psy"):
+        return "psy 5fish"
+    if fork_key == "custom":
+        return "custom"
+    return (fork or "essential").strip() or "Essential"
 
 WINDOWS_MAX_PATH = 260
 
@@ -91,7 +114,6 @@ def warn_and_pause_if_paths_too_long(input_files, video_output_dir, temp_dir):
                 seen.add(path)
                 unique_long_paths.append(path)
         pause_for_long_paths(unique_long_paths)
-
 
 def main():
     # --- Configuration ---
@@ -245,7 +267,7 @@ def main():
                     "-o", json_file 
                 ]
                 try:
-                    subprocess.check_call(cmd_scene, cwd=temp_dir)
+                    subprocess.check_call(cmd_scene, cwd=temp_dir, env=scene_detection_env())
                 except subprocess.CalledProcessError:
                     print("[Dispatch] Scene detection failed.")
             
@@ -325,6 +347,7 @@ def main():
             
             print(f"[Dispatch] Processing {filename}...")
             print("[Dispatch] Starting Encoding...")
+            print(f"svt-av1 fork: {svt_fork_display_name(selected_fork)}")
             try:
                 with keep.running():
                     subprocess.check_call(final_cmd, cwd=temp_dir)
