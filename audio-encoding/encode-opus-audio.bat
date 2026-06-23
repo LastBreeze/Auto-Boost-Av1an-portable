@@ -22,7 +22,7 @@ SET "PORTABLE_ROOT=%~dp0.."
 SET "PYTHON_EXE=%PORTABLE_ROOT%\VapourSynth\python.exe"
 
 REM Script is located in the 'tools' folder
-SET "OPUS_SCRIPT=%PORTABLE_ROOT%\tools\opus.py"
+SET "OPUS_SCRIPT=%PORTABLE_ROOT%\tools\audio-opus.py"
 
 REM Check if tools exist
 if not exist "%PYTHON_EXE%" (
@@ -35,7 +35,7 @@ if not exist "%PYTHON_EXE%" (
 )
 
 if not exist "%OPUS_SCRIPT%" (
-    echo [ERROR] Could not find opus.py at:
+    echo [ERROR] Could not find audio-opus.py at:
     echo %OPUS_SCRIPT%
     pause
     exit /b

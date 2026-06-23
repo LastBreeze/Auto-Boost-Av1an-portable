@@ -28,7 +28,7 @@ stop_display = threading.Event()
 re_ffmpeg = re.compile(r"time=\s*(\S+).*bitrate=\s*(\S+).*speed=\s*(\S+)")
 
 # --- PATH SETUP (Relative to this script) ---
-# Location: Auto-Boost-Av1an-portable/tools/ac3.py
+# Location: Auto-Boost-Av1an-portable/tools/audio-eac3.py
 SCRIPT_DIR = Path(__file__).resolve().parent
 ROOT_DIR = SCRIPT_DIR.parent 
 
@@ -39,7 +39,7 @@ MKVMERGE_EXE = MKV_DIR / "mkvmerge.exe"
 MKVEXTRACT_EXE = MKV_DIR / "mkvextract.exe"
 
 # Settings file is now in 'audio-encoding', NOT 'extras'
-SETTINGS_FILE = ROOT_DIR / "audio-encoding" / "settings-encode-ac3-audio.txt"
+SETTINGS_FILE = ROOT_DIR / "audio-encoding" / "settings-encode-eac3-audio.txt"
 
 # Add MKVToolNix to PATH
 os.environ["PATH"] += os.pathsep + str(MKV_DIR)
@@ -147,12 +147,12 @@ def smart_truncate(text, max_len=55):
 
 def get_user_choice():
     print("\n" + "="*50)
-    print("      AC3 AUDIO ENCODER - SELECTION MENU")
+    print("      EAC3 AUDIO ENCODER - SELECTION MENU")
     print("="*50)
-    print("1. Encode ONLY Lossless audio to AC3 (Recommended)")
+    print("1. Encode ONLY Lossless audio to EAC3 (Recommended)")
     print("   (Processing: FLAC, PCM/WAV, TrueHD, DTS-HD)")
-    print("   (Preserves: EAC3, AAC, DTS Core, Vorbis as-is)")
-    print("\n2. Encode ALL audio tracks to AC3")
+    print("   (Preserves: AC3, AAC, DTS Core, Vorbis as-is)")
+    print("\n2. Encode ALL audio tracks to EAC3")
     print("   (Warning: Causes generational loss on AC3/AAC/DTS)")
     print("="*50)
     
@@ -162,6 +162,23 @@ def get_user_choice():
             return 1
         elif choice == '2':
             return 2
+        print("Invalid input. Please enter 1 or 2.")
+
+def get_encoded_track_title_choice():
+    print("\nUntouched audio tracks will carryover track titles.")
+    print("For newly encoded audio tracks, you can copy over the original track titles")
+    print("or leave newly encoded audio tracks without track titles.")
+    print("You can use JMkvpropedit to edit multiple track titles across MKV files")
+    print("after audio encoding is complete.")
+    print("\nCopy original track titles to newly encoded audio tracks?")
+    print("1: Yes")
+    print("2: No")
+    while True:
+        choice = input("\nEnter your choice (1 or 2): ").strip()
+        if choice == "1":
+            return True
+        if choice == "2":
+            return False
         print("Invalid input. Please enter 1 or 2.")
 
 # --- PHASE 1: EXTRACTION ---
@@ -280,17 +297,17 @@ def get_audio_channels(filepath):
 
     return "2"
 
-def worker_ac3(slot_id):
+def worker_eac3(slot_id):
     while True:
         try:
             input_file = files_queue.get_nowait()
         except queue.Empty:
             break
         
-        output_file = input_file.with_suffix('.ac3')
+        output_file = input_file.with_suffix('.eac3')
         fname = smart_truncate(input_file.name)
         
-        slot_status[slot_id] = f"{slot_id+1}: [AC3] {fname}.. Probing"
+        slot_status[slot_id] = f"{slot_id+1}: [EAC3] {fname}.. Probing"
         channels = get_audio_channels(input_file)
         
         bitrate_val = BITRATE_SETTINGS.get("2.0", "224") # Default
@@ -315,7 +332,7 @@ def worker_ac3(slot_id):
             if str(ch_int) in channel_map:
                 display_ch = f"{channel_map[str(ch_int)]}ch"
 
-            # Improved Bitrate Logic (AC3)
+            # Improved Bitrate Logic (EAC3)
             if ch_int > 6:
                 bitrate_val = BITRATE_SETTINGS.get("Above 5.1", "640")
             elif ch_int >= 6:
@@ -329,21 +346,21 @@ def worker_ac3(slot_id):
             pass
         
         bitrate_str = f"{bitrate_val}k"
-        
+
         # FFMPEG Command Setup
-        cmd = [FFMPEG_EXE, '-y', '-i', str(input_file), '-c:a', 'ac3', 
+        cmd = [FFMPEG_EXE, '-y', '-i', str(input_file), '-c:a', 'eac3', 
                '-b:a', bitrate_str]
         
         status_suffix = ""
-        
+
         # Mono -> Stereo Upmix Ability
         if channels == "1":
             cmd.extend(['-ac', '2'])
             status_suffix = " (Mono->Stereo)"
-        
+
         cmd.append(str(output_file))
 
-        slot_status[slot_id] = f"{slot_id+1}: [AC3] {fname}.. Init ({display_ch} @ {bitrate_str}){status_suffix}"
+        slot_status[slot_id] = f"{slot_id+1}: [EAC3] {fname}.. Init ({display_ch} @ {bitrate_str}){status_suffix}"
         
         try:
             proc = subprocess.Popen(
@@ -362,7 +379,7 @@ def worker_ac3(slot_id):
                     match = re_ffmpeg.search(chunk)
                     if match:
                         t, b, s = match.groups()
-                        slot_status[slot_id] = f"{slot_id+1}: [AC3] {fname}.. T:{t} Spd:{s}{status_suffix}"
+                        slot_status[slot_id] = f"{slot_id+1}: [EAC3] {fname}.. T:{t} Spd:{s}{status_suffix}"
         except Exception as e:
              slot_status[slot_id] = f"{slot_id+1}: [Err] {str(e)[:20]}"
              continue
@@ -425,9 +442,9 @@ def get_track_delay_ms(mkv_path, track_id):
             
     return delay
 
-def mux_final_files():
+def mux_final_files(copy_titles_for_encoded):
     current_dir = Path.cwd()
-    output_dir = current_dir / "ac3-output"
+    output_dir = current_dir / "eac3-output"
     output_dir.mkdir(exist_ok=True)
 
     print(f"\n--- Starting Muxing Phase ---")
@@ -448,10 +465,10 @@ def mux_final_files():
                 ext = match.group(3).lower()
                 
                 if t_num not in track_candidates:
-                    track_candidates[t_num] = {'lang': lang, 'ac3': None, 'orig': None}
+                    track_candidates[t_num] = {'lang': lang, 'eac3': None, 'orig': None}
                 
-                if ext == 'ac3':
-                    track_candidates[t_num]['ac3'] = f
+                if ext == 'eac3':
+                    track_candidates[t_num]['eac3'] = f
                 else:
                     track_candidates[t_num]['orig'] = f
 
@@ -463,14 +480,19 @@ def mux_final_files():
         print(f"Muxing: {mkv_path.name}")
 
         subtitle_flags = []
+        audio_track_titles = {}
         try:
             cmd = [MKVMERGE_EXE, "-J", str(mkv_path)]
             res = run_command(cmd, capture_output=True)
             file_info = json.loads(res)
             for track in file_info.get("tracks", []):
+                tid = track.get("id")
                 if track.get("type") == "subtitles":
-                    tid = track.get("id")
                     subtitle_flags.extend(["--compression", f"{tid}:zlib"])
+                elif track.get("type") == "audio":
+                    props = track.get("properties", {})
+                    original_title = props.get("track_name") or props.get("name") or ""
+                    audio_track_titles[tid] = original_title
         except:
             pass
 
@@ -485,14 +507,13 @@ def mux_final_files():
             cand = track_candidates[tid]
             lang = cand['lang']
             
-            final_path = cand['ac3'] if cand['ac3'] else cand['orig']
+            final_path = cand['eac3'] if cand['eac3'] else cand['orig']
             
             if not final_path: continue
 
-            title = get_track_title_string(lang)
-            title_flag = title if title else lang
-            
-            is_ac3 = (final_path.suffix == '.ac3')
+            original_title = audio_track_titles.get(tid, "")
+            is_eac3 = bool(cand['eac3'] and cand['orig'])
+            title_flag = original_title if (not is_eac3 or copy_titles_for_encoded) else ""
             
             delay_ms = get_track_delay_ms(mkv_path, tid)
             delay_str = ""
@@ -500,28 +521,29 @@ def mux_final_files():
                 delay_str = f" [Delay: {delay_ms}ms]"
                 cmd.extend(["--sync", f"0:{delay_ms}"])
 
-            display_str = "AC3" if is_ac3 else f"Original ({final_path.suffix})"
+            display_str = "EAC3" if is_eac3 else f"Original ({final_path.suffix})"
             
-            print(f"  + Track {tid}: {title_flag} [{display_str}]{delay_str}")
+            title_display = title_flag if title_flag else "(no track title)"
+            print(f"  + Track {tid}: {title_display} [{display_str}]{delay_str}")
             
-            cmd.extend([
-                "--language", f"0:{lang}",
-                "--track-name", f"0:{title_flag}",
-                str(final_path)
-            ])
+            cmd.extend(["--language", f"0:{lang}"])
+            if title_flag:
+                cmd.extend(["--track-name", f"0:{title_flag}"])
+            cmd.append(str(final_path))
         
         if run_with_progress(cmd):
             files_processed += 1
         else:
             print("  > Error during muxing (check logs).")
 
-    print(f"\nAll done. Processed {files_processed} videos into 'ac3-output'.")
+    print(f"\nAll done. Processed {files_processed} videos into 'eac3-output'.")
 
 # --- MAIN ENTRY ---
 
 def main():
     try:
         mode = get_user_choice()
+        copy_titles_for_encoded = get_encoded_track_title_choice()
         
         extracted = extract_tracks()
         
@@ -534,19 +556,19 @@ def main():
                 if f.suffix in LOSSLESS_EXTS:
                     to_encode_candidates.append(f)
 
-        to_ac3 = []
+        to_eac3 = []
         
-        print("\nPreparing files for AC3 conversion...")
+        print("\nPreparing files for EAC3 conversion...")
         for f in to_encode_candidates:
-            if f.suffix == '.ac3':
+            if f.suffix == '.eac3':
                 pass 
             else:
-                to_ac3.append(f)
+                to_eac3.append(f)
         
-        if to_ac3:
-            run_phase(to_ac3, worker_ac3, "Encoding to AC3")
+        if to_eac3:
+            run_phase(to_eac3, worker_eac3, "Encoding to EAC3")
 
-        mux_final_files()
+        mux_final_files(copy_titles_for_encoded)
         
     except KeyboardInterrupt:
         print("\n\nProcess interrupted by user. Exiting safely.")

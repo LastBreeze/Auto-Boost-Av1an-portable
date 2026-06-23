@@ -22,7 +22,7 @@ SET "PORTABLE_ROOT=%~dp0.."
 SET "PYTHON_EXE=%PORTABLE_ROOT%\VapourSynth\python.exe"
 
 REM Script is located in the 'tools' folder
-SET "EAC3_SCRIPT=%PORTABLE_ROOT%\tools\eac3.py"
+SET "EAC3_SCRIPT=%PORTABLE_ROOT%\tools\audio-eac3.py"
 
 REM Check if tools exist
 if not exist "%PYTHON_EXE%" (
@@ -35,7 +35,7 @@ if not exist "%PYTHON_EXE%" (
 )
 
 if not exist "%EAC3_SCRIPT%" (
-    echo [ERROR] Could not find eac3.py at:
+    echo [ERROR] Could not find audio-eac3.py at:
     echo %EAC3_SCRIPT%
     pause
     exit /b

@@ -27,19 +27,25 @@ stop_display = threading.Event()
 # Regex for FFMPEG progress parsing
 re_ffmpeg = re.compile(r"time=\s*(\S+).*bitrate=\s*(\S+).*speed=\s*(\S+)")
 
+# Regex for OPUSENC progress parsing
+# Matches "99%" or " 9%" at the end of the string or surrounded by spaces/brackets
+re_opus_pct = re.compile(r"(\d+)%")
+
 # --- PATH SETUP (Relative to this script) ---
-# Location: Auto-Boost-Av1an-portable/tools/eac3.py
+# Location: Auto-Boost-Av1an-portable/tools/audio-opus.py
 SCRIPT_DIR = Path(__file__).resolve().parent
 ROOT_DIR = SCRIPT_DIR.parent 
 
+# TOOLS
 FFMPEG_EXE = ROOT_DIR / "tools" / "av1an" / "ffmpeg.exe"
-FFPROBE_EXE = ROOT_DIR / "tools" / "av1an" / "ffprobe.exe"
+FFPROBE_EXE = ROOT_DIR / "tools" / "av1an" / "ffprobe.exe" 
+OPUSENC_EXE = ROOT_DIR / "tools" / "opus" / "opusenc.exe"
 MKV_DIR = ROOT_DIR / "tools" / "MKVToolNix"
 MKVMERGE_EXE = MKV_DIR / "mkvmerge.exe"
 MKVEXTRACT_EXE = MKV_DIR / "mkvextract.exe"
 
 # Settings file is now in 'audio-encoding', NOT 'extras'
-SETTINGS_FILE = ROOT_DIR / "audio-encoding" / "settings-encode-eac3-audio.txt"
+SETTINGS_FILE = ROOT_DIR / "audio-encoding" / "settings-encode-opus-audio.txt"
 
 # Add MKVToolNix to PATH
 os.environ["PATH"] += os.pathsep + str(MKV_DIR)
@@ -49,10 +55,10 @@ os.environ["PATH"] += os.pathsep + str(MKV_DIR)
 def load_settings():
     """Reads the settings file for bitrates. Returns a dictionary with defaults if missing."""
     defaults = {
-        "Above 5.1": "640",
-        "5.1": "448",
-        "2.1": "320",
-        "2.0": "224"
+        "Above 5.1": "320",
+        "5.1": "256",
+        "2.1": "192",
+        "2.0": "128"
     }
     
     if not SETTINGS_FILE.exists():
@@ -93,7 +99,7 @@ def run_with_progress(cmd):
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
-            bufsize=1, 
+            bufsize=1, # Line buffered
             encoding='utf-8',
             errors='replace'
         )
@@ -114,7 +120,7 @@ def run_with_progress(cmd):
                 else:
                     current_line.append(char)
         
-        print() 
+        print() # Final newline to move past the progress bar
         return process.returncode == 0
     except Exception as e:
         print(f"    Error during execution: {e}")
@@ -147,12 +153,12 @@ def smart_truncate(text, max_len=55):
 
 def get_user_choice():
     print("\n" + "="*50)
-    print("      EAC3 AUDIO ENCODER - SELECTION MENU")
+    print("      OPUS AUDIO ENCODER - SELECTION MENU")
     print("="*50)
-    print("1. Encode ONLY Lossless audio to EAC3 (Recommended)")
+    print("1. Encode ONLY Lossless audio to Opus (Recommended)")
     print("   (Processing: FLAC, PCM/WAV, TrueHD, DTS-HD)")
     print("   (Preserves: AC3, AAC, DTS Core, Vorbis as-is)")
-    print("\n2. Encode ALL audio tracks to EAC3")
+    print("\n2. Encode ALL audio tracks to Opus")
     print("   (Warning: Causes generational loss on AC3/AAC/DTS)")
     print("="*50)
     
@@ -162,6 +168,23 @@ def get_user_choice():
             return 1
         elif choice == '2':
             return 2
+        print("Invalid input. Please enter 1 or 2.")
+
+def get_encoded_track_title_choice():
+    print("\nUntouched audio tracks will carryover track titles.")
+    print("For newly encoded audio tracks, you can copy over the original track titles")
+    print("or leave newly encoded audio tracks without track titles.")
+    print("You can use JMkvpropedit to edit multiple track titles across MKV files")
+    print("after audio encoding is complete.")
+    print("\nCopy original track titles to newly encoded audio tracks?")
+    print("1: Yes")
+    print("2: No")
+    while True:
+        choice = input("\nEnter your choice (1 or 2): ").strip()
+        if choice == "1":
+            return True
+        if choice == "2":
+            return False
         print("Invalid input. Please enter 1 or 2.")
 
 # --- PHASE 1: EXTRACTION ---
@@ -227,19 +250,24 @@ def extract_tracks():
 
 def display_loop():
     last_line_count = 0
-    sys.stdout.write("\n") 
+    sys.stdout.write("\n") # Initial spacer
 
     while not stop_display.is_set():
+        # 1. Filter for active threads
         active_slots = [s for s in slot_status if s != "Idle"]
         current_line_count = len(active_slots)
 
+        # 2. Move cursor up to start of the previous block
         if last_line_count > 0:
             sys.stdout.write(f"\033[{last_line_count}A")
         
+        # 3. Print current active slots (Overwrite mode)
         for line in active_slots:
+            # Cut at 110 chars to prevent wrap, \r to start, \033[K to clear rest of line
             clean_line = line[:110]
             sys.stdout.write(f"\r{clean_line}\033[K\n")
         
+        # 4. If fewer lines than before, clear the remaining stale lines at the bottom
         if current_line_count < last_line_count:
             sys.stdout.write("\033[J")
 
@@ -247,6 +275,7 @@ def display_loop():
         sys.stdout.flush()
         time.sleep(0.1)
 
+    # Cleanup: clear the transient status lines one last time
     if last_line_count > 0:
         sys.stdout.write(f"\033[{last_line_count}A")
         sys.stdout.write("\033[J")
@@ -280,22 +309,75 @@ def get_audio_channels(filepath):
 
     return "2"
 
-def worker_eac3(slot_id):
+def worker_flac(slot_id):
     while True:
         try:
             input_file = files_queue.get_nowait()
         except queue.Empty:
             break
         
-        output_file = input_file.with_suffix('.eac3')
+        output_file = input_file.with_suffix('.flac')
         fname = smart_truncate(input_file.name)
         
-        slot_status[slot_id] = f"{slot_id+1}: [EAC3] {fname}.. Probing"
+        slot_status[slot_id] = f"{slot_id+1}: [FLAC] {fname}.. Checking"
+        
         channels = get_audio_channels(input_file)
         
-        bitrate_val = BITRATE_SETTINGS.get("2.0", "224") # Default
-        display_ch = f"{channels}ch"
+        cmd = [FFMPEG_EXE, '-y', '-i', str(input_file), '-c:a', 'flac', 
+               '-sample_fmt', 's16', '-compression_level', '0']
+        
+        status_suffix = ""
+        if channels == "1":
+            # Force Mono to Stereo conversion
+            cmd.extend(['-ac', '2'])
+            status_suffix = " (Mono->Stereo)"
+        
+        cmd.append(str(output_file))
+        
+        slot_status[slot_id] = f"{slot_id+1}: [FLAC] {fname}.. Start{status_suffix}"
 
+        try:
+            proc = subprocess.Popen(
+                [str(c) for c in cmd], 
+                stderr=subprocess.PIPE, 
+                stdout=subprocess.DEVNULL, 
+                text=True, 
+                bufsize=1, 
+                encoding='utf-8'
+            )
+            while True:
+                chunk = proc.stderr.read(256)
+                if not chunk and proc.poll() is not None:
+                    break
+                if chunk:
+                    match = re_ffmpeg.search(chunk)
+                    if match:
+                        t, b, s = match.groups()
+                        slot_status[slot_id] = f"{slot_id+1}: [FLAC] {fname}.. T:{t} Spd:{s}{status_suffix}"
+        except Exception as e:
+             slot_status[slot_id] = f"{slot_id+1}: [Err] {str(e)[:20]}"
+             continue
+
+        files_queue.task_done()
+    slot_status[slot_id] = "Idle"
+
+def worker_opus(slot_id):
+    while True:
+        try:
+            input_file = files_queue.get_nowait()
+        except queue.Empty:
+            break
+        
+        output_file = input_file.with_suffix('.opus')
+        fname = smart_truncate(input_file.name)
+        
+        slot_status[slot_id] = f"{slot_id+1}: [OPUS] {fname}.. Probing"
+        channels = get_audio_channels(input_file)
+        
+        # Default
+        bitrate = BITRATE_SETTINGS.get("2.0", "128")
+        display_ch = f"{channels}ch" 
+        
         # Map nice display names
         channel_map = {
             "1": "1.0",
@@ -314,55 +396,52 @@ def worker_eac3(slot_id):
             # Use mapped name if available
             if str(ch_int) in channel_map:
                 display_ch = f"{channel_map[str(ch_int)]}ch"
-
-            # Improved Bitrate Logic (EAC3)
+            
+            # --- Select Bitrate ---
             if ch_int > 6:
-                bitrate_val = BITRATE_SETTINGS.get("Above 5.1", "640")
+                bitrate = BITRATE_SETTINGS.get("Above 5.1", "320")
             elif ch_int >= 6:
-                bitrate_val = BITRATE_SETTINGS.get("5.1", "448")
-            elif ch_int >= 3:
-                # New 2.1 Capability
-                bitrate_val = BITRATE_SETTINGS.get("2.1", "320")
+                bitrate = BITRATE_SETTINGS.get("5.1", "256")
+            elif ch_int >= 3: 
+                bitrate = BITRATE_SETTINGS.get("2.1", "192")
             else:
-                bitrate_val = BITRATE_SETTINGS.get("2.0", "224")
+                bitrate = BITRATE_SETTINGS.get("2.0", "128")
+                
         except:
             pass
         
-        bitrate_str = f"{bitrate_val}k"
+        slot_status[slot_id] = f"{slot_id+1}: [OPUS] {fname}.. Init ({display_ch} @ {bitrate}k)"
 
-        # FFMPEG Command Setup
-        cmd = [FFMPEG_EXE, '-y', '-i', str(input_file), '-c:a', 'eac3', 
-               '-b:a', bitrate_str]
-        
-        status_suffix = ""
-
-        # Mono -> Stereo Upmix Ability
-        if channels == "1":
-            cmd.extend(['-ac', '2'])
-            status_suffix = " (Mono->Stereo)"
-
-        cmd.append(str(output_file))
-
-        slot_status[slot_id] = f"{slot_id+1}: [EAC3] {fname}.. Init ({display_ch} @ {bitrate_str}){status_suffix}"
+        cmd = [OPUSENC_EXE, '--bitrate', bitrate, str(input_file), str(output_file)]
         
         try:
             proc = subprocess.Popen(
                 [str(c) for c in cmd], 
+                stdout=subprocess.PIPE, 
                 stderr=subprocess.PIPE, 
-                stdout=subprocess.DEVNULL, 
                 text=True, 
                 bufsize=1, 
                 encoding='utf-8'
             )
+            
+            # --- IMPROVED READER LOOP ---
+            # We read byte-by-byte or in small chunks, effectively looking for the carriage return updates.
+            # However, opusenc updates purely with \r. Reading large chunks is fine if we search via regex.
+            # Using a larger buffer (64) prevents "splitting" the digit from the % sign.
+            
             while True:
-                chunk = proc.stderr.read(256)
+                chunk = proc.stderr.read(64) 
                 if not chunk and proc.poll() is not None:
                     break
+                
                 if chunk:
-                    match = re_ffmpeg.search(chunk)
-                    if match:
-                        t, b, s = match.groups()
-                        slot_status[slot_id] = f"{slot_id+1}: [EAC3] {fname}.. T:{t} Spd:{s}{status_suffix}"
+                    # Find ALL matches in the chunk, use the LAST one found.
+                    # This helps if the buffer contains "10% \r 11%"
+                    matches = re_opus_pct.findall(chunk)
+                    if matches:
+                        pct = matches[-1] # Take the most recent one
+                        slot_status[slot_id] = f"{slot_id+1}: [OPUS] {fname}.. {pct}% ({display_ch})"
+                        
         except Exception as e:
              slot_status[slot_id] = f"{slot_id+1}: [Err] {str(e)[:20]}"
              continue
@@ -397,6 +476,10 @@ def run_phase(files, worker_func, name):
 # --- PHASE 4: MUXING ---
 
 def get_track_delay_ms(mkv_path, track_id):
+    """
+    Determines delay by extracting v2 timestamps for the track from the source file.
+    Reads the first timestamp line. Returns 0 if none found.
+    """
     temp_ts = Path(f"temp_delay_{mkv_path.stem}_{track_id}.txt")
     delay = 0
     try:
@@ -425,9 +508,9 @@ def get_track_delay_ms(mkv_path, track_id):
             
     return delay
 
-def mux_final_files():
+def mux_final_files(copy_titles_for_encoded):
     current_dir = Path.cwd()
-    output_dir = current_dir / "eac3-output"
+    output_dir = current_dir / "opus-output"
     output_dir.mkdir(exist_ok=True)
 
     print(f"\n--- Starting Muxing Phase ---")
@@ -448,10 +531,10 @@ def mux_final_files():
                 ext = match.group(3).lower()
                 
                 if t_num not in track_candidates:
-                    track_candidates[t_num] = {'lang': lang, 'eac3': None, 'orig': None}
+                    track_candidates[t_num] = {'lang': lang, 'opus': None, 'orig': None}
                 
-                if ext == 'eac3':
-                    track_candidates[t_num]['eac3'] = f
+                if ext == 'opus':
+                    track_candidates[t_num]['opus'] = f
                 else:
                     track_candidates[t_num]['orig'] = f
 
@@ -463,14 +546,19 @@ def mux_final_files():
         print(f"Muxing: {mkv_path.name}")
 
         subtitle_flags = []
+        audio_track_titles = {}
         try:
             cmd = [MKVMERGE_EXE, "-J", str(mkv_path)]
             res = run_command(cmd, capture_output=True)
             file_info = json.loads(res)
             for track in file_info.get("tracks", []):
+                tid = track.get("id")
                 if track.get("type") == "subtitles":
-                    tid = track.get("id")
                     subtitle_flags.extend(["--compression", f"{tid}:zlib"])
+                elif track.get("type") == "audio":
+                    props = track.get("properties", {})
+                    original_title = props.get("track_name") or props.get("name") or ""
+                    audio_track_titles[tid] = original_title
         except:
             pass
 
@@ -485,14 +573,13 @@ def mux_final_files():
             cand = track_candidates[tid]
             lang = cand['lang']
             
-            final_path = cand['eac3'] if cand['eac3'] else cand['orig']
+            final_path = cand['opus'] if cand['opus'] else cand['orig']
             
             if not final_path: continue
 
-            title = get_track_title_string(lang)
-            title_flag = title if title else lang
-            
-            is_eac3 = (final_path.suffix == '.eac3')
+            original_title = audio_track_titles.get(tid, "")
+            is_opus = bool(cand['opus'] and cand['orig'])
+            title_flag = original_title if (not is_opus or copy_titles_for_encoded) else ""
             
             delay_ms = get_track_delay_ms(mkv_path, tid)
             delay_str = ""
@@ -500,28 +587,29 @@ def mux_final_files():
                 delay_str = f" [Delay: {delay_ms}ms]"
                 cmd.extend(["--sync", f"0:{delay_ms}"])
 
-            display_str = "EAC3" if is_eac3 else f"Original ({final_path.suffix})"
+            display_str = "Opus" if is_opus else f"Original ({final_path.suffix})"
             
-            print(f"  + Track {tid}: {title_flag} [{display_str}]{delay_str}")
+            title_display = title_flag if title_flag else "(no track title)"
+            print(f"  + Track {tid}: {title_display} [{display_str}]{delay_str}")
             
-            cmd.extend([
-                "--language", f"0:{lang}",
-                "--track-name", f"0:{title_flag}",
-                str(final_path)
-            ])
+            cmd.extend(["--language", f"0:{lang}"])
+            if title_flag:
+                cmd.extend(["--track-name", f"0:{title_flag}"])
+            cmd.append(str(final_path))
         
         if run_with_progress(cmd):
             files_processed += 1
         else:
             print("  > Error during muxing (check logs).")
 
-    print(f"\nAll done. Processed {files_processed} videos into 'eac3-output'.")
+    print(f"\nAll done. Processed {files_processed} videos into 'opus-output'.")
 
 # --- MAIN ENTRY ---
 
 def main():
     try:
         mode = get_user_choice()
+        copy_titles_for_encoded = get_encoded_track_title_choice()
         
         extracted = extract_tracks()
         
@@ -534,19 +622,32 @@ def main():
                 if f.suffix in LOSSLESS_EXTS:
                     to_encode_candidates.append(f)
 
-        to_eac3 = []
+        to_flac = []
+        to_opus = []
         
-        print("\nPreparing files for EAC3 conversion...")
+        print("\nAnalyzing audio channels for processing logic...")
         for f in to_encode_candidates:
-            if f.suffix == '.eac3':
+            channels = get_audio_channels(f)
+            
+            if channels == "1":
+                to_flac.append(f) 
+            elif f.suffix == '.flac':
+                to_opus.append(f)
+            elif f.suffix == '.opus':
                 pass 
             else:
-                to_eac3.append(f)
+                to_flac.append(f)
         
-        if to_eac3:
-            run_phase(to_eac3, worker_eac3, "Encoding to EAC3")
+        if to_flac:
+            run_phase(to_flac, worker_flac, "Converting to Intermediate FLAC (and Upmixing Mono)")
+            for f in to_flac:
+                to_opus.append(f.with_suffix('.flac'))
+        
+        if to_opus:
+            valid_opus_inputs = [f for f in to_opus if f.exists()]
+            run_phase(valid_opus_inputs, worker_opus, "Encoding to Opus")
 
-        mux_final_files()
+        mux_final_files(copy_titles_for_encoded)
         
     except KeyboardInterrupt:
         print("\n\nProcess interrupted by user. Exiting safely.")
