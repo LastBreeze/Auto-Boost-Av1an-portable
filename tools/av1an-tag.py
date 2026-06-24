@@ -192,7 +192,7 @@ def main():
     # Format: Auto-Boost-Av1an [Version] [Flags] SVT_AV1_Version... settings: "..."
     
     # 1. Prefix
-    info_parts = [f"Auto-Boost-Av1an {script_version}"]
+    info_parts = [f"Auto-Boost-Av1an {script_version} Single Pass"]
     
     # 2. Photon Noise (if > 0)
     if config["PHOTON_NOISE"] and config["PHOTON_NOISE"] != "0":
