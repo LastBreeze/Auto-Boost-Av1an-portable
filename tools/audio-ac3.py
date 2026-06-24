@@ -481,6 +481,7 @@ def mux_final_files(copy_titles_for_encoded):
 
         subtitle_flags = []
         audio_track_titles = {}
+        audio_default_flags = {}
         try:
             cmd = [MKVMERGE_EXE, "-J", str(mkv_path)]
             res = run_command(cmd, capture_output=True)
@@ -493,6 +494,8 @@ def mux_final_files(copy_titles_for_encoded):
                     props = track.get("properties", {})
                     original_title = props.get("track_name") or props.get("name") or ""
                     audio_track_titles[tid] = original_title
+                    original_default = props.get("default_track", props.get("flag_default", False))
+                    audio_default_flags[tid] = "yes" if bool(original_default) else "no"
         except:
             pass
 
@@ -523,10 +526,12 @@ def mux_final_files(copy_titles_for_encoded):
 
             display_str = "AC3" if is_ac3 else f"Original ({final_path.suffix})"
             
+            default_flag = audio_default_flags.get(tid, "no")
             title_display = title_flag if title_flag else "(no track title)"
-            print(f"  + Track {tid}: {title_display} [{display_str}]{delay_str}")
+            print(f"  + Track {tid}: {title_display} [{display_str}] [Default: {default_flag}]{delay_str}")
             
             cmd.extend(["--language", f"0:{lang}"])
+            cmd.extend(["--default-track-flag", f"0:{default_flag}"])
             if title_flag:
                 cmd.extend(["--track-name", f"0:{title_flag}"])
             cmd.append(str(final_path))
