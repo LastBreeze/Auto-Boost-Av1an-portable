@@ -130,51 +130,60 @@ def obscure_user_path(text: str) -> str:
 # ----------------------
 
 # --- SETTINGS PARSER ---
-def get_script_setting(key_name: str, default_value: str) -> str:
-    """
-    Parses settings.txt from the script's directory (or current dir) for specific keys.
-    Does not rely on line numbers, searches for 'key=value'.
-    """
-    # Look for settings.txt in same folder as script
-    script_dir = Path(__file__).parent.resolve()
-    settings_path = script_dir / "settings.txt"
-    
-    if not settings_path.exists():
-        # Fallback to current working directory
-        settings_path = Path.cwd() / "settings.txt"
-    
-    if not settings_path.exists():
-        return default_value
+def find_settings_path() -> Path | None:
+    """Find settings.txt using the existing script-dir then cwd lookup order."""
+    script_settings_path = Path(__file__).parent.resolve() / "settings.txt"
+    if script_settings_path.exists():
+        return script_settings_path
 
+    cwd_settings_path = Path.cwd() / "settings.txt"
+    if cwd_settings_path.exists():
+        return cwd_settings_path
+
+    return None
+
+
+def load_script_settings() -> dict[str, str]:
+    """Read settings.txt once into a case-insensitive key/value dict."""
+    settings_path = find_settings_path()
+    if settings_path is None:
+        return {}
+
+    settings = {}
     try:
         with open(settings_path, "r", encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
-                # Skip comments
-                if line.startswith("#") or line.startswith(";"):
+                if not line or line.startswith(("#", ";", "[")) or "=" not in line:
                     continue
-                if "=" in line:
-                    k, v = line.split("=", 1)
-                    if k.strip().lower() == key_name.lower():
-                        return v.strip()
+                key, value = line.split("=", 1)
+                settings[key.strip().lower()] = value.strip()
     except Exception:
         pass
-        
-    return default_value
+
+    return settings
+
+
+def get_script_setting(settings: dict[str, str], key_name: str, default_value: str) -> str:
+    """Return a setting from a dict loaded by load_script_settings()."""
+    return settings.get(key_name.lower(), default_value)
+
+
+script_settings = load_script_settings()
 
 # Load Settings
-s_crop_mode = get_script_setting("crop", "auto")
-s_crop_top = get_script_setting("top", "0")
-s_crop_bottom = get_script_setting("bottom", "0")
-s_crop_left = get_script_setting("left", "0")
-s_crop_right = get_script_setting("right", "0")
-s_downscale = get_script_setting("downscale", "False")
-s_target_res = get_script_setting("target_resolution", "1920x1080")
-s_kernel = get_script_setting("kernel_type", "Hermite")
-s_denoise = get_script_setting("denoise", "False")
-s_denoise_setting = get_script_setting("denoise_setting", "")
-s_deband = get_script_setting("deband", "False")
-s_deband_setting = get_script_setting("deband_setting", "")
+s_crop_mode = get_script_setting(script_settings, "crop", "auto")
+s_crop_top = get_script_setting(script_settings, "top", "0")
+s_crop_bottom = get_script_setting(script_settings, "bottom", "0")
+s_crop_left = get_script_setting(script_settings, "left", "0")
+s_crop_right = get_script_setting(script_settings, "right", "0")
+s_downscale = get_script_setting(script_settings, "downscale", "False")
+s_target_res = get_script_setting(script_settings, "target_resolution", "1920x1080")
+s_kernel = get_script_setting(script_settings, "kernel_type", "Hermite")
+s_denoise = get_script_setting(script_settings, "denoise", "False")
+s_denoise_setting = get_script_setting(script_settings, "denoise_setting", "")
+s_deband = get_script_setting(script_settings, "deband", "False")
+s_deband_setting = get_script_setting(script_settings, "deband_setting", "")
 
 # Normalize boolean string
 do_downscale_bool = s_downscale.lower() == "true"

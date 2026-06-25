@@ -24,8 +24,20 @@ def scene_detection_env():
     env["AUTOBOOST_SCENE_X264_PROGRESS"] = "1"
     return env
 
+def parse_settings_lines(lines):
+    """Parse settings.txt lines into a case-insensitive key/value dict."""
+    settings = {}
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith(("#", ";", "[")) or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        settings[key.strip().lower()] = value.strip()
+    return settings
+
+
 def set_settings_value(settings_path, key, value):
-    """Set key=value in settings.txt, preserving the rest of the file."""
+    """Set key=value in settings.txt, preserving the rest of the file, and return parsed settings."""
     key_l = key.lower()
     lines = []
     found = False
@@ -45,6 +57,7 @@ def set_settings_value(settings_path, key, value):
         lines.append(f"{key}={value}")
     with open(settings_path, "w", encoding="utf-8", newline="\r\n") as f:
         f.write("\n".join(lines) + "\n")
+    return parse_settings_lines(lines)
 
 def svt_fork_display_name(fork):
     fork_key = (fork or "essential").strip().lower()
@@ -150,26 +163,24 @@ def sanitize_input_filenames(video_input_dir, extensions):
     return renamed
 
 
-def get_script_setting(settings_path, key_name, default_value):
-    """Read key=value from settings.txt, ignoring comments and section headers."""
+def load_script_settings(settings_path):
+    """Read settings.txt once into a case-insensitive key/value dict."""
     if not os.path.exists(settings_path):
-        return default_value
+        return {}
     try:
         with open(settings_path, "r", encoding="utf-8", errors="replace") as f:
-            for line in f:
-                line = line.strip()
-                if not line or line.startswith(("#", ";", "[")) or "=" not in line:
-                    continue
-                key, value = line.split("=", 1)
-                if key.strip().lower() == key_name.lower():
-                    return value.strip()
+            return parse_settings_lines(f.read().splitlines())
     except Exception:
-        pass
-    return default_value
+        return {}
 
 
-def setting_is_true(settings_path, key_name, default_value="False"):
-    return get_script_setting(settings_path, key_name, default_value).strip().lower() in ("1", "true", "yes", "y", "on")
+def get_script_setting(settings, key_name, default_value):
+    """Return a setting from a dict loaded by load_script_settings()."""
+    return settings.get(key_name.lower(), default_value)
+
+
+def setting_is_true(settings, key_name, default_value="False"):
+    return get_script_setting(settings, key_name, default_value).strip().lower() in ("1", "true", "yes", "y", "on")
 
 
 def read_crop_int(value, key_name):
@@ -304,24 +315,24 @@ def detect_crop_values(source_path, tools_dir):
     return top, bottom, left, right
 
 
-def build_vapoursynth_script(source_path, temp_dir, tools_dir, settings_path, autocrop, convert_yuv420p10=False):
+def build_vapoursynth_script(source_path, temp_dir, tools_dir, settings, autocrop, convert_yuv420p10=False):
     """Build the per-input .vpy script used as av1an input."""
     basename = Path(source_path).stem
     vpy_file = os.path.join(temp_dir, f"{basename}.vpy")
     cache_file = os.path.join(temp_dir, f"{basename}.ffindex")
 
-    s_crop_mode = get_script_setting(settings_path, "crop", "auto")
-    s_crop_top = get_script_setting(settings_path, "top", "0")
-    s_crop_bottom = get_script_setting(settings_path, "bottom", "0")
-    s_crop_left = get_script_setting(settings_path, "left", "0")
-    s_crop_right = get_script_setting(settings_path, "right", "0")
-    do_downscale = setting_is_true(settings_path, "downscale", "False")
-    target_res = get_script_setting(settings_path, "target_resolution", "1920x1080")
-    kernel = get_script_setting(settings_path, "kernel_type", "Hermite")
-    do_denoise = setting_is_true(settings_path, "denoise", "False")
-    denoise_setting = get_script_setting(settings_path, "denoise_setting", "")
-    do_deband = setting_is_true(settings_path, "deband", "False")
-    deband_setting = get_script_setting(settings_path, "deband_setting", "")
+    s_crop_mode = get_script_setting(settings, "crop", "auto")
+    s_crop_top = get_script_setting(settings, "top", "0")
+    s_crop_bottom = get_script_setting(settings, "bottom", "0")
+    s_crop_left = get_script_setting(settings, "left", "0")
+    s_crop_right = get_script_setting(settings, "right", "0")
+    do_downscale = setting_is_true(settings, "downscale", "False")
+    target_res = get_script_setting(settings, "target_resolution", "1920x1080")
+    kernel = get_script_setting(settings, "kernel_type", "Hermite")
+    do_denoise = setting_is_true(settings, "denoise", "False")
+    denoise_setting = get_script_setting(settings, "denoise_setting", "")
+    do_deband = setting_is_true(settings, "deband", "False")
+    deband_setting = get_script_setting(settings, "deband_setting", "")
 
     requested_crop_mode = s_crop_mode.strip().lower()
     if not autocrop:
@@ -540,12 +551,15 @@ def main():
             i += 1
 
     settings_path = os.path.join(root_dir, "settings.txt")
+    settings = None
     if denoise_setting is not None:
         try:
-            set_settings_value(settings_path, "denoise", denoise_setting)
+            settings = set_settings_value(settings_path, "denoise", denoise_setting)
             print(f"[Dispatch] Set settings.txt denoise={denoise_setting}")
         except Exception as e:
             print(f"[Dispatch] Warning: Failed to update settings.txt denoise: {e}")
+    if settings is None:
+        settings = load_script_settings(settings_path)
 
     setup_svt_av1_fork(tools_dir, selected_fork, avx512=avx512, verbose=True)
             
@@ -608,7 +622,7 @@ def main():
                 input_abspath_origin,
                 temp_dir,
                 tools_dir,
-                settings_path,
+                settings,
                 autocrop=autocrop,
                 convert_yuv420p10=convert_yuv420p10,
             )
