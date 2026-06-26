@@ -104,7 +104,7 @@ def main():
     print("Higher numbers = lower quality + smaller file size.\n")
     print("  Recommended starting points:")
     print("    20 -- Very high quality, large files")
-    print("    25 -- Good quality, medium files (most people use this range)")
+    print("    25 -- Good quality, medium files")
     print("    30 -- Lower quality, small files\n")
     print("If you are unsure, start with 30 and adjust from there.")
     print("You can always re-run this tool to generate a new script.\n")
@@ -194,7 +194,7 @@ def main():
     print("--luminance-qp-bias counteracts that by boosting quality in")
     print("those darker frames. How strong do you want that boost?\n")
     print("  30 -- Light: a gentle correction, minimal impact on file size")
-    print("  50 -- Balanced: solid improvement for most videos (recommended)")
+    print("  50 -- Balanced: solid improvement for most videos")
     print("  70 -- High detail: maximum shadow quality, best for dark/moody content\n")
     luminance_qp_bias = input("Enter luminance QP bias [30/50/70] (Press Enter for 30): ").strip()
     if luminance_qp_bias not in ("30", "50", "70"):
