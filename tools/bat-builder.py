@@ -77,8 +77,10 @@ def main():
         print("Some 5fish/essential SVT-AV1 builds have an AVX-512 optimized exe.")
         print("Only select Yes if you are sure your CPU supports AVX-512.")
         print("If you are not sure, press Enter for the default: No.\n")
-        avx_choice = input("Does your CPU support AVX-512? [Y/N] (Press Enter for No): ").strip().lower()
-        if avx_choice == "y":
+        print("  1: Yes -- Use the AVX-512 optimized encoder executable")
+        print("  2: No  -- Use the standard encoder executable\n")
+        avx_choice = input("Does your CPU support AVX-512? [1 Yes / 2 No] (Press Enter for No): ").strip()
+        if avx_choice == "1":
             avx512_flag = " --avx512"
 
     denoise_value = "True" if fork == "5fish" else "False"
@@ -182,6 +184,23 @@ def main():
     if not speed:
         speed = default_speed
 
+    # --- Dark Scene Quality Boost ---
+    print("\n--------------------------------------------------------")
+    print("Dark Scene Quality Boost")
+    print("--------------------------------------------------------")
+    print("By default, AV1 treats dark/low-light scenes as less important")
+    print("and gives them less detail. This can cause banding or")
+    print("blockiness in shadows and night scenes.")
+    print("--luminance-qp-bias counteracts that by boosting quality in")
+    print("those darker frames. How strong do you want that boost?\n")
+    print("  30 -- Light: a gentle correction, minimal impact on file size")
+    print("  50 -- Balanced: solid improvement for most videos (recommended)")
+    print("  70 -- High detail: maximum shadow quality, best for dark/moody content\n")
+    luminance_qp_bias = input("Enter luminance QP bias [30/50/70] (Press Enter for 30): ").strip()
+    if luminance_qp_bias not in ("30", "50", "70"):
+        luminance_qp_bias = "30"
+    luminance_param = f" --luminance-qp-bias {luminance_qp_bias}"
+
     # --- Build Parameter Strings ---
     fast_params = ""
     final_params = ""
@@ -189,20 +208,20 @@ def main():
     film_grain_note = ""
 
     if fork == "5fish":
-        fast_params = "--lineart-psy-bias 4 --texture-psy-bias 2 --hbd-mds 0 --keyint 305 --noise-level-thr 16000 --tune 0 --filtering-noise-detection 4"
-        final_params = "--lineart-psy-bias 4 --texture-psy-bias 2 --hbd-mds 1 --keyint 305 --noise-level-thr 16000 --tune 0 --filtering-noise-detection 4 --lp 3 --photon-noise 200"
+        fast_params = f"--lineart-psy-bias 4 --texture-psy-bias 2 --hbd-mds 0 --keyint 305 --noise-level-thr 16000 --tune 0 --filtering-noise-detection 4{luminance_param}"
+        final_params = f"--lineart-psy-bias 4 --texture-psy-bias 2 --hbd-mds 1 --keyint 305 --noise-level-thr 16000 --tune 0 --filtering-noise-detection 4{luminance_param} --lp 3 --photon-noise 200"
         has_rename = False
     elif fork == "essential":
-        fast_params = f"--scd 0 --enable-dlf 3{dist_preset}"
-        final_params = f"--scd 0 --enable-dlf 3 --photon-noise 200{dist_preset}"
+        fast_params = f"--scd 0 --enable-dlf 3{dist_preset}{luminance_param}"
+        final_params = f"--scd 0 --enable-dlf 3{dist_preset}{luminance_param} --lp 3 --photon-noise 200"
         film_grain_note = ":: If you'd like to use --film-grain, then --photon-noise must be set to 0, do not remove the setting.\n"
     elif fork == "hdr":
         # Keep base clean for HDR, apply tuning/noise based on user input
-        fast_params = "--tune 0" if "tune 0" in hdr_noise else "--tune 5"
-        final_params = f"{hdr_noise.strip()}"
+        fast_params = ("--tune 0" if "tune 0" in hdr_noise else "--tune 5") + luminance_param
+        final_params = f"{hdr_noise.strip()}{luminance_param} --lp 3 --photon-noise 200"
     elif fork == "custom":
-        fast_params = ""
-        final_params = ""
+        fast_params = luminance_param.strip()
+        final_params = f"{luminance_param.strip()} --lp 3 --photon-noise 200"
 
     # --- Auto Crop ---
     print("\n--------------------------------------------------------")
@@ -211,12 +230,12 @@ def main():
     print("Most movies and TV shows have black bars on the top and bottom")
     print("(letterboxing). Auto crop automatically detects and removes them,")
     print("which saves file space and avoids wasting encoding bits on black areas.\n")
-    print("  Y: Yes -- Automatically detect and crop black bars")
-    print("  N: No  -- Keep the video as-is, no cropping\n")
+    print("  1: Yes -- Automatically detect and crop black bars")
+    print("  2: No  -- Keep the video as-is, no cropping\n")
     print("Tip: If auto crop removes too much or too little, you can open")
     print("settings.txt in Notepad++ and switch to manual crop mode instead.\n")
-    autocrop_input = input("Enable auto crop? [Y/N] (Press Enter for No): ").strip().lower()
-    use_autocrop = autocrop_input in ("y", "yes")
+    autocrop_input = input("Enable auto crop? [1 Yes / 2 No] (Press Enter for No): ").strip()
+    use_autocrop = autocrop_input == "1"
 
     autocrop_flag = " --autocrop" if use_autocrop else ""
 
