@@ -190,7 +190,7 @@ def main():
     print("--------------------------------------------------------")
     print("By default, AV1 treats dark/low-light scenes as less important")
     print("and gives them less detail. This can cause banding or")
-    print("blockiness in shadows and night scenes.")
+    print("blocking or detail loss in shadows and night scenes.")
     print("--luminance-qp-bias counteracts that by boosting quality in")
     print("those darker frames. How strong do you want that boost?\n")
     print("  30 -- Light: a gentle correction, minimal impact on file size")
