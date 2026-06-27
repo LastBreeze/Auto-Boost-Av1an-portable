@@ -19,13 +19,6 @@ def enable_ansi_colors():
 def clear_screen():
     os.system('cls' if os.name == 'nt' else 'clear')
 
-def append_final_params_suffix(params):
-    params = params.strip()
-    suffix = " --lp 3"
-    if "--film-grain" not in params.split():
-        suffix += " --photon-noise 200"
-    return f"{params}{suffix}".strip()
-
 def main():
     enable_ansi_colors()
     clear_screen()
@@ -225,7 +218,7 @@ def main():
     elif fork == "hdr":
         # Keep base clean for HDR, apply tuning/noise based on user input
         fast_params = ("--tune 0" if "tune 0" in hdr_noise else "--tune 5") + luminance_param
-        final_params = append_final_params_suffix(f"{hdr_noise.strip()}{luminance_param}")
+        final_params = f"{hdr_noise.strip()}{luminance_param} --lp 3"
     elif fork == "custom":
         fast_params = luminance_param.strip()
         final_params = f"{luminance_param.strip()} --lp 3 --photon-noise 200"
