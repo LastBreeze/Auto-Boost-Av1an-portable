@@ -13,7 +13,7 @@ from pathlib import Path
 #   final_params = "--scd 0 --enable-dlf 3 --photon-noise 200"
 # For comparison runs only the selected grain/noise value changes.
 DEFAULT_PHOTON_LEVELS = [200, 400, 600, 800, 1000]
-DEFAULT_FILM_GRAIN_LEVELS = [2, 4, 6, 8, 10]
+DEFAULT_FILM_GRAIN_LEVELS = [6, 8, 10, 12, 14, 16]
 CRF = "30"
 PRESET = "8"
 WORKERS = "2"
@@ -239,7 +239,7 @@ def choose_test_mode_and_levels():
                 print("Please enter a valid photon-noise value or range, for example: 600-1600")
         if answer in {"2", "f", "film", "film-grain", "film grain"}:
             print("\nFilm-grain test selected.")
-            print("Five test files will be created for film-grain values: 2, 4, 6, 8, 10.")
+            print("Six test files will be created for film-grain values: 6, 8, 10, 12, 14, 16.")
             print("Or you can select a range, example: 6-16")
             print("Values above 20 could cause obvious patterns depending on source.")
             print('SVT-AV1 syntax example: "--film-grain 8"')
