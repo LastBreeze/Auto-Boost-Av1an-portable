@@ -508,17 +508,28 @@ def cleanup_generated_test_files(work_dir, encoded_files):
         shutil.rmtree(logs_dir, ignore_errors=True)
 
 
-def launch_vspreview(mkv_files, work_dir):
+def launch_vspreview(mkv_files, work_dir, source_clip=None):
     if not mkv_files:
         print("No encoded MKV files were created for preview.")
         return 1
 
+    preview_files = []
+    if source_clip is not None:
+        source_clip = Path(source_clip)
+        if source_clip.exists():
+            preview_files.append(source_clip)
+        else:
+            print(f"[VSPreview] Warning: 10 second source clip was not found: {source_clip.name}")
+    preview_files.extend(mkv_files)
+
     print("\nLaunching VSPreview directly; no extra vspreview.bat pause is needed.")
+    if source_clip is not None and source_clip in preview_files:
+        print(f"[VSPreview] Loading source test clip too: {source_clip.name}")
     repair_vspreview_storage()
     cleanup_preview(None, work_dir)
 
-    vpy_filename, script_content = create_vpy_script(mkv_files)
-    print(f"Generating script: {vpy_filename} for {len(mkv_files)} file(s)...")
+    vpy_filename, script_content = create_vpy_script(preview_files)
+    print(f"Generating script: {vpy_filename} for {len(preview_files)} file(s)...")
     with open(work_dir / vpy_filename, "w", encoding="utf-8") as f:
         f.write(script_content)
 
@@ -634,7 +645,7 @@ def main():
     if args.no_preview:
         print("Skipping VSPreview because --no-preview was passed.")
         return 0
-    return launch_vspreview(encoded_files, work_dir)
+    return launch_vspreview(encoded_files, work_dir, clip_file)
 
 
 if __name__ == "__main__":
