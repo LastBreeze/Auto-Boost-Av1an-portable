@@ -165,9 +165,9 @@ def main():
     print("Faster speeds = quicker encode, but slightly less efficient.\n")
 
     if fork == "hdr":
-        print("  Recommended speeds for the HDR fork:")
+        print("  Recommended speeds for the SVT-AV1-HDR fork:")
         print("  0 -- Slowest. Best possible quality. Use if you have time.")
-        print("  2 -- DEFAULT. Ideal balance of quality and speed for HDR.")
+        print("  2 -- DEFAULT. Ideal balance of quality and speed for SVT-AV1-HDR.")
         print("       Highly recommended -- preserves grain and detail well.")
         print("  4 -- Faster. Minimum recommended speed. Only use if your")
         print("       CPU is too slow for preset 2.\n")
@@ -197,12 +197,12 @@ def main():
     print("blocking or detail loss in shadows and night scenes.")
     print("--luminance-qp-bias counteracts that by boosting quality in")
     print("those darker frames. How strong do you want that boost?\n")
-    print("  30 -- Light: a gentle correction, minimal impact on file size")
-    print("  50 -- Balanced: solid improvement for most videos")
-    print("  70 -- High detail: maximum shadow quality, best for dark/moody content\n")
-    luminance_qp_bias = input("Enter luminance QP bias [30/50/70] (Press Enter for 30): ").strip()
-    if luminance_qp_bias not in ("30", "50", "70"):
-        luminance_qp_bias = "30"
+    print("  20 -- Light: a gentle correction, minimal impact on file size, start here")
+    print("  40 -- Balanced: solid improvement for most videos")
+    print("  60 -- Higher detail: more significant boosting for dark scenes, higher impact on file size\n")
+    luminance_qp_bias = input("Enter luminance QP bias [30/50/70] (Press Enter for 20): ").strip()
+    if luminance_qp_bias not in ("20", "40", "60"):
+        luminance_qp_bias = "20"
     luminance_param = f" --luminance-qp-bias {luminance_qp_bias}"
 
     # --- Build Parameter Strings ---

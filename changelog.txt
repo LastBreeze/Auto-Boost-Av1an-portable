@@ -1,11 +1,17 @@
 Changelog
 
+v2.26
+---------------------------------
+• Update vs-zip to 19.0.0
+• Adjust svt-av1 setting defaults for bat builder, add --luminance-qp-bias to address bit starving
+  in dark scenes
+• Adjust defaults for extras\photon-film-grain-test.bat
+
 v2.25
 ---------------------------------
-• Added JMkvpropedit for editing MKV track titles/properties without remuxing
-• Reworked photon/film-grain testing: auto-detects source MKV, creates a 10-second mkvmerge sample, supports custom photon-noise/film-grain ranges, launches VSPreview directly, and cleans up temp files/logs
-• Renamed audio helper scripts to audio-ac3.py, audio-opus.py, and audio-eac3.py and updated audio-encoding launchers
-• Audio encoding scripts now preserve untouched track titles and optionally copy original titles to newly encoded tracks via a 1: Yes / 2: No prompt
+• Added extras\JMkvpropedit, can be used to edit mkv track titles/properties without remuxing
+• Photon-film-grain-test.bat can now perform photon-noise or film-grain testing with custom ranges
+• Audio encoding scripts will now optionally carryover track titles
 
 v2.24
 ---------------------------------
