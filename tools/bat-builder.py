@@ -200,7 +200,7 @@ def main():
     print("  20 -- Light: a gentle correction, minimal impact on file size, start here")
     print("  40 -- Balanced: solid improvement for most videos")
     print("  60 -- Higher detail: more significant boosting for dark scenes, higher impact on file size\n")
-    luminance_qp_bias = input("Enter luminance QP bias [30/50/70] (Press Enter for 20): ").strip()
+    luminance_qp_bias = input("Enter luminance QP bias (Press Enter for 20): ").strip()
     if luminance_qp_bias not in ("20", "40", "60"):
         luminance_qp_bias = "20"
     luminance_param = f" --luminance-qp-bias {luminance_qp_bias}"
