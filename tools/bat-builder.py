@@ -114,6 +114,7 @@ def main():
 
     # --- 4. Special Parameters based on Fork ---
     dist_preset = ""
+    dist_filename_suffix = ""
     if fork == "essential":
         print("\n--------------------------------------------------------")
         print("STEP 4 OF 5: Fidelity / Detail Preservation (essential fork)")
@@ -130,7 +131,10 @@ def main():
         print("Tip: Start at 0. If textures or fine lines look soft or blurry,")
         print("try bumping this up by 1 and compare.\n")
         val = input("Select a fidelity level [0-4] (Press Enter for 0): ").strip()
-        if val and val != "0":
+        if val not in ("0", "1", "2", "3", "4"):
+            val = "0"
+        dist_filename_suffix = f"-d{val}"
+        if val != "0":
             dist_preset = f" --distortion-bias-preset {val}"
 
     hdr_noise = ""
@@ -241,7 +245,7 @@ def main():
 
     # --- Construct Script Content ---
     autocrop_suffix = "-autocrop" if use_autocrop else ""
-    output_filename = f"batbuilder-{mode}-{fork}-crf{crf}-p{speed}{autocrop_suffix}.bat"
+    output_filename = f"batbuilder-{mode}-{fork}{dist_filename_suffix}-crf{crf}-p{speed}{autocrop_suffix}.bat"
     
     script = "@echo off\n"
     
