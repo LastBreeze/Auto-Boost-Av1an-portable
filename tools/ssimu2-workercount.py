@@ -122,19 +122,8 @@ def cleanup_temp_files():
             pass
 
 def setup_svt_av1_fork(target_fork="5fish"):
-    """Checks for AVX-512 support and swaps the SvtAv1EncApp.exe accordingly."""
+    """Swaps in the standard SVT-AV1 encoder build for benchmarking."""
     print(f"Setting up SVT-AV1 fork: {target_fork}", file=sys.stderr)
-    avx512_supported = False
-    try:
-        from cpuinfo import get_cpu_info
-        info = get_cpu_info()
-        if 'avx512f' in info.get('flags', []):
-            avx512_supported = True
-            print("   - CPU supports AVX-512.", file=sys.stderr)
-        else:
-            print("   - CPU does not support AVX-512.", file=sys.stderr)
-    except ImportError:
-        print("   - Warning: py-cpuinfo not installed. Assuming no AVX-512 support.", file=sys.stderr)
 
     fork_parent = None
     if FORKS_DIR.exists():
@@ -146,13 +135,6 @@ def setup_svt_av1_fork(target_fork="5fish"):
     if fork_parent:
         target_subfolder = None
         subfolders = [d for d in fork_parent.iterdir() if d.is_dir()]
-
-        if avx512_supported:
-            for sub in subfolders:
-                sub_lower = sub.name.lower()
-                if 'icelake' in sub_lower or 'znver5' in sub_lower or 'znver4' in sub_lower:
-                    target_subfolder = sub
-                    break
 
         if not target_subfolder:
             for sub in subfolders:
@@ -224,11 +206,12 @@ def calculate_optimal_count(fps, rss_per_worker):
         return 1
     total_ram = psutil.virtual_memory().total
     cpu_threads = os.cpu_count() or 1
+    cpu_worker_cap = max(1, cpu_threads // 2)
     safe_ram = total_ram * 0.85
     if rss_per_worker <= 0:
         rss_per_worker = 100 * 1024 * 1024
     max_workers_ram = int(safe_ram / rss_per_worker)
-    max_workers = min(max_workers_ram, cpu_threads)
+    max_workers = min(max_workers_ram, cpu_worker_cap)
     return max(1, max_workers)
 
 def _print_progress(percent: float, end: bool = False, elapsed: float = 0.0):
@@ -559,9 +542,15 @@ def benchmark_cpu_vszip(encoded_file):
         return 0, 1, 0.0
 
     opt_workers = calculate_optimal_count(fps_1, rss)
+    cpu_threads = os.cpu_count() or 1
+    cpu_worker_cap = max(1, cpu_threads // 2)
 
     if opt_workers > 1:
-        print("   populating 90% of system ram with multiple workers", file=sys.stderr)
+        print(
+            f"   populating up to 90% of system ram with multiple workers "
+            f"(CPU cap: {cpu_worker_cap}/{cpu_threads} detected threads)",
+            file=sys.stderr,
+        )
 
     print(f"   Benchmarking CPU (vs-zip - {opt_workers} Workers)...", file=sys.stderr)
     fps_opt, _, elapsed_opt = _run_vszip_internal(opt_workers, encoded_file, duration=10)
