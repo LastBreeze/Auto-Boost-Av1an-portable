@@ -46,7 +46,7 @@ def main():
     print("")
     print("  NOTE: If your video has a lot of grain, pick Av1an Single Pass. Auto-Boost can")
     print("  mistake the grain for fine detail and try to preserve it, which wastes bits")
-    print("  bits and makes your final file much larger than it needs to be.\n")
+    print("  and makes your final file much larger than it needs to be.\n")
     mode_choice = input("Select [1/2]: ").strip()
     mode = "autoboost" if mode_choice == "1" else "av1an"
 
