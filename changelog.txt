@@ -1,8 +1,15 @@
 Changelog
 
+v2.27
+---------------------------------
+• Updated bundled SVT-AV1 fork builds (svt-av1-hdr and svt-av1-psy 5fish) to their latest versions
+• Improved tag filtering so output mkv tagging ommits system specific cpu settings
+• bat-builder: added guidance for choosing HDR presets
+• extras\photon-film-grain-test artifacts are now kept in a temp folder
+
 v2.26
 ---------------------------------
-• Update vs-zip to 19.0.0
+• Update vs-zip to 19.0.0 for performance increase in cpu based SSIM2 metrics
 • Adjust svt-av1 setting defaults for bat builder, add --luminance-qp-bias to address bit starving
   in dark scenes
 • Adjust defaults for extras\photon-film-grain-test.bat
