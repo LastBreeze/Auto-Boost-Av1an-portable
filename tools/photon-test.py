@@ -19,6 +19,7 @@ PRESET = "8"
 WORKERS = "2"
 CLIP_SECONDS = 10.0
 CLIP_NAME = "photon-test-source-10s.mkv"
+TEMP_DIR_NAME = "temp"
 OUTPUT_PATTERN = re.compile(r"^(photon|filmgrain)\d+\.mkv$", re.IGNORECASE)
 IGNORED_MKV_NAMES = {CLIP_NAME}
 
@@ -262,8 +263,10 @@ def create_test_clip(mkvmerge_exe, source_file, clip_file, start_seconds, work_d
         print(f"Removing existing temporary test clip: {clip_file.name}")
         clip_file.unlink()
 
-    temp_prefix = work_dir / "photon-test-source-10s-part.mkv"
-    for old_part in work_dir.glob("photon-test-source-10s-part*.mkv"):
+    temp_work_dir = clip_file.parent
+    temp_work_dir.mkdir(exist_ok=True)
+    temp_prefix = temp_work_dir / "photon-test-source-10s-part.mkv"
+    for old_part in temp_work_dir.glob("photon-test-source-10s-part*.mkv"):
         print(f"Removing stale mkvmerge part file: {old_part.name}")
         old_part.unlink()
 
@@ -280,12 +283,12 @@ def create_test_clip(mkvmerge_exe, source_file, clip_file, start_seconds, work_d
     print("\nCreating 10 second test clip with MKVToolNix mkvmerge.exe")
     print(f"Source: {source_file.name}")
     print(f"Range:  {split_range}")
-    rc = run_streamed(cmd, cwd=work_dir)
+    rc = run_streamed(cmd, cwd=temp_work_dir)
     if rc != 0:
         print(f"Error: mkvmerge.exe failed while creating the 10 second test clip (exit code {rc}).")
         return False
 
-    created_parts = [path for path in sorted(work_dir.glob("photon-test-source-10s-part*.mkv")) if path.exists()]
+    created_parts = [path for path in sorted(temp_work_dir.glob("photon-test-source-10s-part*.mkv")) if path.exists()]
     if not created_parts:
         print(f"Error: mkvmerge.exe did not create the expected test clip: {clip_file.name}")
         return False
@@ -317,6 +320,12 @@ def remove_old_outputs(work_dir):
         if is_test_output(path) and path.name.lower() != CLIP_NAME:
             print(f"Removing existing test output: {path.name}")
             path.unlink()
+
+
+def ensure_temp_dir(work_dir):
+    temp_dir = work_dir / TEMP_DIR_NAME
+    temp_dir.mkdir(exist_ok=True)
+    return temp_dir
 
 
 def repair_vspreview_storage():
@@ -507,6 +516,15 @@ def cleanup_generated_test_files(work_dir, encoded_files):
         print("Deleting temp folder: logs")
         shutil.rmtree(logs_dir, ignore_errors=True)
 
+    # If this helper-created extras/temp folder is now empty, remove the folder too.
+    if work_dir.name.lower() == TEMP_DIR_NAME:
+        try:
+            work_dir.rmdir()
+            print(f"Deleting temp folder: {work_dir.name}")
+        except OSError:
+            # Leave it alone if something user-created or still-open remains inside.
+            pass
+
 
 def launch_vspreview(mkv_files, work_dir, source_clip=None):
     if not mkv_files:
@@ -563,11 +581,13 @@ def main():
     av1an_exe = script_dir / "av1an" / "av1an.exe"
     mkvmerge_exe = script_dir / "MKVToolNix" / "mkvmerge.exe"
     work_dir = Path.cwd().resolve()
+    temp_dir = ensure_temp_dir(work_dir)
     source_file = detect_source_mkv(work_dir, args.source)
-    clip_file = work_dir / CLIP_NAME
+    clip_file = temp_dir / CLIP_NAME
 
     print("\n--- Auto-Boost Grain / Photon Test ---")
     print(f"Working folder: {work_dir}")
+    print(f"Temp folder: {temp_dir}")
 
     if source_file is None:
         return 1
@@ -595,18 +615,19 @@ def main():
         return 1
 
     remove_old_outputs(work_dir)
+    remove_old_outputs(temp_dir)
     encoded_files = []
     for level in levels:
-        output_file = work_dir / output_name_for(test_mode, level)
-        temp_dir = work_dir / f"{output_file.stem}-av1an-temp"
+        output_file = temp_dir / output_name_for(test_mode, level)
+        av1an_temp_dir = temp_dir / f"{output_file.stem}-av1an-temp"
         encoder_params = encoder_params_for(test_mode, level)
 
         if output_file.exists():
             print(f"Removing existing output: {output_file.name}")
             output_file.unlink()
-        if temp_dir.exists():
-            print(f"Removing stale av1an temp folder: {temp_dir.name}")
-            shutil.rmtree(temp_dir, ignore_errors=True)
+        if av1an_temp_dir.exists():
+            print(f"Removing stale av1an temp folder: {av1an_temp_dir.name}")
+            shutil.rmtree(av1an_temp_dir, ignore_errors=True)
 
         setting_name = "--photon-noise" if test_mode == "photon" else "--film-grain"
         print("\n" + "=" * 72)
@@ -621,13 +642,13 @@ def main():
             "--no-defaults",
             "--split-method", "none",
             "-y",
-            "--temp", str(temp_dir),
+            "--temp", str(av1an_temp_dir),
             "-w", WORKERS,
             "-o", str(output_file),
             "-v", encoder_params,
         ]
 
-        rc = run_streamed(cmd, cwd=work_dir)
+        rc = run_streamed(cmd, cwd=temp_dir)
         if rc != 0:
             print(f"Error: av1an failed for {mode_label} {level} (exit code {rc}).")
             return rc
@@ -645,7 +666,7 @@ def main():
     if args.no_preview:
         print("Skipping VSPreview because --no-preview was passed.")
         return 0
-    return launch_vspreview(encoded_files, work_dir, clip_file)
+    return launch_vspreview(encoded_files, temp_dir, clip_file)
 
 
 if __name__ == "__main__":
