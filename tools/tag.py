@@ -7,6 +7,38 @@ import shlex
 
 # Since this script runs in 'temp' via dispatch, path to tools is ../tools
 TOOLS_DIR = os.path.join("..", "tools")
+UNTAGGED_OPTIONS = {
+    "--avx512": 0,
+    "--denoise": 1,
+    "--fast-speed": 1,
+    "--verbose": 0,
+    "--ssimu2-cpu-workers": 1,
+    "--resume": 0,
+}
+
+def strip_untagged_options(params):
+    """Remove operational helper options that should not be written to MKV tags."""
+    if not params:
+        return params
+    params = params.strip()
+    if len(params) >= 2 and params.startswith('"') and params.endswith('"'):
+        params = params[1:-1]
+    try:
+        parts = shlex.split(params, posix=False)
+    except ValueError:
+        return params
+
+    cleaned = []
+    i = 0
+    while i < len(parts):
+        curr = parts[i]
+        skip_count = UNTAGGED_OPTIONS.get(curr)
+        if skip_count is not None:
+            i += 1 + skip_count
+            continue
+        cleaned.append(curr)
+        i += 1
+    return " ".join(cleaned)
 
 def get_script_version():
     """Extracts the latest version number from Auto-Boost-Av1an.py."""
@@ -152,6 +184,9 @@ def parse_batch_line(line, vars_map):
         if curr in ["-i", "--scenes", "--workers"]:
             i += 2
             continue
+        if curr in UNTAGGED_OPTIONS:
+            i += 1 + UNTAGGED_OPTIONS[curr]
+            continue
         if curr == "--fast-params":
             i += 2
             continue
@@ -291,7 +326,7 @@ def main():
         clean_params = final_params.strip()
         if len(clean_params) >= 2 and clean_params.startswith('"') and clean_params.endswith('"'):
             clean_params = clean_params[1:-1]
-        settings_content.append(clean_params)
+        settings_content.append(strip_untagged_options(clean_params))
 
     combined_settings_str = " ".join(settings_content)
     full_string = " ".join(info_parts) + f' settings: "{combined_settings_str}"'

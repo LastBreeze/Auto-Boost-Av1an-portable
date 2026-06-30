@@ -1,6 +1,7 @@
 import os
 
 BLUE = "\033[94m"
+RED = "\033[91m"
 RESET = "\033[0m"
 
 def enable_ansi_colors():
@@ -42,6 +43,10 @@ def main():
     print("  2: Av1an Single Pass")
     print("     Encodes the video once, straight through.")
     print("     Good if you want faster turnaround.\n")
+    print("")
+    print("  NOTE: If your video has a lot of grain, pick Av1an Single Pass. Auto-Boost can")
+    print("  mistake the grain for fine detail and try to preserve it, which wastes bits")
+    print("  bits and makes your final file much larger than it needs to be.\n")
     mode_choice = input("Select [1/2]: ").strip()
     mode = "autoboost" if mode_choice == "1" else "av1an"
 
@@ -152,6 +157,11 @@ def main():
         print("     Preserves the natural film grain in your source video.\n")
         noise_choice = input("Select mode [1/2]: ").strip()
         if noise_choice == "2":
+            if mode == "autoboost":
+                print(f"\n{RED}WARNING: Auto-Boost mode is NOT recommended for high grain content.")
+                print("Visual metrics can mistake grain for detail, which can lead")
+                print("to excessive boosting. For grainy SVT-AV1-HDR content, use")
+                print(f"Av1an Single Pass mode instead.{RESET}\n")
             hdr_noise = " --tune 5 --film-grain 10"
         else:
             hdr_noise = " --tune 0 --noise 4"
@@ -167,12 +177,13 @@ def main():
     if fork == "hdr":
         print("  Recommended speeds for the SVT-AV1-HDR fork:")
         print("  0 -- Slowest. Best possible quality. Use if you have time.")
+        print("  1 -- Slower. Can offer some quality improvements with tune grain,")
+        print("       and also helps reduce artifacts.")
         print("  2 -- DEFAULT. Ideal balance of quality and speed for SVT-AV1-HDR.")
-        print("       Highly recommended -- preserves grain and detail well.")
-        print("  4 -- Faster. Minimum recommended speed. Only use if your")
-        print("       CPU is too slow for preset 2.\n")
-        print("  WARNING: Do not go faster than preset 4. Speeds above 4 skip")
-        print("  too many quality-preserving tools and will hurt your output.\n")
+        print("       Highly recommended -- preserves grain and detail well.\n")
+        print("  Julio, the developer of SVT-AV1-HDR, highly recommends NOT using")
+        print("  preset 4. Speeds at or above preset 4 skip too many quality-preserving")
+        print("  tools and will hurt your output for this svt-av1 fork.\n")
         default_speed = "2"
     else:
         print("  Recommended speeds for this fork:")
