@@ -16,6 +16,22 @@
 # ---------------------------------------------------------------------
 # ---------------------------------------------------------------------
 
+# Modifications for auto-boost-av1an portable:
+# Script has been modified to be safer for portable python, added
+# progress percent
+#
+# - Fixed a race condition in x264 based scene detection on Windows:
+#   x264 renames its first pass stats file from `<name>.log.temp` to
+#   `<name>.log` on completion, but the rename can fail if the script's
+#   progress counter has the file open at that moment, leaving only the
+#   `.log.temp` behind and crashing the script with "Unexpected result
+#   from av1an or x264". The script now falls back to reading the
+#   `.log.temp` file when the `.log` file is missing.
+# - Added a return code check after the av1an x264 scene detection
+#   process finishes, so a failed av1an run raises a clear error instead
+#   of silently continuing.
+# - Improved the missing stats file assertion message to list the files
+#   actually present in the x264.logs directory for easier debugging.
 
 import argparse
 from collections.abc import Callable
@@ -1610,6 +1626,9 @@ if not resume or not scene_detection_scenes_file.exists():
     if scene_detection_perform_x264:
         scene_detection_x264_output_file.unlink(missing_ok=True)
         scene_detection_x264_stats_dir.mkdir(exist_ok=True)
+        if not resume:
+            for scene_detection_x264_stale_log in scene_detection_x264_stats_dir.glob("*.log*"):
+                scene_detection_x264_stale_log.unlink(missing_ok=True)
 
         scene_detection_x264_scenes = {}
         scene_detection_x264_scenes["scenes"] = []
@@ -1710,6 +1729,35 @@ if not resume or not scene_detection_scenes_file.exists():
         ]
         scene_detection_x264_process = subprocess.Popen(command, text=True)
 
+        scene_detection_match_x264_stats_frame = re.compile(r"^in:\d+ ", re.MULTILINE)
+        def scene_detection_x264_count_stats_frames():
+            counted = 0
+            stats_files = list(scene_detection_x264_stats_dir.glob("*.log")) + \
+                          list(scene_detection_x264_stats_dir.glob("*.log.temp"))
+            for stats_file in stats_files:
+                try:
+                    with stats_file.open("r", errors="replace") as stats_f:
+                        counted += len(scene_detection_match_x264_stats_frame.findall(stats_f.read()))
+                except OSError:
+                    continue
+            return counted
+        scene_detection_x264_progress_time = 0.0
+        scene_detection_x264_progress_frames = 0
+        scene_detection_x264_start = time.time() - 0.000001
+        def scene_detection_x264_progress():
+            global scene_detection_x264_progress_time, scene_detection_x264_progress_frames
+            if time.time() - scene_detection_x264_progress_time >= 1:
+                scene_detection_x264_progress_time = time.time()
+                scene_detection_x264_progress_frames = min(scene_detection_x264_count_stats_frames(), scene_detection_x264_total_frames)
+            if scene_detection_x264_process.poll() is not None or scene_detection_x264_total_frames <= 0:
+                scene_detection_x264_progress_percent = 100.0
+                scene_detection_x264_progress_frames_display = scene_detection_x264_total_frames_print
+            else:
+                scene_detection_x264_progress_percent = scene_detection_x264_progress_frames / scene_detection_x264_total_frames * 100
+                scene_detection_x264_progress_frames_display = scene_detection_x264_progress_frames
+            scene_detection_x264_progress_fps = scene_detection_x264_progress_frames_display / (time.time() - scene_detection_x264_start)
+            return scene_detection_x264_progress_frames_display, scene_detection_x264_progress_percent, scene_detection_x264_progress_fps
+
 
     if scene_detection_perform_av1an:
         scene_detection_av1an_scenes_file.unlink(missing_ok=True)
@@ -1751,12 +1799,12 @@ if not resume or not scene_detection_scenes_file.exists():
             scene_detection_min = np.empty((scene_detection_luma_clip.num_frames,), dtype=np.float32)
             scene_detection_max = np.empty((scene_detection_luma_clip.num_frames,), dtype=np.float32)
             for current_frame, frame in enumerate(scene_detection_luma_clip.frames(backlog=48)):
-                print(f"\r\033[K{frame_print(current_frame)} / Measuring frame luminance / {current_frame / (time.time() - start):.2f} fps", end="\r", flush=True)
+                print(f"\r\033[K{frame_print(current_frame)} / {current_frame / scene_detection_luma_clip.num_frames * 100:5.1f}% / Measuring frame luminance / {current_frame / (time.time() - start):.2f} fps", end="\r", flush=True)
                 scene_detection_diffs[current_frame] = frame.props["LumaDiff"]
                 scene_detection_average[current_frame] = frame.props["LumaAverage"]
                 scene_detection_min[current_frame] = frame.props["LumaMin"]
                 scene_detection_max[current_frame] = frame.props["LumaMax"]
-            print(f"\r\033[K{frame_print(current_frame + 1)} / Frame luminance measurement complete / {(current_frame + 1) / (time.time() - start):.2f} fps", end="\n", flush=True)
+            print(f"\r\033[K{frame_print(current_frame + 1)} / 100.0% / Frame luminance measurement complete / {(current_frame + 1) / (time.time() - start):.2f} fps", end="\n", flush=True)
             
             np.savetxt(scene_detection_diffs_file, scene_detection_diffs, fmt="%.9f")
             np.savetxt(scene_detection_average_file, scene_detection_average, fmt="%.9f")
@@ -1789,6 +1837,11 @@ if not resume or not scene_detection_scenes_file.exists():
         zones_diffs = {}
         zones_vapoursynth_scenecut = {}
         zones_luma_scenecut = {}
+        scene_detection_vapoursynth_total_frames = 0
+        for zone in zones:
+            if zone["zone"].scene_detection_method in ["x264_vapoursynth", "vapoursynth"]:
+                scene_detection_vapoursynth_total_frames += zone["end_frame"] - zone["start_frame"]
+        scene_detection_vapoursynth_processed_frames = 0
         for zone_i, zone in enumerate(zones):
             assert zone["zone"].scene_detection_method in ["av1an", "x264_vapoursynth", "vapoursynth", "external"], "Invalid `scene_detection_method`. Please check your config inside `Progression-Boost.py`."
 
@@ -1810,7 +1863,13 @@ if not resume or not scene_detection_scenes_file.exists():
                 start = time.time() - 0.000001
                 for offset_frame, frame in enumerate(scene_detection_clip.frames(backlog=48)):
                     current_frame = zone["start_frame"] + offset_frame
-                    print(f"\r\033[K{frame_print(current_frame)} / Detecting scenes / {offset_frame / (time.time() - start):.2f} fps", end="", flush=True)
+                    scene_detection_vapoursynth_line = f"{frame_print(current_frame)} / {(scene_detection_vapoursynth_processed_frames + offset_frame + 1) / scene_detection_vapoursynth_total_frames * 100:5.1f}% / VapourSynth based scene detection / {offset_frame / (time.time() - start):.2f} fps"
+                    if scene_detection_perform_x264:
+                        scene_detection_x264_line_frames, scene_detection_x264_line_percent, scene_detection_x264_line_fps = scene_detection_x264_progress()
+                        scene_detection_x264_line = f"{frame_print(scene_detection_x264_line_frames)} / {scene_detection_x264_line_percent:5.1f}% / x264 based scene detection / {scene_detection_x264_line_fps:.2f} fps"
+                        print(f"\r\033[K{scene_detection_vapoursynth_line}\n\033[K{scene_detection_x264_line}\033[A\r", end="", flush=True)
+                    else:
+                        print(f"\r\033[K{scene_detection_vapoursynth_line}", end="", flush=True)
 
                     if not scene_detection_diffs_available:
                         scene_detection_diffs[current_frame] = frame.props["LumaDiff"]
@@ -1837,8 +1896,11 @@ if not resume or not scene_detection_scenes_file.exists():
                 zones_diffs[zone_i] = diffs
                 zones_vapoursynth_scenecut[zone_i] = vapoursynth_scenecut
                 zones_luma_scenecut[zone_i] = luma_scenecut
+                scene_detection_vapoursynth_processed_frames += scene_detection_clip.num_frames
 
-        print(f"\r\033[K{frame_print(current_frame + 1)} / VapourSynth based scene detection complete", end="\n", flush=True)
+        print(f"\r\033[K{frame_print(current_frame + 1)} / 100.0% / VapourSynth based scene detection complete", end="\n", flush=True)
+        if scene_detection_perform_x264:
+            print("\r\033[K", end="", flush=True)
 
     if scene_detection_has_external:
         with input_scenes_file.open("r") as input_scenes_f:
@@ -1867,18 +1929,40 @@ if not resume or not scene_detection_scenes_file.exists():
 
 
     if scene_detection_perform_x264:
-        if scene_detection_x264_process.poll() is None:
-            print(f"\r\033[K{frame_print(0)} / Performing x264 based scene detection", end="", flush=True)
+        while scene_detection_x264_process.poll() is None:
+            scene_detection_x264_line_frames, scene_detection_x264_line_percent, scene_detection_x264_line_fps = scene_detection_x264_progress()
+            print(f"\r\033[K{frame_print(scene_detection_x264_line_frames)} / {scene_detection_x264_line_percent:5.1f}% / x264 based scene detection / {scene_detection_x264_line_fps:.2f} fps", end="", flush=True)
+            time.sleep(1)
         scene_detection_x264_process.wait()
-        print(f"\r\033[K{frame_print(scene_detection_x264_total_frames_print)} / x264 based scene detection finished", end="\n", flush=True)
+        if scene_detection_x264_process.returncode != 0:
+            raise subprocess.CalledProcessError(scene_detection_x264_process.returncode, "av1an (x264 based scene detection)")
+        print(f"\r\033[K{frame_print(scene_detection_x264_total_frames_print)} / 100.0% / x264 based scene detection finished", end="\n", flush=True)
 
         zones_x264_scenecut = {}
         scene_detection_match_x264_I = re.compile(r"^in:(\d+) out:\d+ type:(\w)")
         for zone_i, zone in enumerate(zones):
             x264_scenecut = np.zeros((zone["end_frame"] - zone["start_frame"],), dtype=float)
             def scene_detection_write_x264_scenecut(name, start_frame, end_frame, skip_starting_frames=False):
-                assert (scene_detection_x264_stats_dir / f"{name}.log").exists(), "Unexpected result from av1an or x264"
-                with (scene_detection_x264_stats_dir / f"{name}.log").open("r") as x264_stats_f:
+                x264_stats_file = scene_detection_x264_stats_dir / f"{name}.log"
+                if not x264_stats_file.exists():
+                    # x264 writes first pass stats to `<stats>.log.temp` and renames it to
+                    # `<stats>.log` when the encode finishes. On Windows, this rename fails
+                    # if another process happens to have the file open at that moment. Our
+                    # own progress counter (`scene_detection_x264_count_stats_frames`) reads
+                    # the `.log.temp` files once a second to report progress, so this race
+                    # occasionally leaves a fully written `.log.temp` behind instead of the
+                    # expected `.log` while x264 and av1an still exit successfully. The
+                    # `.log.temp` file contains the same stats lines, so fall back to it.
+                    x264_stats_temp_file = scene_detection_x264_stats_dir / f"{name}.log.temp"
+                    if x264_stats_temp_file.exists():
+                        try:
+                            x264_stats_temp_file.rename(x264_stats_file)
+                        except OSError:
+                            x264_stats_file = x264_stats_temp_file
+                assert x264_stats_file.exists(), \
+                    f"Unexpected result from av1an or x264: stats file \"{name}.log\" was not created in \"{scene_detection_x264_stats_dir}\". " \
+                    f"Files present: {sorted(f.name for f in scene_detection_x264_stats_dir.glob('*'))}"
+                with x264_stats_file.open("r") as x264_stats_f:
                     x264_stats = x264_stats_f.read()
 
                 for line in x264_stats.splitlines():

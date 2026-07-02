@@ -3,6 +3,7 @@ import subprocess
 import os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import glob
+import re
 import shutil
 from wakepy import keep
 from svt_fork_setup import setup_svt_av1_fork
@@ -39,6 +40,54 @@ def set_settings_value(settings_path, key, value):
         lines.append(f"{key}={value}")
     with open(settings_path, "w", encoding="utf-8", newline="\r\n") as f:
         f.write("\n".join(lines) + "\n")
+
+# --- Optimized worker settings (read from the generating .bat file) ---
+_BAT_SET_RE = re.compile(r'^set\s+"?([^=\s"]+)\s*=(.*?)"?\s*$', re.IGNORECASE)
+
+
+def find_active_bat_file(tools_dir, root_dir):
+    """Locate the .bat that launched this run via the tools/bat-used-*.txt marker."""
+    markers = glob.glob(os.path.join(tools_dir, "bat-used-*.txt"))
+    markers.sort(key=lambda p: os.path.getmtime(p), reverse=True)
+    for marker in markers:
+        name = os.path.basename(marker)
+        if not (name.startswith("bat-used-") and name.endswith(".txt")):
+            continue
+        bat_name = name[len("bat-used-"):-len(".txt")]
+        bat_path = os.path.join(root_dir, bat_name)
+        if os.path.isfile(bat_path):
+            return bat_path
+    return None
+
+
+def read_bat_optimize_settings(tools_dir, root_dir):
+    """Parse optimize-workers / custom-av1an-workers / custom-ssim2-workers from
+    the active .bat. Returns an empty dict when the settings are absent, so
+    callers proceed exactly as before."""
+    bat_path = find_active_bat_file(tools_dir, root_dir)
+    if not bat_path:
+        return {}
+    wanted = {"optimize-workers", "custom-av1an-workers", "custom-ssim2-workers"}
+    settings = {}
+    try:
+        with open(bat_path, "r", encoding="utf-8", errors="replace") as f:
+            for raw in f.read().splitlines():
+                line = raw.strip()
+                if not line or line.startswith("::") or line.lower().startswith("rem "):
+                    continue
+                m = _BAT_SET_RE.match(line)
+                key = value = None
+                if m:
+                    key, value = m.group(1).lower(), m.group(2).strip()
+                elif "=" in line and " " not in line.split("=", 1)[0] and "%" not in line.split("=", 1)[0]:
+                    k, v = line.split("=", 1)
+                    key, value = k.strip().lower(), v.strip()
+                if key in wanted:
+                    settings[key] = value
+    except Exception:
+        return {}
+    return settings
+
 
 def svt_fork_display_name(fork):
     fork_key = (fork or "essential").strip().lower()
@@ -238,6 +287,29 @@ def main():
             passthrough_args.append(arg)
             idx += 1
     args = passthrough_args
+
+    # --- Optimized worker overrides from the generating .bat (optional) ---
+    # Written by the one-time benchmark (workercount.py / ssimu2-workercount.py
+    # --optimize-bat). When absent, everything proceeds exactly as before.
+    bat_opt = read_bat_optimize_settings(tools_dir, root_dir)
+    if bat_opt.get("optimize-workers", "").strip().lower() in ("true", "1", "yes", "on"):
+        def _override_flag_value(flag, value):
+            for i in range(len(args)):
+                if args[i] == flag and i + 1 < len(args):
+                    args[i + 1] = value
+                    return
+            args.extend([flag, value])
+
+        custom_enc = bat_opt.get("custom-av1an-workers", "").strip()
+        if custom_enc.isdigit() and int(custom_enc) > 0:
+            worker_count = int(custom_enc)
+            _override_flag_value("--workers", custom_enc)
+            print(f"\033[94m[Dispatch] Using optimized av1an worker count from bat: {custom_enc}\033[0m")
+
+        custom_ssimu2 = bat_opt.get("custom-ssim2-workers", "").strip()
+        if custom_ssimu2.isdigit() and int(custom_ssimu2) > 0:
+            _override_flag_value("--ssimu2-cpu-workers", custom_ssimu2)
+            print(f"\033[94m[Dispatch] Using optimized SSIMU2 CPU worker count from bat: {custom_ssimu2}\033[0m")
 
     setup_svt_av1_fork(tools_dir, selected_fork, avx512=avx512, verbose=True)
 

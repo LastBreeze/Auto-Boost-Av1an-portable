@@ -1,9 +1,16 @@
 Changelog
 
+v2.3
+---------------------------------
+• Add progress percent to scene detection.
+• Optimize av1an cpu and ssim2 worker count to more accurately prevent oversaturating the cpu/gpu.
+• Add custom benchmark: bat-builder will now ask if you want to perform a worker count test
+  benchmark to optimize for the svt-av1 preset and filtering of that specific script.
+
 v2.27
 ---------------------------------
 • Updated bundled SVT-AV1 fork builds (svt-av1-hdr and svt-av1-psy 5fish) to their latest versions
-• Improved tag filtering so output mkv tagging ommits system specific cpu settings
+• Improved tag filtering so output mkv tagging omits system specific cpu settings
 • bat-builder: added guidance for choosing HDR presets
 • extras\photon-film-grain-test artifacts are now kept in a temp folder
 

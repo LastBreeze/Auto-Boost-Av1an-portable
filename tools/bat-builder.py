@@ -254,6 +254,21 @@ def main():
 
     autocrop_flag = " --autocrop" if use_autocrop else ""
 
+    # --- One-Time Worker Optimization ---
+    print("\n--------------------------------------------------------")
+    print("One-Time Worker Optimization Benchmark")
+    print("--------------------------------------------------------")
+    print("Optimize av1an svt-av1 and ssim2 worker count for this bat")
+    print("script with one-time benchmark? This will target proper cpu")
+    print("and gpu saturation for your svt-av1 preset and any filtering.\n")
+    print("  1: Yes -- On first launch, this .bat runs a one-time benchmark")
+    print("            using YOUR chosen encoder preset/params and any")
+    print("            settings.txt filtering. The tuned worker counts are")
+    print("            saved inside this .bat and reused on every run.")
+    print("  2: No  -- Use the standard shared worker calculation\n")
+    optimize_input = input("Select [1 Yes / 2 No] (Press Enter for No): ").strip()
+    optimize_workers = optimize_input == "1"
+
     # --- Construct Script Content ---
     autocrop_suffix = "-autocrop" if use_autocrop else ""
     output_filename = f"batbuilder-{mode}-{fork}{dist_filename_suffix}-crf{crf}-p{speed}{autocrop_suffix}.bat"
@@ -277,6 +292,15 @@ def main():
     script += ":: DENOISE updates denoise=True/False in settings.txt before dispatch. 5fish defaults to True; all other forks default to False.\n"
     script += 'set "AVX512_FLAG=' + avx512_flag.strip() + '"\n'
     script += ":: Leave AVX512_FLAG empty unless you are sure your CPU supports AVX-512.\n\n"
+
+    if optimize_workers:
+        script += 'set "optimize-workers=true"\n'
+        script += 'set "custom-av1an-workers=      "\n'
+        script += 'set "custom-ssim2-workers=      "\n'
+        script += ":: The one-time optimized benchmark fills in the custom worker values above.\n"
+        script += ":: The padding spaces are intentional (in-place editing); do not remove them.\n"
+        script += ":: To re-run a benchmark, clear the number between = and the closing quote.\n"
+        script += ":: To disable optimized workers, set optimize-workers=false (keep line length).\n\n"
     
     script += "del tools\\bat*.txt\n"
     script += "move *.mkv video-input\nmove *.mp4 video-input\nmove *.m2ts video-input\n"
@@ -285,6 +309,11 @@ def main():
     
     script += ":: --- STEP 0A: CREATE BATCH MARKER ---\necho.\ntype NUL > \"tools\\bat-used-%~nx0.txt\"\n\n"
     script += ":: --- STEP 0B: SET TEMP PATH ---\nset \"PATH=%~dp0VapourSynth;%~dp0tools\\av1an;%~dp0tools\\MKVToolNix;%PATH%\"\n\n"
+
+    # Optimized One-Time Benchmark (encode workers)
+    if optimize_workers:
+        script += ":: --- STEP 1-OPT: ONE-TIME OPTIMIZED WORKER BENCHMARK (ENCODE) ---\n"
+        script += "\"VapourSynth\\python.exe\" \"tools\\workercount.py\" --optimize-bat \"%~f0\"\n\n"
 
     # Worker Check Encoding
     script += ":: --- STEP 1A: WORKER COUNT CHECK (ENCODE) ---\n" if mode == "autoboost" else ":: --- STEP 1: WORKER COUNT CHECK ---\n"
@@ -307,6 +336,11 @@ def main():
         script += ")\n\n"
     else:
         script += ")\n\n"
+
+    # Optimized One-Time Benchmark (SSIMU2 vs-zip workers, Autoboost Only)
+    if mode == "autoboost" and optimize_workers:
+        script += ":: --- STEP 1B-OPT: ONE-TIME OPTIMIZED SSIMU2 BENCHMARK ---\n"
+        script += "\"VapourSynth\\python.exe\" \"tools\\ssimu2-workercount.py\" --optimize-bat \"%~f0\"\n\n"
 
     # Worker Check SSIMU2 (Autoboost Only)
     if mode == "autoboost":

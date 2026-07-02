@@ -59,6 +59,54 @@ def set_settings_value(settings_path, key, value):
         f.write("\n".join(lines) + "\n")
     return parse_settings_lines(lines)
 
+# --- Optimized worker settings (read from the generating .bat file) ---
+_BAT_SET_RE = re.compile(r'^set\s+"?([^=\s"]+)\s*=(.*?)"?\s*$', re.IGNORECASE)
+
+
+def find_active_bat_file(tools_dir, root_dir):
+    """Locate the .bat that launched this run via the tools/bat-used-*.txt marker."""
+    markers = glob.glob(os.path.join(tools_dir, "bat-used-*.txt"))
+    markers.sort(key=lambda p: os.path.getmtime(p), reverse=True)
+    for marker in markers:
+        name = os.path.basename(marker)
+        if not (name.startswith("bat-used-") and name.endswith(".txt")):
+            continue
+        bat_name = name[len("bat-used-"):-len(".txt")]
+        bat_path = os.path.join(root_dir, bat_name)
+        if os.path.isfile(bat_path):
+            return bat_path
+    return None
+
+
+def read_bat_optimize_settings(tools_dir, root_dir):
+    """Parse optimize-workers / custom-av1an-workers / custom-ssim2-workers from
+    the active .bat. Returns an empty dict when the settings are absent, so
+    callers proceed exactly as before."""
+    bat_path = find_active_bat_file(tools_dir, root_dir)
+    if not bat_path:
+        return {}
+    wanted = {"optimize-workers", "custom-av1an-workers", "custom-ssim2-workers"}
+    settings = {}
+    try:
+        with open(bat_path, "r", encoding="utf-8", errors="replace") as f:
+            for raw in f.read().splitlines():
+                line = raw.strip()
+                if not line or line.startswith("::") or line.lower().startswith("rem "):
+                    continue
+                m = _BAT_SET_RE.match(line)
+                key = value = None
+                if m:
+                    key, value = m.group(1).lower(), m.group(2).strip()
+                elif "=" in line and " " not in line.split("=", 1)[0] and "%" not in line.split("=", 1)[0]:
+                    k, v = line.split("=", 1)
+                    key, value = k.strip().lower(), v.strip()
+                if key in wanted:
+                    settings[key] = value
+    except Exception:
+        return {}
+    return settings
+
+
 def svt_fork_display_name(fork):
     fork_key = (fork or "essential").strip().lower()
     if fork_key in ("svt-av1-essential", "essential"):
@@ -549,6 +597,16 @@ def main():
             i += 1
         else:
             i += 1
+
+    # --- Optimized worker override from the generating .bat (optional) ---
+    # Written by the one-time benchmark (workercount.py --optimize-bat).
+    # When absent, everything proceeds exactly as before.
+    bat_opt = read_bat_optimize_settings(tools_dir, root_dir)
+    if bat_opt.get("optimize-workers", "").strip().lower() in ("true", "1", "yes", "on"):
+        custom_enc = bat_opt.get("custom-av1an-workers", "").strip()
+        if custom_enc.isdigit() and int(custom_enc) > 0:
+            workers = custom_enc
+            print(f"{BLUE}[Dispatch] Using optimized av1an worker count from bat: {workers}{RESET}")
 
     settings_path = os.path.join(root_dir, "settings.txt")
     settings = None
