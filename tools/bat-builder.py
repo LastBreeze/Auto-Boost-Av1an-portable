@@ -74,7 +74,7 @@ def main():
     fork_map = {"1": "5fish", "2": "essential", "3": "hdr", "4": "custom"}
     fork = fork_map.get(fork_choice, "essential")
 
-    avx512_flag = ""
+    avx512_value = "False"
     if fork in ("5fish", "essential"):
         print("\n--------------------------------------------------------")
         print("AVX-512 CPU Support")
@@ -86,7 +86,7 @@ def main():
         print("  2: No  -- Use the standard encoder executable\n")
         avx_choice = input("Does your CPU support AVX-512? [1 Yes / 2 No] (Press Enter for No): ").strip()
         if avx_choice == "1":
-            avx512_flag = " --avx512"
+            avx512_value = "True"
 
     denoise_value = "True" if fork == "5fish" else "False"
     if fork == "5fish":
@@ -223,8 +223,8 @@ def main():
     film_grain_note = ""
 
     if fork == "5fish":
-        fast_params = f"--lineart-psy-bias 4 --texture-psy-bias 2 --hbd-mds 0 --keyint 305 --noise-level-thr 16000 --tune 0 --filtering-noise-detection 4{luminance_param}"
-        final_params = f"--lineart-psy-bias 4 --texture-psy-bias 2 --hbd-mds 1 --keyint 305 --noise-level-thr 16000 --tune 0 --filtering-noise-detection 4{luminance_param} --lp 3 --photon-noise 200"
+        fast_params = f"--lineart-psy-bias 3 --texture-psy-bias 3 --hbd-mds 0{luminance_param}"
+        final_params = f"--lineart-psy-bias 3 --texture-psy-bias 3 --hbd-mds 1{luminance_param} --lp 3 --photon-noise 200"
         has_rename = False
     elif fork == "essential":
         fast_params = f"--scd 0 --enable-dlf 3{dist_preset}{luminance_param}"
@@ -290,8 +290,8 @@ def main():
     script += ":: example forks: 5fish, essential, hdr, custom\n"
     script += f'set "DENOISE={denoise_value}"\n'
     script += ":: DENOISE updates denoise=True/False in settings.txt before dispatch. 5fish defaults to True; all other forks default to False.\n"
-    script += 'set "AVX512_FLAG=' + avx512_flag.strip() + '"\n'
-    script += ":: Leave AVX512_FLAG empty unless you are sure your CPU supports AVX-512.\n\n"
+    script += f'set "AVX512={avx512_value}"\n'
+    script += ":: Set AVX512=True only if your CPU supports AVX-512 and the fork has an AVX-512 build.\n\n"
 
     if optimize_workers:
         script += 'set "optimize-workers=true"\n'
@@ -398,9 +398,9 @@ def main():
         script += film_grain_note
         
     if mode == "autoboost":
-        script += f"\"VapourSynth\\python.exe\" \"tools\\dispatch.py\" --fork %fork% %AVX512_FLAG% --denoise %DENOISE% --quality %QUALITY%{autocrop_flag} --ssimu2 %SSIMU2_TOOL% --verbose --ssimu2-cpu-workers %SSIMU2_WORKERS% --resume --fast-speed 8 --final-speed %FINAL_SPEED% --workers %WORKER_COUNT% --fast-params \"%FAST_PARAMS%\" --final-params \"%FINAL_PARAMS%\"\n\n"
+        script += f"\"VapourSynth\\python.exe\" \"tools\\dispatch.py\" --fork %fork% --avx512 %AVX512% --denoise %DENOISE% --quality %QUALITY%{autocrop_flag} --ssimu2 %SSIMU2_TOOL% --verbose --ssimu2-cpu-workers %SSIMU2_WORKERS% --resume --fast-speed 8 --final-speed %FINAL_SPEED% --workers %WORKER_COUNT% --fast-params \"%FAST_PARAMS%\" --final-params \"%FINAL_PARAMS%\"\n\n"
     else:
-        script += f"\"VapourSynth\\python.exe\" \"tools\\av1an-dispatch.py\" --resume --fork %fork% %AVX512_FLAG% --denoise %DENOISE%{autocrop_flag} --quality %QUALITY% --workers %WORKER_COUNT% --final-speed %FINAL_SPEED% --final-params \"%av1an_settings%\"\n\n"
+        script += f"\"VapourSynth\\python.exe\" \"tools\\av1an-dispatch.py\" --resume --fork %fork% --avx512 %AVX512% --denoise %DENOISE%{autocrop_flag} --quality %QUALITY% --workers %WORKER_COUNT% --final-speed %FINAL_SPEED% --final-params \"%av1an_settings%\"\n\n"
 
     script += "echo.\necho All tasks finished.\npause\n\n"
     step_num += 1

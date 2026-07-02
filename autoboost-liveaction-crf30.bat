@@ -9,8 +9,8 @@ set "fork=essential"
 :: example forks: 5fish, essential, hdr, custom
 set "DENOISE=False"
 :: DENOISE updates denoise=True/False in settings.txt before dispatch. 5fish should use True; other forks default to False.
-set "AVX512_FLAG="
-:: Optional: set AVX512_FLAG=--avx512 only if your CPU supports AVX-512 and the fork has an AVX-512 build.
+set "AVX512=False"
+:: Set AVX512=True only if your CPU supports AVX-512 and the fork has an AVX-512 build.
 
 del tools\bat*.txt
 move *.mkv video-input
@@ -92,7 +92,7 @@ echo Encoding inputs from: video-input
 echo Outputs will go to:   video-output
 echo.
 :: If you'd like to use --film-grain, then --photon-noise must be set to 0, do not remove the setting.
-"VapourSynth\python.exe" "tools\dispatch.py" --fork %fork% %AVX512_FLAG% --denoise %DENOISE% --quality %QUALITY% --autocrop --ssimu2 %SSIMU2_TOOL% --verbose --ssimu2-cpu-workers %SSIMU2_WORKERS% --resume --fast-speed 8 --final-speed %FINAL_SPEED% --workers %WORKER_COUNT% --fast-params "%FAST_PARAMS%" --final-params "%FINAL_PARAMS%"
+"VapourSynth\python.exe" "tools\dispatch.py" --fork %fork% --avx512 %AVX512% --denoise %DENOISE% --quality %QUALITY% --autocrop --ssimu2 %SSIMU2_TOOL% --verbose --ssimu2-cpu-workers %SSIMU2_WORKERS% --resume --fast-speed 8 --final-speed %FINAL_SPEED% --workers %WORKER_COUNT% --fast-params "%FAST_PARAMS%" --final-params "%FINAL_PARAMS%"
 
 echo.
 echo All tasks finished.

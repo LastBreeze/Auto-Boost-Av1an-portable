@@ -1,7 +1,7 @@
 @echo off
 :: Notepad++ is suggested for editing this file.
 :: This batch file uses av1an-dispatch.py to call av1an.exe directly.
-set "av1an_settings=--lineart-psy-bias 4 --texture-psy-bias 2 --hbd-mds 1 --keyint 305 --noise-level-thr 16000 --tune 0 --filtering-noise-detection 4 --lp 3 --photon-noise 200"
+set "av1an_settings=--lineart-psy-bias 3 --texture-psy-bias 3 --hbd-mds 1 --lp 3 --photon-noise 200"
 set "FINAL_SPEED=4"
 set "QUALITY=30"
 :: Set photon noise to 0 if using film-grain
@@ -9,8 +9,8 @@ set "fork=5fish"
 :: example forks: 5fish, essential, hdr, custom
 set "DENOISE=True"
 :: DENOISE updates denoise=True/False in settings.txt before dispatch. 5fish should use True; other forks default to False.
-set "AVX512_FLAG="
-:: Optional: set AVX512_FLAG=--avx512 only if your CPU supports AVX-512 and the fork has an AVX-512 build.
+set "AVX512=False"
+:: Set AVX512=True only if your CPU supports AVX-512 and the fork has an AVX-512 build.
 
 del tools\bat*.txt
 move *.mkv video-input
@@ -53,7 +53,7 @@ echo Encoding inputs from: video-input
 echo Outputs will go to:   video-output
 echo.
 
-"VapourSynth\python.exe" "tools\av1an-dispatch.py" --fork %fork% %AVX512_FLAG% --denoise %DENOISE% --quality %QUALITY% --workers %WORKER_COUNT% --final-speed %FINAL_SPEED% --final-params "%av1an_settings%"
+"VapourSynth\python.exe" "tools\av1an-dispatch.py" --fork %fork% --avx512 %AVX512% --denoise %DENOISE% --quality %QUALITY% --workers %WORKER_COUNT% --final-speed %FINAL_SPEED% --final-params "%av1an_settings%"
 
 echo.
 echo All tasks finished.
