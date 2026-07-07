@@ -295,12 +295,11 @@ def main():
 
     if optimize_workers:
         script += 'set "optimize-workers=true"\n'
-        script += 'set "custom-av1an-workers=      "\n'
-        script += 'set "custom-ssim2-workers=      "\n'
+        script += 'set "custom-av1an-workers="\n'
+        script += 'set "custom-ssim2-workers="\n'
         script += ":: The one-time optimized benchmark fills in the custom worker values above.\n"
-        script += ":: The padding spaces are intentional (in-place editing); do not remove them.\n"
         script += ":: To re-run a benchmark, clear the number between = and the closing quote.\n"
-        script += ":: To disable optimized workers, set optimize-workers=false (keep line length).\n\n"
+        script += ":: To disable optimized workers, set optimize-workers=false.\n\n"
     
     script += "del tools\\bat*.txt\n"
     script += "move *.mkv video-input\nmove *.mp4 video-input\nmove *.m2ts video-input\n"

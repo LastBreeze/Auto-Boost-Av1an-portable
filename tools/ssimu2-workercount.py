@@ -126,12 +126,8 @@ def parse_bat_settings(bat_path):
     return settings
 
 
-def set_bat_value_fixed_width(bat_path, key, value):
-    """Write key=value into the .bat WITHOUT changing the file's byte length.
-
-    cmd.exe reads a running batch file by byte offset, so any edit made while
-    the .bat is executing must keep every byte offset identical. bat-builder
-    writes these values with padding spaces so the number fits in-place."""
+def set_bat_value(bat_path, key, value):
+    """Write key=value into the .bat as a normal unpadded `set "key=value"` line."""
     value = str(value)
     key_l = key.lower()
     bat_path = Path(bat_path)
@@ -151,24 +147,15 @@ def set_bat_value_fixed_width(bat_path, key, value):
         m = BAT_SET_RE.match(stripped)
         if m and m.group(1).lower() == key_l:
             prefix = f'set "{m.group(1)}='
-            width = len(stripped) - len(prefix) - 1  # minus closing quote
             suffix = '"'
         elif "=" in stripped and " " not in stripped.split("=", 1)[0] and stripped.split("=", 1)[0].strip().lower() == key_l:
             actual_key = stripped.split("=", 1)[0]
             prefix = f"{actual_key}="
-            width = len(stripped) - len(prefix)
             suffix = ""
         else:
             continue
 
-        if len(value) <= width:
-            padded = value + " " * (width - len(value))
-        else:
-            padded = value
-            print(f"[Optimize] Warning: value '{value}' is wider than the reserved "
-                  f"space for {key} in the .bat; file length will change.", file=sys.stderr)
-
-        lines[idx] = lead + prefix + padded + suffix + ending
+        lines[idx] = lead + prefix + value + suffix + ending
         try:
             with open(bat_path, "w", encoding="utf-8", errors="replace", newline="") as f:
                 f.write("".join(lines))
@@ -1188,7 +1175,7 @@ def run_optimize_mode(bat_arg=None):
         vszip_workers = run_full_suite(target_fork=fork, use_filters=True)
 
     if vszip_workers:
-        if set_bat_value_fixed_width(bat_path, "custom-ssim2-workers", vszip_workers):
+        if set_bat_value(bat_path, "custom-ssim2-workers", vszip_workers):
             print(f"[Optimize] Wrote custom-ssim2-workers={vszip_workers} into {bat_path.name}", file=sys.stderr)
             print("[Optimize] Clear that value in the .bat to re-run this benchmark.", file=sys.stderr)
     else:

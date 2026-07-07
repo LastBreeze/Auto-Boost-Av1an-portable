@@ -90,13 +90,8 @@ def parse_bat_settings(bat_path):
     return settings
 
 
-def set_bat_value_fixed_width(bat_path, key, value):
-    """Write key=value into the .bat WITHOUT changing the file's byte length.
-
-    cmd.exe reads a running batch file by byte offset, so any edit made while
-    the .bat is executing must keep every byte offset identical. bat-builder
-    writes these values with padding spaces so the number fits in-place.
-    """
+def set_bat_value(bat_path, key, value):
+    """Write key=value into the .bat as a normal unpadded `set "key=value"` line."""
     value = str(value)
     key_l = key.lower()
     try:
@@ -114,28 +109,16 @@ def set_bat_value_fixed_width(bat_path, key, value):
         lead = body[:len(body) - len(body.lstrip())]
         m = BAT_SET_RE.match(stripped)
         if m and m.group(1).lower() == key_l:
-            actual_key = m.group(1)
-            prefix = f'set "{actual_key}='
-            width = len(stripped) - len(prefix) - 1  # minus closing quote
+            prefix = f'set "{m.group(1)}='
             suffix = '"'
         elif "=" in stripped and stripped.split("=", 1)[0].strip().lower() == key_l and " " not in stripped.split("=", 1)[0]:
             actual_key = stripped.split("=", 1)[0]
             prefix = f"{actual_key}="
-            width = len(stripped) - len(prefix)
             suffix = ""
         else:
             continue
 
-        if len(value) <= width:
-            padded = value + " " * (width - len(value))
-        else:
-            # Value doesn't fit in the reserved space. Writing anyway would
-            # shift byte offsets in a running .bat, so warn loudly.
-            padded = value
-            print(f"[Optimize] Warning: value '{value}' is wider than the reserved "
-                  f"space for {key} in the .bat; file length will change.", file=sys.stderr)
-
-        lines[idx] = lead + prefix + padded + suffix + ending
+        lines[idx] = lead + prefix + value + suffix + ending
         try:
             with open(bat_path, "w", encoding="utf-8", errors="replace", newline="") as f:
                 f.write("".join(lines))
@@ -627,7 +610,7 @@ def run_optimize_mode(bat_arg=None):
 
     workers = get_optimal_workers(input_path=input_path, encoder_params=encoder_params)
 
-    if set_bat_value_fixed_width(bat_path, "custom-av1an-workers", workers):
+    if set_bat_value(bat_path, "custom-av1an-workers", workers):
         print(f"[Optimize] Wrote custom-av1an-workers={workers} into {os.path.basename(bat_path)}")
         print("[Optimize] Clear that value in the .bat to re-run this benchmark.")
 
