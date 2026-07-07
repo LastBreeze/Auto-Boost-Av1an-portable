@@ -1,11 +1,18 @@
 Changelog
 
+v2.4
+---------------------------------
+• Auto-Boost-Av1an Portable can notify your phone when encoding is complete via the ntfy app
+• Added extras\Inviska MKV Extract
+• Files can now be added to video-input during encoding, workflow will rescan after each av1 encode
+
 v2.3
 ---------------------------------
 • Add progress percent to scene detection.
 • Optimize av1an cpu and ssim2 worker count to more accurately prevent oversaturating the cpu/gpu.
 • Add custom benchmark: bat-builder will now ask if you want to perform a worker count test
   benchmark to optimize for the svt-av1 preset and filtering of that specific script.
+• filter folder removed: on the fly filtering is available during av1 encoding
 
 v2.27
 ---------------------------------

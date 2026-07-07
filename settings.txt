@@ -1,17 +1,21 @@
 # Notepad++ is suggested for editing this file.
 
-# Only the live action .bat scripts have cropping enabled, using the --autocrop setting.
-# You can follow the live action .bat example, and add --autocrop to any .bat file you like.
-# Mode options: auto, manual
+# ntfy for Android or iPhone can receive notifications when encoding is complete
+# ntfy support is optional
+ntfy=d:\ntfy.txt
+
+# Automatic crop detection is enabled by batch files that pass --autocrop.
+# Manual crop values are used whenever crop=manual.
+# Mode options: auto, manual, off
 crop=auto
 
 # Manual Crop Values
 # Only used if crop=manual
 # Subtracts pixels from the specific side
-top=140
-bottom=140
-left=0
-right=0
+top=0
+bottom=0
+left=300
+right=300
 
 [downscaling]
 # Downscaling will be performed after crop.
@@ -32,7 +36,7 @@ downscale=False
 #   * Live Action: Spline36
 #
 # Target Resolution (WidthxHeight) e.g.
-1920x1080
+# 1920x1080
 # Or provide target width (recommended) and height is calculated for you.
 # Example: Source: 3840x1600, target: 1920, video will be 1900x800
 target_resolution=1920

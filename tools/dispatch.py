@@ -5,8 +5,13 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import glob
 import re
 import shutil
+import urllib.parse
+import urllib.request
 from wakepy import keep
 from svt_fork_setup import setup_svt_av1_fork
+
+BLUE = "\033[94m"
+RESET = "\033[0m"
 
 def scene_detection_env():
     """Environment for scene detection subprocesses.
@@ -18,6 +23,28 @@ def scene_detection_env():
     env["PYTHONUNBUFFERED"] = "1"
     env["AUTOBOOST_SCENE_X264_PROGRESS"] = "1"
     return env
+
+def parse_settings_lines(lines):
+    """Parse settings.txt lines into a case-insensitive key/value dict."""
+    settings = {}
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith(("#", ";", "[")) or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        settings[key.strip().lower()] = value.strip()
+    return settings
+
+
+def load_script_settings(settings_path):
+    """Read settings.txt once into a case-insensitive key/value dict."""
+    if not os.path.exists(settings_path):
+        return {}
+    try:
+        with open(settings_path, "r", encoding="utf-8", errors="replace") as f:
+            return parse_settings_lines(f.read().splitlines())
+    except Exception:
+        return {}
 
 def set_settings_value(settings_path, key, value):
     """Set key=value in settings.txt, preserving the rest of the file."""
@@ -100,6 +127,93 @@ def svt_fork_display_name(fork):
     if fork_key == "custom":
         return "custom"
     return (fork or "essential").strip() or "Essential"
+
+
+def parse_bool_setting(value, default=False):
+    if value is None:
+        return default
+    return str(value).strip().lower() in ("1", "true", "yes", "y", "on")
+
+
+def resolve_configured_path(configured_path, root_dir, tools_dir, default_filename="ntfy.txt"):
+    configured_path = (configured_path or "").strip().strip('"')
+    if not configured_path:
+        return os.path.join(tools_dir, default_filename)
+
+    if re.match(r"^[A-Za-z]:[\\/]", configured_path):
+        if os.name != "nt":
+            drive = configured_path[0].lower()
+            rest = configured_path[2:].lstrip("\\/").replace("\\", "/")
+            return os.path.join("/mnt", drive, rest)
+        return configured_path
+
+    if os.path.isabs(configured_path):
+        return configured_path
+
+    if os.name != "nt":
+        configured_path = configured_path.replace("\\", "/")
+
+    return os.path.join(root_dir, configured_path)
+
+
+def read_ntfy_config(settings, root_dir, tools_dir):
+    ntfy_path_setting = (settings or {}).get("ntfy", "").strip()
+    if ntfy_path_setting.lower() in ("", "false", "off", "none", "disabled"):
+        if not ntfy_path_setting:
+            ntfy_path_setting = os.path.join(tools_dir, "ntfy.txt")
+        else:
+            return {}, None
+    ntfy_path = resolve_configured_path(ntfy_path_setting, root_dir, tools_dir)
+    if not os.path.exists(ntfy_path):
+        return {}, ntfy_path
+
+    config = {}
+    try:
+        with open(ntfy_path, "r", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                stripped = line.strip()
+                if not stripped or stripped.startswith(("#", ";")):
+                    continue
+                if "=" in stripped:
+                    key, value = stripped.split("=", 1)
+                    config[key.strip().lower()] = value.strip()
+                elif "secretword" not in config:
+                    # Backward compatibility with older one-line ntfy.txt files.
+                    config["secretword"] = stripped
+    except Exception as e:
+        print(f"[Dispatch] Warning: Could not read ntfy settings from {ntfy_path}: {e}")
+    return config, ntfy_path
+
+
+def send_ntfy_notification(settings, root_dir, tools_dir, title, message):
+    ntfy_config, ntfy_path = read_ntfy_config(settings, root_dir, tools_dir)
+    secret_word = ntfy_config.get("secretword", "").strip()
+    pc_name = ntfy_config.get("pcname", "").strip() or "this PC"
+    if not secret_word:
+        if ntfy_path:
+            print(f"[Dispatch] ntfy not sent; secretword missing or empty in: {ntfy_path}")
+        return False
+
+    body = f"{message}\nPC: {pc_name}"
+    topic = urllib.parse.quote(secret_word, safe="")
+    request = urllib.request.Request(
+        f"https://ntfy.sh/{topic}",
+        data=body.encode("utf-8"),
+        headers={
+            "Title": title,
+            "Tags": "movie_camera",
+            "Priority": "default",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            response.read()
+        print("[Dispatch] ntfy notification sent.")
+        return True
+    except Exception as e:
+        print(f"[Dispatch] Warning: Failed to send ntfy notification: {e}")
+        return False
 
 WINDOWS_MAX_PATH = 260
 
@@ -191,6 +305,26 @@ def sanitize_input_filenames(video_input_dir, extensions):
     return renamed
 
 
+
+def gather_input_files(video_input_dir, extensions):
+    input_files = []
+    for ext in extensions:
+        input_files.extend(sorted(glob.glob(os.path.join(video_input_dir, ext))))
+    return input_files
+
+
+def scan_for_new_input_files(video_input_dir, extensions, known_input_files):
+    """Rescan video-input between encodes and queue files added after startup."""
+    sanitize_input_filenames(video_input_dir, extensions)
+    current_files = gather_input_files(video_input_dir, extensions)
+    new_files = [path for path in current_files if path not in known_input_files]
+    if new_files:
+        print(f"{BLUE}[Dispatch] New input file(s) detected in video-input; adding to queue:{RESET}")
+        for path in new_files:
+            print(f"{BLUE}{os.path.basename(path)}{RESET}")
+        known_input_files.update(new_files)
+    return new_files
+
 def main():
     # --- Configuration ---
     # Paths relative to this script (tools/dispatch.py)
@@ -261,6 +395,8 @@ def main():
             print(f"[Dispatch] Warning: Failed to copy settings.txt: {e}")
     else:
         print(f"[Dispatch] Warning: settings.txt not found at {settings_src}")
+
+    ntfy_settings = load_script_settings(settings_src)
         
     # Extract dispatcher-only options and worker count for logic checks
     worker_count = None
@@ -281,8 +417,12 @@ def main():
             selected_fork = args[idx + 1]
             idx += 2
         elif arg == "--avx512":
-            avx512 = True
-            idx += 1
+            if idx + 1 < len(args) and not args[idx + 1].startswith("--"):
+                avx512 = parse_bool_setting(args[idx + 1])
+                idx += 2
+            else:
+                avx512 = True
+                idx += 1
         else:
             passthrough_args.append(arg)
             idx += 1
@@ -322,9 +462,8 @@ def main():
     # --- Gather Input Files ---
     extensions = ("*.mkv", "*.mp4", "*.m2ts")
     sanitize_input_filenames(video_input_dir, extensions)
-    input_files = []
-    for ext in extensions:
-        input_files.extend(glob.glob(os.path.join(video_input_dir, ext)))
+    input_files = gather_input_files(video_input_dir, extensions)
+    known_input_files = set(input_files)
     
     if not input_files:
         print(f"[Dispatch] No video files found in {video_input_dir}")
@@ -335,7 +474,10 @@ def main():
     print(f"[Dispatch] Found {len(input_files)} files to process.")
 
     # --- Main Processing Loop ---
-    for input_abspath_origin in input_files:
+    input_index = 0
+    while input_index < len(input_files):
+        input_abspath_origin = input_files[input_index]
+        input_index += 1
         filename = os.path.basename(input_abspath_origin)
         basename = os.path.splitext(filename)[0]
         
@@ -453,6 +595,13 @@ def main():
                     subprocess.check_call(final_cmd, cwd=temp_dir)
             except subprocess.CalledProcessError:
                 print("[Dispatch] Encoding failed.")
+                send_ntfy_notification(
+                    ntfy_settings,
+                    root_dir,
+                    tools_dir,
+                    "Auto-Boost encode failed",
+                    "An encode failed.",
+                )
                 continue 
 
             # 4. Move Av1an Artifacts from video-input to Temp
@@ -513,17 +662,40 @@ def main():
             # 7. Move Output
             temp_output_mkv = os.path.join(temp_dir, f"{basename}-output.mkv")
             
+            output_moved = False
             if os.path.exists(temp_output_mkv):
                 print(f"[Dispatch] Moving final file to: {final_output_path}")
                 try:
                     shutil.move(temp_output_mkv, final_output_path)
+                    output_moved = True
                 except Exception as e:
                     print(f"[Dispatch] Error moving output file: {e}")
             else:
                 print(f"[Dispatch] Error: Expected output file not found: {temp_output_mkv}")
+
+            if output_moved:
+                newly_detected_files = scan_for_new_input_files(video_input_dir, extensions, known_input_files)
+                if newly_detected_files:
+                    warn_and_pause_if_paths_too_long(newly_detected_files, video_output_dir, temp_dir)
+                    input_files.extend(newly_detected_files)
         
         except Exception as e:
             print(f"[Dispatch] Critical Error during processing: {e}")
+            send_ntfy_notification(
+                ntfy_settings,
+                root_dir,
+                tools_dir,
+                "Auto-Boost encode failed",
+                "An encode failed.",
+            )
+
+    send_ntfy_notification(
+        ntfy_settings,
+        root_dir,
+        tools_dir,
+        "Auto-Boost encode complete",
+        "All queued encodes are complete.",
+    )
 
     print("\n" + "="*80)
     print("Dispatch Batch Complete.")
