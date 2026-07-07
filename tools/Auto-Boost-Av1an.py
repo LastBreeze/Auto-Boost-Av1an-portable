@@ -192,13 +192,12 @@ do_deband_bool = s_deband.lower() == "true"
 # -----------------------
 
 stage = int(args.stage)
-# Make direct Auto-Boost invocations behave like the generated .bat dispatchers.
-setup_svt_av1_fork(tools_dir, args.fork, avx512=args.avx512, verbose=True)
 src_file = Path(args.input).resolve()
 if platform.system() == 'Windows':
     src_file = type(src_file)(r"\\?" + rf"\{src_file}")
 file_ext = src_file.suffix
 output_dir = src_file.parent
+
 if args.temp is not None:
     tmp_dir = Path(args.temp).resolve()
     if platform.system() == 'Windows':
@@ -213,7 +212,7 @@ cache_file = tmp_dir / f"{src_file.stem}.ffindex"
 fast_output_file = tmp_dir / f"{src_file.stem}_fastpass.mkv"
 # Final output
 final_output_file = output_dir / f"{src_file.stem}-av1.mkv"
-tmp_final_output_file = tmp_dir / f"{src_file.stem}-av1.mkv" 
+tmp_final_output_file = tmp_dir / f"{src_file.stem}-av1.mkv"
 
 ssimu2_log_file = tmp_dir / f"{src_file.stem}_ssimu2.log"
 xpsnr_log_file = tmp_dir / f"{src_file.stem}_xpsnr.log"
@@ -284,6 +283,14 @@ else:
     fast_pass_workers = av1an_workers_arg
 
 photon_noise_val = int(args.photon_noise)
+
+
+def append_encoder_photon_noise(params: list[str]) -> list[str]:
+    """Keep --photon-noise as an SVT-AV1 encoder setting, not Av1an JSON photon_noise."""
+    if photon_noise_val > 0 and "--photon-noise" not in params:
+        return params + ["--photon-noise", str(photon_noise_val)]
+    return params
+
 
 if args.debug:
     print("=" * 54)
@@ -855,10 +862,6 @@ def final_pass() -> None:
         '--keep',
     ]
 
-    # Only add photon noise if strictly greater than 0
-    if photon_noise_val > 0:
-        av1an_cmd.extend(['--photon-noise', str(photon_noise_val)])
-
     av1an_cmd.extend([
         '-e', 'svt-av1',
         '-m', 'bestsource',
@@ -870,8 +873,8 @@ def final_pass() -> None:
         # Use generated scenes
         av1an_cmd.extend(['-s', scenes_file.name])
     else:
-        v_params = f"--preset {final_speed} --crf {quality} {final_params}"
-        av1an_cmd.extend(['-v', v_params])
+        v_params = append_encoder_photon_noise(["--preset", final_speed, "--crf", str(quality)] + (final_params.split() if final_params else []))
+        av1an_cmd.extend(['-v', " ".join(v_params)])
 
     # Show command ALWAYS per user request
     print("-" * 50)
@@ -1382,21 +1385,53 @@ def metrics_aggregation(score_list: list[float]) -> tuple[float, float, float]:
 
 def find_zones_file(video_path: Path) -> Path | None:
     """
-    Looks for a zones file matching sXXeXX pattern.
-    Example: Awesome.Show.S01E02.mkv matches s01e02-zones.txt
+    Find a zones txt file for the input video.
+
+    Primary match: S01E02 in the video filename -> s01e02-zones.txt.
+    Search the source folder first, then common Auto-Boost folders so a run
+    launched from temp/ or with a differently-resolved input path still finds
+    video-input/s01e02-zones.txt.
     """
     stem = video_path.stem
-    # Match S01E02 or s01e02 case insensitive
-    match = re.search(r"([sS]\d{2}[eE]\d{2})", stem)
+    match = re.search(r"(s\d{2}e\d{2})", stem, flags=re.IGNORECASE)
     if not match:
         return None
-    
+
     ep_str = match.group(1).lower()
-    zones_filename = f"{ep_str}-zones.txt"
-    zones_path = video_path.parent / zones_filename
-    
-    if zones_path.exists():
-        return zones_path
+    exact_filename = f"{ep_str}-zones.txt"
+
+    search_dirs: list[Path] = []
+
+    def add_search_dir(path: Path) -> None:
+        try:
+            resolved = path.resolve()
+        except Exception:
+            resolved = path
+        if resolved not in search_dirs:
+            search_dirs.append(resolved)
+
+    add_search_dir(video_path.parent)
+    add_search_dir(video_path.parent / "video-input")
+    add_search_dir(video_path.parent.parent / "video-input")
+    add_search_dir(Path.cwd())
+    add_search_dir(Path.cwd() / "video-input")
+    add_search_dir(tools_dir.parent / "video-input")
+
+    for directory in search_dirs:
+        zones_path = directory / exact_filename
+        if zones_path.exists():
+            return zones_path
+
+    # Fallback: accept names like show-s01e02-zones.txt or S01E02.zones.txt.
+    # This keeps exact s01e02-zones.txt preferred while making auto-match less brittle.
+    for directory in search_dirs:
+        if not directory.exists():
+            continue
+        for candidate in sorted(directory.glob("*.txt")):
+            candidate_stem = candidate.stem.lower()
+            if ep_str in candidate_stem and "zones" in candidate_stem:
+                return candidate
+
     return None
 
 def parse_param_string_to_dict(param_list: list[str]) -> dict:
@@ -1431,32 +1466,25 @@ def dict_to_param_list(d: dict) -> list[str]:
             l.append(v)
     return l
 
-def merge_params(base_params: list[str], zone_params_str: str) -> tuple[list[str], int | None]:
+def merge_params(base_params: list[str], zone_params_str: str) -> list[str]:
     """
-    Merges base params with zone params. 
-    Returns (new_param_list, photon_noise_override).
+    Merges base params with zone params.
+    --photon-noise is an SVT-AV1 encoder setting and stays in video_params.
     """
     base_dict = parse_param_string_to_dict(base_params)
-    
+
     # Split zone params string into list
     zone_list = zone_params_str.strip().split()
     zone_dict = parse_param_string_to_dict(zone_list)
-    
-    photon_noise_val = None
-    
-    # Update base with zone
+
+    # Update base with zone. Zones can override --photon-noise here just like
+    # any other SVT-AV1 setting; it must not be moved into Av1an's JSON
+    # photon_noise field, which is limited to u8 and should remain null.
     for k, v in zone_dict.items():
-        if k == '--photon-noise':
-            try:
-                photon_noise_val = int(v)
-            except:
-                pass
-            # Do not add photon noise to video_params dict
-        else:
-            base_dict[k] = v
-            
+        base_dict[k] = v
+
     # Reconstruct list
-    return dict_to_param_list(base_dict), photon_noise_val
+    return dict_to_param_list(base_dict)
 
 # ---------------------
 
@@ -1557,18 +1585,15 @@ def calculate_zones_json(ranges: list[float], hr: bool, nframe: int, override_zo
             console.print(f'Chunk: [{start_frame}:{end_frame}] / 15th: {metric_percentile_15_total[index]:.2f} / CRF: {new_crf}')
 
         extra_params = final_params.split() if final_params else []
-        scene_params = ["--preset", final_speed, "--crf", f"{new_crf:.2f}"] + extra_params
-        
-        # Handle 0 -> None for JSON
-        pn_val = photon_noise_val if photon_noise_val > 0 else None
-        
+        scene_params = append_encoder_photon_noise(["--preset", final_speed, "--crf", f"{new_crf:.2f}"] + extra_params)
+
         base_scenes.append({
             "start_frame": start_frame,
             "end_frame": end_frame,
-            "photon_noise": pn_val, # Use global argument or None
+            "photon_noise": None,
             "video_params": scene_params
         })
-        
+
     # 2. Check for Zones File
     if override_zones:
         zones_file = override_zones
@@ -1645,20 +1670,16 @@ def calculate_zones_json(ranges: list[float], hr: bool, nframe: int, override_zo
                         int_start = max(s_start, z_start)
                         int_end = min(s_end, z_end_exclusive)
                         
-                        # Merge params
-                        merged_params, merged_pn = merge_params(scene["video_params"], z_params_str)
-                        pn = merged_pn if merged_pn is not None else scene["photon_noise"]
-                        
-                        # Ensure consistency if zone overrides to 0
-                        if pn == 0: pn = None
-                        
+                        # Merge params. --photon-noise remains in video_params.
+                        merged_params = merge_params(scene["video_params"], z_params_str)
+
                         new_list.append({
                             "start_frame": int_start,
                             "end_frame": int_end,
-                            "photon_noise": pn,
+                            "photon_noise": None,
                             "video_params": merged_params
                         })
-                        
+
                         # 3. Post-zone
                         if s_end > z_end_exclusive:
                             new_list.append({
@@ -1686,7 +1707,7 @@ def calculate_zones_json(ranges: list[float], hr: bool, nframe: int, override_zo
                 "encoder": "svt_av1",
                 "passes": 1,
                 "video_params": s["video_params"],
-                "photon_noise": s["photon_noise"],
+                "photon_noise": None,
                 "photon_noise_height": None,
                 "photon_noise_width": None,
                 "chroma_noise": False,
@@ -1703,8 +1724,6 @@ def calculate_zones_json(ranges: list[float], hr: bool, nframe: int, override_zo
     console.print(f"[cyan]Generated Av1an scenes file: {obscure_user_path(str(scenes_file))}[/cyan]")
 
 
-console.print("[bold]Auto-Boost-Av1an start!\n")
-
 # --- ZONES CHECK FOR DISPLAY ---
 current_zones_file = None
 zones_msg = ""
@@ -1713,17 +1732,22 @@ if zones_override_path:
     # User specified
     current_zones_file = zones_override_path
     if current_zones_file.exists():
-        zones_msg = f"Final-pass zones file specified: {current_zones_file.name}"
+        zones_msg = f"Zones file specified: {current_zones_file.name}"
     else:
-        zones_msg = f"Final-pass zones file specified: {current_zones_file.name} (Not found)"
+        zones_msg = f"Zones file specified: {current_zones_file.name} (not found)"
 else:
     # Auto-detect
     current_zones_file = find_zones_file(src_file)
     if current_zones_file:
-        zones_msg = f"Final-pass zones file found: {current_zones_file.name}"
+        zones_msg = f"Zones file detected: {current_zones_file.name}"
 
 if zones_msg:
-    console.print(f"[cyan]{zones_msg}[/cyan]\n")
+    console.print(f"[blue]{zones_msg}[/blue]")
+
+console.print("[bold]Auto-Boost-Av1an start!\n")
+
+# Make direct Auto-Boost invocations behave like the generated .bat dispatchers.
+setup_svt_av1_fork(tools_dir, args.fork, avx512=args.avx512, verbose=True)
 # -------------------------------
 
 if no_boosting:
