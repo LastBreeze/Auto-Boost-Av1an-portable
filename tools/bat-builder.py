@@ -295,10 +295,14 @@ def main():
 
     if optimize_workers:
         script += 'set "optimize-workers=true"\n'
-        script += 'set "custom-av1an-workers="\n'
-        script += 'set "custom-ssim2-workers="\n'
-        script += ":: The one-time optimized benchmark fills in the custom worker values above.\n"
-        script += ":: To re-run a benchmark, clear the number between = and the closing quote.\n"
+        script += 'set "custom-av1an-workers="' + " " * 8 + "\n"
+        script += 'set "custom-ssim2-workers="' + " " * 8 + "\n"
+        script += 'set "custom-ssim2-tool="' + " " * 16 + "\n"
+        script += ":: The one-time optimized benchmark fills in the custom worker/stream values and SSIMU2 tool above.\n"
+        script += ":: custom-ssim2-tool values: vs-hip nvidia, vs-hip vulkan, ffvship nvidia, ffvship vulkan, vs-zip.\n"
+        script += ":: The trailing spaces after the closing quotes are RESERVED so the benchmark can edit this\n"
+        script += ":: running .bat in-place without shifting cmd.exe's byte offsets - do not delete them.\n"
+        script += ":: To re-run a benchmark, clear the custom value between = and the closing quote.\n"
         script += ":: To disable optimized workers, set optimize-workers=false.\n\n"
     
     script += "del tools\\bat*.txt\n"
@@ -312,7 +316,8 @@ def main():
     # Optimized One-Time Benchmark (encode workers)
     if optimize_workers:
         script += ":: --- STEP 1-OPT: ONE-TIME OPTIMIZED WORKER BENCHMARK (ENCODE) ---\n"
-        script += "\"VapourSynth\\python.exe\" \"tools\\workercount.py\" --optimize-bat \"%~f0\"\n\n"
+        script += "\"VapourSynth\\python.exe\" \"tools\\workercount.py\" --optimize-bat \"%~f0\"\n"
+        script += "if defined custom-av1an-workers set \"WORKER_COUNT=%custom-av1an-workers%\"\n\n"
 
     # Worker Check Encoding
     script += ":: --- STEP 1A: WORKER COUNT CHECK (ENCODE) ---\n" if mode == "autoboost" else ":: --- STEP 1: WORKER COUNT CHECK ---\n"
@@ -339,7 +344,9 @@ def main():
     # Optimized One-Time Benchmark (SSIMU2 vs-zip workers, Autoboost Only)
     if mode == "autoboost" and optimize_workers:
         script += ":: --- STEP 1B-OPT: ONE-TIME OPTIMIZED SSIMU2 BENCHMARK ---\n"
-        script += "\"VapourSynth\\python.exe\" \"tools\\ssimu2-workercount.py\" --optimize-bat \"%~f0\"\n\n"
+        script += "\"VapourSynth\\python.exe\" \"tools\\ssimu2-workercount.py\" --optimize-bat \"%~f0\"\n"
+        script += "if defined custom-ssim2-tool set \"SSIMU2_TOOL=%custom-ssim2-tool%\"\n"
+        script += "if defined custom-ssim2-workers set \"SSIMU2_WORKERS=%custom-ssim2-workers%\"\n\n"
 
     # Worker Check SSIMU2 (Autoboost Only)
     if mode == "autoboost":
@@ -370,7 +377,13 @@ def main():
         script += "\techo Decrease worker count.\n"
         script += "    pause\n)\n\n"
 
+    if optimize_workers:
+        script += "if defined custom-av1an-workers set \"WORKER_COUNT=%custom-av1an-workers%\"\n"
+
     if mode == "autoboost":
+        if optimize_workers:
+            script += "if defined custom-ssim2-tool set \"SSIMU2_TOOL=%custom-ssim2-tool%\"\n"
+            script += "if defined custom-ssim2-workers set \"SSIMU2_WORKERS=%custom-ssim2-workers%\"\n"
         script += "if not defined SSIMU2_TOOL set \"SSIMU2_TOOL=vs-hip\"\n"
         script += "if not defined SSIMU2_WORKERS set \"SSIMU2_WORKERS=1\"\n\n"
 
@@ -397,7 +410,7 @@ def main():
         script += film_grain_note
         
     if mode == "autoboost":
-        script += f"\"VapourSynth\\python.exe\" \"tools\\dispatch.py\" --fork %fork% --avx512 %AVX512% --denoise %DENOISE% --quality %QUALITY%{autocrop_flag} --ssimu2 %SSIMU2_TOOL% --verbose --ssimu2-cpu-workers %SSIMU2_WORKERS% --resume --fast-speed 8 --final-speed %FINAL_SPEED% --workers %WORKER_COUNT% --fast-params \"%FAST_PARAMS%\" --final-params \"%FINAL_PARAMS%\"\n\n"
+        script += f"\"VapourSynth\\python.exe\" \"tools\\dispatch.py\" --fork %fork% --avx512 %AVX512% --denoise %DENOISE% --quality %QUALITY%{autocrop_flag} --ssimu2 \"%SSIMU2_TOOL%\" --verbose --ssimu2-cpu-workers %SSIMU2_WORKERS% --resume --fast-speed 8 --final-speed %FINAL_SPEED% --workers %WORKER_COUNT% --fast-params \"%FAST_PARAMS%\" --final-params \"%FINAL_PARAMS%\"\n\n"
     else:
         script += f"\"VapourSynth\\python.exe\" \"tools\\av1an-dispatch.py\" --resume --fork %fork% --avx512 %AVX512% --denoise %DENOISE%{autocrop_flag} --quality %QUALITY% --workers %WORKER_COUNT% --final-speed %FINAL_SPEED% --final-params \"%av1an_settings%\"\n\n"
 

@@ -38,14 +38,14 @@ AUTO_BOOST_SCRIPT = TOOLS_DIR / "Auto-Boost-Av1an.py"
 SKIP = 3
 STALL_TIMEOUT = 10.0  # Seconds to wait before killing stalled process
 
-# vs-zip CPU worker measurement tuning
-TARGET_CPU_UTILIZATION = 0.90   # Aim for ~90% CPU load with vs-zip workers
-SPILLOVER_WEIGHT = 0.5          # Fraction of measured usage ABOVE 1 core counted as
-                                # real per-worker demand. A lone worker opportunistically
-                                # spills onto idle cores it doesn't strictly need, so its
-                                # raw measurement overstates demand under contention.
+# vs-zip worker sweet-spot tuning.
+# The vs-zip count is found by measuring REAL SSIMU2 throughput (fps) at
+# several worker counts and keeping the fastest - the only reliable signal on
+# power/thermally limited CPUs where more workers collapse clock speeds.
+VSZIP_TEST_DURATION = 12        # Seconds of rendering measured per candidate
+VSZIP_TIE_MARGIN = 0.03         # Within 3% fps counts as a tie -> prefer FEWER workers
+VSZIP_RAM_HEADROOM = 0.85       # Candidates that push RAM past 85% are rejected
 CPU_WARMUP_SECONDS = 3.0        # Ignore vs-zip spin-up before sampling CPU usage
-VSZIP_PROBE_DURATION = 12       # Seconds for the 1-worker measurement pass
 
 # GPU / Plugin Paths
 VS_PLUGINS_DIR = BASE_DIR / "VapourSynth" / "vs-plugins"
@@ -127,7 +127,15 @@ def parse_bat_settings(bat_path):
 
 
 def set_bat_value(bat_path, key, value):
-    """Write key=value into the .bat as a normal unpadded `set "key=value"` line."""
+    """Write key=value into the .bat WITHOUT changing the file's byte length.
+
+    cmd.exe reads a running batch file by byte offset, so an edit made while
+    the .bat is executing must not shift any bytes. bat-builder reserves
+    trailing spaces AFTER the closing quote of each custom line; cmd ignores
+    everything after the closing quote of a `set "key=value"` line, so the
+    value is written inside the quotes and the leftover reserve stays as
+    padding. `if defined` checks in the .bat keep working because an empty
+    quoted value leaves the variable undefined."""
     value = str(value)
     key_l = key.lower()
     bat_path = Path(bat_path)
@@ -146,16 +154,22 @@ def set_bat_value(bat_path, key, value):
         lead = body[:len(body) - len(body.lstrip())]
         m = BAT_SET_RE.match(stripped)
         if m and m.group(1).lower() == key_l:
-            prefix = f'set "{m.group(1)}='
-            suffix = '"'
-        elif "=" in stripped and " " not in stripped.split("=", 1)[0] and stripped.split("=", 1)[0].strip().lower() == key_l:
-            actual_key = stripped.split("=", 1)[0]
-            prefix = f"{actual_key}="
-            suffix = ""
+            new_core = lead + f'set "{m.group(1)}={value}"'
+        elif ("=" in stripped and " " not in stripped.split("=", 1)[0]
+                and stripped.split("=", 1)[0].strip().lower() == key_l):
+            new_core = lead + f"{stripped.split('=', 1)[0]}={value}"
         else:
             continue
 
-        lines[idx] = lead + prefix + value + suffix + ending
+        if len(new_core) <= len(body):
+            new_body = new_core + " " * (len(body) - len(new_core))
+        else:
+            new_body = new_core
+            print(f"[Optimize] Warning: value '{value}' is wider than the reserved "
+                  f"space for {key}; the .bat byte length will change. If this run "
+                  f"was launched by that .bat, re-launch it before encoding.", file=sys.stderr)
+
+        lines[idx] = new_body + ending
         try:
             with open(bat_path, "w", encoding="utf-8", errors="replace", newline="") as f:
                 f.write("".join(lines))
@@ -166,6 +180,47 @@ def set_bat_value(bat_path, key, value):
 
     print(f"[Optimize] Warning: {key} line not found in {bat_path.name}.", file=sys.stderr)
     return False
+
+
+def format_bat_ssimu2_tool(tool, variant=None):
+    tool = (tool or "").strip().lower().replace("_", "-")
+    variant = (variant or "").strip().lower()
+    if tool == "vs-hip":
+        return f"vs-hip {variant if variant in ('nvidia', 'vulkan') else 'nvidia'}"
+    if tool in ("ffvship", "ffvship-nvidia", "ffvship-vulkan"):
+        if not variant:
+            variant = "vulkan" if "vulkan" in tool else "nvidia"
+        return f"ffvship {variant if variant in ('nvidia', 'vulkan') else 'nvidia'}"
+    if tool == "vs-zip":
+        return "vs-zip"
+    return tool.replace("-", " ")
+
+
+def read_ssimu2_config(config_path=CONFIG_FILE):
+    cfg = {}
+    try:
+        for raw in Path(config_path).read_text(encoding="utf-8", errors="replace").splitlines():
+            if not raw.strip() or raw.lstrip().startswith("#") or "=" not in raw:
+                continue
+            key, value = raw.split("=", 1)
+            cfg[key.strip().lower().replace("_", "-")] = value.strip()
+    except Exception:
+        pass
+    return cfg
+
+
+def winner_count_from_config(cfg):
+    tool = (cfg.get("tool") or "").strip().lower().replace("_", "-")
+    if tool == "vs-zip":
+        value = cfg.get("workercount", "")
+    elif tool == "vs-hip":
+        value = cfg.get("streams") or cfg.get("workercount", "")
+    else:
+        value = cfg.get("streams") or cfg.get("workercount", "")
+    try:
+        return max(1, int(value))
+    except (TypeError, ValueError):
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -325,6 +380,124 @@ final.set_output(0)
         print(f"   Warning: filtered benchmark source failed ({e}); using raw sample.", file=sys.stderr)
         return core.ffms2.Source(source=str(SAMPLE_FILE)), "raw sample (filtered script failed)"
 
+# ---------------------------------------------------------------------------
+# BENCHMARK SAMPLE (created from the first video in video-input via mkvmerge,
+# mirroring extras/create-sample.bat: 90 seconds, --no-audio)
+# ---------------------------------------------------------------------------
+
+MKVMERGE_EXE = TOOLS_DIR / "MKVToolNix" / "mkvmerge.exe"
+VIDEO_INPUT_DIR = BASE_DIR / "video-input"
+BENCH_SAMPLE_FILE = TOOLS_DIR / "benchmark-sample.mkv"
+SAMPLE_MAX_AGE_SECONDS = 6 * 3600
+VIDEO_EXTENSIONS = (".mkv", ".mp4", ".m2ts")
+
+
+def find_first_input_video():
+    """First real source file in video-input (skips encode artifacts)."""
+    if not VIDEO_INPUT_DIR.is_dir():
+        return None
+    for path in sorted(VIDEO_INPUT_DIR.iterdir()):
+        if not path.is_file():
+            continue
+        if path.suffix.lower() not in VIDEO_EXTENSIONS:
+            continue
+        if path.stem.lower().endswith(("-av1", "-output")):
+            continue
+        return path
+    return None
+
+
+def delete_benchmark_sample():
+    for pattern in ("benchmark-sample*.mkv", "benchmark-sample.mkv.*"):
+        for path in TOOLS_DIR.glob(pattern):
+            try:
+                path.unlink()
+                print(f"[Sample] Deleted {path.name}", file=sys.stderr)
+            except OSError:
+                pass
+
+
+def ensure_benchmark_sample(force=False):
+    """Create tools/benchmark-sample.mkv: a 90 second, audio-free cut of the
+    first video in video-input, made with mkvmerge exactly like
+    extras/create-sample.bat (--no-audio --split parts:00:03:00-00:04:30).
+    Falls back to the first 90 seconds for short sources. Reuses a recent
+    sample so workercount.py and ssimu2-workercount.py share one file.
+    Returns the sample Path, or None if it could not be created."""
+    if not force and BENCH_SAMPLE_FILE.exists():
+        try:
+            if time.time() - BENCH_SAMPLE_FILE.stat().st_mtime < SAMPLE_MAX_AGE_SECONDS:
+                print(f"[Sample] Reusing recent benchmark sample: {BENCH_SAMPLE_FILE.name}", file=sys.stderr)
+                return BENCH_SAMPLE_FILE
+        except OSError:
+            pass
+
+    source = find_first_input_video()
+    if not source:
+        print("[Sample] No source video found in video-input.", file=sys.stderr)
+        return None
+
+    mkvmerge = str(MKVMERGE_EXE) if MKVMERGE_EXE.exists() else "mkvmerge"
+
+    for path in TOOLS_DIR.glob("benchmark-sample*.mkv"):
+        try:
+            path.unlink()
+        except OSError:
+            pass
+
+    # Prefer 3:00-4:30 (skips intros); fall back to 0:00-1:30 for short
+    # sources, where mkvmerge produces no output file at all.
+    for time_range in ("00:03:00-00:04:30", "00:00:00-00:01:30"):
+        cmd = [mkvmerge, "-o", str(BENCH_SAMPLE_FILE), "--no-audio",
+               "--split", f"parts:{time_range}", str(source)]
+        try:
+            subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=600)
+        except FileNotFoundError:
+            print("[Sample] Warning: mkvmerge not found; cannot create benchmark sample.", file=sys.stderr)
+            return None
+        except subprocess.TimeoutExpired:
+            print("[Sample] Warning: mkvmerge timed out; cannot create benchmark sample.", file=sys.stderr)
+            return None
+
+        produced = None
+        if BENCH_SAMPLE_FILE.exists() and BENCH_SAMPLE_FILE.stat().st_size > 1024 * 1024:
+            produced = BENCH_SAMPLE_FILE
+        else:
+            # Some mkvmerge versions append part numbers when splitting
+            parts = sorted(TOOLS_DIR.glob("benchmark-sample-0*.mkv"))
+            if parts and parts[0].stat().st_size > 1024 * 1024:
+                try:
+                    parts[0].replace(BENCH_SAMPLE_FILE)
+                    produced = BENCH_SAMPLE_FILE
+                except OSError:
+                    produced = parts[0]
+                for extra in parts[1:]:
+                    try:
+                        extra.unlink()
+                    except OSError:
+                        pass
+
+        if produced:
+            print(f"[Sample] Created 90s benchmark sample (no audio) from "
+                  f"{source.name} [{time_range}].", file=sys.stderr)
+            return produced
+
+    print(f"[Sample] Warning: mkvmerge produced no usable sample from {source.name}.", file=sys.stderr)
+    return None
+
+
+def adopt_benchmark_sample():
+    """Point every benchmark at a fresh 90s cut of the user's real source in
+    video-input; keep the bundled tools/sample.mkv as the fallback."""
+    global SAMPLE_FILE
+    bench = ensure_benchmark_sample()
+    if bench:
+        SAMPLE_FILE = Path(bench)
+        print(f"[Sample] Benchmarking against {SAMPLE_FILE.name}", file=sys.stderr)
+    else:
+        print(f"[Sample] Falling back to {SAMPLE_FILE.name}", file=sys.stderr)
+
+
 def write_ssimu2_config(tool="vs-hip", filter_tool="vs-hip", workercount=1, variant="nvidia", streams=1):
     with open(CONFIG_FILE, "w", encoding="utf-8") as f:
         f.write(f"tool={tool}\n")
@@ -454,32 +627,6 @@ src.set_output()
     except subprocess.CalledProcessError as e:
         print(f"Error: Fast pass generation failed. {e}", file=sys.stderr)
         return None
-
-def calculate_optimal_count(rss_per_worker, cores_per_worker):
-    """Size the vs-zip worker count from MEASURED settled CPU usage.
-
-    One vs-zip 'worker' is one VapourSynth thread (core.num_threads), so its
-    baseline demand is 1 core. Anything measured above that with a single
-    worker is mostly opportunistic spillover (decode threads spreading over
-    idle cores) and is only partially counted via SPILLOVER_WEIGHT."""
-    total_ram = psutil.virtual_memory().total
-    cpu_threads = os.cpu_count() or 1
-
-    if rss_per_worker <= 0:
-        rss_per_worker = 100 * 1024 * 1024
-    safe_ram = total_ram * 0.85
-    max_workers_ram = max(1, int(safe_ram / rss_per_worker))
-
-    if cores_per_worker and cores_per_worker > 0:
-        effective = 1.0 + max(0.0, cores_per_worker - 1.0) * SPILLOVER_WEIGHT
-        effective = max(0.5, min(effective, float(cpu_threads)))
-        max_workers_cpu = max(1, int((cpu_threads * TARGET_CPU_UTILIZATION) / effective))
-    else:
-        # Could not measure CPU - fall back to the old conservative cap
-        max_workers_cpu = max(1, cpu_threads // 2)
-
-    return max(1, min(max_workers_ram, max_workers_cpu, cpu_threads))
-
 
 def _print_progress(percent: float, end: bool = False, elapsed: float = 0.0):
     if end:
@@ -812,13 +959,17 @@ def run_ffvship_suite(exe_path: Path, variant_name: str, encoded_file: Path):
 
 
 def benchmark_cpu_vszip(encoded_file, use_filters=False):
-    """Benchmark vs-zip CPU workers.
+    """Find the vs-zip worker sweet spot by measuring REAL SSIMU2 throughput
+    at several worker counts, instead of extrapolating from CPU usage.
+
+    This catches power/thermally limited CPUs (especially laptops) where
+    adding workers collapses clock speeds: total CPU still reads 100%, but
+    fps drops hard. Ties within VSZIP_TIE_MARGIN go to the LOWER count.
 
     use_filters=False (regular mode): settings.txt is NOT read and NO filters
     are applied - the raw sample is used directly for the general worker test.
     use_filters=True (optimize mode): the source is built through the user's
     real settings.txt filtering chain."""
-    print("   Benchmarking CPU (vs-zip - Single Worker probe)...", file=sys.stderr)
     if use_filters:
         source_clip, source_desc = build_benchmark_source_clip()
     else:
@@ -826,41 +977,68 @@ def benchmark_cpu_vszip(encoded_file, use_filters=False):
         source_desc = "raw sample (regular mode: settings.txt not read, no filters)"
     print(f"   vs-zip benchmark source: {source_desc}", file=sys.stderr)
 
-    fps_1, rss, elapsed_1, cores_1 = _run_vszip_internal(
-        1, encoded_file, duration=VSZIP_PROBE_DURATION, source_clip=source_clip)
+    cpu_threads = os.cpu_count() or 1
+    total_ram = psutil.virtual_memory().total
+    results = {}   # workers -> (fps, elapsed)
+    ram_cap = [cpu_threads]
 
-    if fps_1 <= 0:
+    def measure(w):
+        w = max(1, min(int(w), ram_cap[0]))
+        if w in results:
+            return w
+        print(f"   Testing vs-zip with {w} workers...", file=sys.stderr)
+        fps, rss, elapsed, cores = _run_vszip_internal(
+            w, encoded_file, duration=VSZIP_TEST_DURATION, source_clip=source_clip)
+        if rss > total_ram * VSZIP_RAM_HEADROOM and w > 1:
+            print(f"   ! {w} workers pushed RAM to {rss // (1024**2)} MB "
+                  f"(>{int(VSZIP_RAM_HEADROOM * 100)}% of system RAM) - rejected.", file=sys.stderr)
+            ram_cap[0] = min(ram_cap[0], w)
+            fps = 0.0
+        results[w] = (fps, elapsed)
+        if fps > 0:
+            note = f" ({cores:.1f}/{cpu_threads} cores busy)" if cores > 0 else ""
+            print(f"   -> {w} workers: {fps:.2f} fps{note}", file=sys.stderr)
+        else:
+            print(f"   -> {w} workers: no throughput (failed, stalled, or unsafe)", file=sys.stderr)
+        return w
+
+    # Coarse ladder across the thread range, then refine around the best.
+    coarse = sorted({max(1, cpu_threads // 4), max(1, cpu_threads // 2),
+                     max(1, (3 * cpu_threads) // 4), cpu_threads})
+    for w in coarse:
+        measure(w)
+
+    valid = {w: r[0] for w, r in results.items() if r[0] > 0}
+    if valid:
+        tested = sorted(results)
+        best_w = max(valid, key=lambda k: valid[k])
+        idx = tested.index(best_w)
+        refine = []
+        if idx > 0:
+            refine.append((best_w + tested[idx - 1]) // 2)
+        if idx < len(tested) - 1:
+            refine.append((best_w + tested[idx + 1]) // 2)
+        for cand in refine:
+            if cand not in results and 1 <= cand <= cpu_threads:
+                measure(cand)
+
+    valid = {w: r for w, r in results.items() if r[0] > 0}
+    if not valid:
         return 0, 1, 0.0
 
-    cpu_threads = os.cpu_count() or 1
-    opt_workers = calculate_optimal_count(rss, cores_1)
+    best_fps = max(r[0] for r in valid.values())
+    contenders = [w for w, r in valid.items() if r[0] >= best_fps * (1 - VSZIP_TIE_MARGIN)]
+    best_w = min(contenders)
+    fps_best, elapsed_best = valid[best_w]
 
-    if cores_1 > 0:
-        print(f"   Measured settled usage (1 worker): {cores_1:.2f} cores "
-              f"({100.0 * cores_1 / cpu_threads:.0f}% of CPU)", file=sys.stderr)
-        print(f"   Targeting {int(TARGET_CPU_UTILIZATION * 100)}% of {cpu_threads} threads "
-              f"-> {opt_workers} workers (spillover weight {SPILLOVER_WEIGHT})", file=sys.stderr)
-    else:
-        print(f"   Warning: Could not measure per-worker CPU. Falling back to "
-              f"{opt_workers} workers (threads/2 cap).", file=sys.stderr)
+    print("   vs-zip sweet spot summary:", file=sys.stderr)
+    for w in sorted(results):
+        fps_w = results[w][0]
+        marker = "  <-- sweet spot" if w == best_w else ""
+        fps_str = f"{fps_w:.2f} fps" if fps_w > 0 else "failed/unsafe"
+        print(f"     {w} workers: {fps_str}{marker}", file=sys.stderr)
 
-    print(f"   Benchmarking CPU (vs-zip - {opt_workers} Workers)...", file=sys.stderr)
-    fps_opt, _, elapsed_opt, cores_total = _run_vszip_internal(
-        opt_workers, encoded_file, duration=10, source_clip=source_clip)
-
-    # Confirmation pass: if the chosen count oversaturates the CPU, scale it
-    # back proportionally toward the target load.
-    if cores_total > cpu_threads * 0.97 and opt_workers > 1:
-        scaled = max(1, int(opt_workers * (cpu_threads * TARGET_CPU_UTILIZATION) / cores_total))
-        if scaled < opt_workers:
-            print(f"   Confirmation run oversaturated the CPU ({cores_total:.1f}/{cpu_threads} cores). "
-                  f"Scaling workers {opt_workers} -> {scaled}.", file=sys.stderr)
-            opt_workers = scaled
-    elif cores_total > 0:
-        print(f"   Confirmation run settled at {cores_total:.1f}/{cpu_threads} cores "
-              f"({100.0 * cores_total / cpu_threads:.0f}% of CPU).", file=sys.stderr)
-
-    return fps_opt, opt_workers, elapsed_opt
+    return fps_best, best_w, elapsed_best
 
 def _run_vszip_internal(workers, encoded_file, duration, source_clip=None):
     if not hasattr(core, 'vszip'):
@@ -1000,10 +1178,13 @@ def run_full_suite(target_fork="5fish", use_filters=False):
     Optimize mode passes use_filters=True to benchmark through the user's
     real filtering chain.
 
-    Returns the measured vs-zip CPU worker count, or None if vs-zip failed."""
+    Returns the winning config dict, or None if all benchmarks failed."""
     vszip_workers = None
     try:
         cleanup_temp_files()
+
+        # Benchmark against a 90s cut of the user's real source when available
+        adopt_benchmark_sample()
 
         # Setup specific SVT-AV1 fork with AVX-512 detection before pass
         setup_svt_av1_fork(target_fork=target_fork)
@@ -1106,7 +1287,12 @@ def run_full_suite(target_fork="5fish", use_filters=False):
         if filters_enabled and filter_tool not in ('vs-hip', 'vs-zip'):
             print("   [Config] Filtering is enabled; forced filter-tool to vs-hip/vs-zip.", file=sys.stderr)
 
-        return vszip_workers
+        return {
+            "tool": winner["tool"],
+            "variant": config_variant,
+            "workercount": winner["workers"],
+            "streams": config_streams,
+        }
 
     except Exception as e:
         print(f"Fatal error: {e}", file=sys.stderr)
@@ -1117,14 +1303,13 @@ def run_full_suite(target_fork="5fish", use_filters=False):
 
 
 def run_optimize_mode(bat_arg=None):
-    """One-time optimized vs-zip benchmark driven by a generated .bat with
-    optimize-workers=true. Writes custom-ssim2-workers back into the .bat.
+    """One-time optimized SSIMU2 benchmark driven by a generated .bat with
+    optimize-workers=true. Writes the benchmark winner into that exact .bat.
 
-    - If workercount-ssimu2.txt does not exist yet, the FULL suite runs once
-      (tool selection + vs-zip) and the vs-zip result is stored in the .bat.
-    - If it exists but custom-ssim2-workers is empty, only the vs-zip portion
-      is re-benchmarked (fast pass + measurement) with the user's filtering.
-    - If custom-ssim2-workers already has a value, this returns immediately."""
+    custom-ssim2-tool stores the winning backend and GPU variant when needed.
+    custom-ssim2-workers stores the matching stream/worker count for that
+    winning backend, not the unrelated vs-zip worker count unless vs-zip won.
+    If both custom values are already present, this returns immediately."""
     bat_path = None
     if bat_arg and Path(bat_arg).is_file():
         bat_path = Path(bat_arg).resolve()
@@ -1141,45 +1326,39 @@ def run_optimize_mode(bat_arg=None):
         # This bat did not opt in - nothing to do.
         return
 
-    existing = bat.get("custom-ssim2-workers", "").strip()
-    if existing.isdigit() and int(existing) > 0:
-        print(f"[Optimize] custom-ssim2-workers already set to {existing} in "
+    existing_workers = bat.get("custom-ssim2-workers", "").strip()
+    existing_tool = bat.get("custom-ssim2-tool", "").strip()
+    if existing_workers.isdigit() and int(existing_workers) > 0 and existing_tool:
+        print(f"[Optimize] custom-ssim2-tool={existing_tool} and custom-ssim2-workers={existing_workers} already set in "
               f"{bat_path.name}. Skipping benchmark.", file=sys.stderr)
         return
 
     fork = (bat.get("fork", "5fish") or "5fish").strip()
 
     print("\n-------------------------------------------------------------------------------", file=sys.stderr)
-    print(f"[Optimize] One-time optimized SSIMU2 (vs-zip) benchmark for: {bat_path.name}", file=sys.stderr)
+    print(f"[Optimize] One-time optimized SSIMU2 benchmark for: {bat_path.name}", file=sys.stderr)
     print("-------------------------------------------------------------------------------", file=sys.stderr)
 
     if CONFIG_FILE.exists():
-        # Tool selection is already benchmarked - only measure vs-zip CPU
-        # workers, through the user's real filtering chain.
-        vszip_workers = None
-        try:
-            cleanup_temp_files()
-            setup_svt_av1_fork(target_fork=fork)
-            encoded_file = run_fast_pass()
-            if encoded_file:
-                fps_zip, w_zip, _ = benchmark_cpu_vszip(encoded_file, use_filters=True)
-                if fps_zip > 0:
-                    vszip_workers = w_zip
-        except Exception as e:
-            print(f"[Optimize] vs-zip benchmark error: {e}", file=sys.stderr)
-        finally:
-            cleanup_temp_files()
+        # Tool selection was already benchmarked. Reuse that winner instead of
+        # replacing GPU winners with the vs-zip worker count.
+        winner_cfg = read_ssimu2_config(CONFIG_FILE)
     else:
-        # First run: the full suite handles tool selection AND the improved
-        # vs-zip measurement in one pass.
-        vszip_workers = run_full_suite(target_fork=fork, use_filters=True)
+        # First run: the full suite handles tool selection and writes the
+        # winning backend/worker-or-stream count to workercount-ssimu2.txt.
+        winner_cfg = run_full_suite(target_fork=fork, use_filters=True) or {}
 
-    if vszip_workers:
-        if set_bat_value(bat_path, "custom-ssim2-workers", vszip_workers):
-            print(f"[Optimize] Wrote custom-ssim2-workers={vszip_workers} into {bat_path.name}", file=sys.stderr)
-            print("[Optimize] Clear that value in the .bat to re-run this benchmark.", file=sys.stderr)
+    winner_tool = format_bat_ssimu2_tool(winner_cfg.get("tool"), winner_cfg.get("variant"))
+    winner_count = winner_count_from_config(winner_cfg)
+
+    if winner_tool and winner_count:
+        wrote_tool = set_bat_value(bat_path, "custom-ssim2-tool", winner_tool)
+        wrote_workers = set_bat_value(bat_path, "custom-ssim2-workers", winner_count)
+        if wrote_tool and wrote_workers:
+            print(f"[Optimize] Wrote custom-ssim2-tool={winner_tool} and custom-ssim2-workers={winner_count} into {bat_path.name}", file=sys.stderr)
+            print("[Optimize] Clear those values in the .bat to re-run this benchmark.", file=sys.stderr)
     else:
-        print("[Optimize] vs-zip benchmark failed; leaving custom-ssim2-workers empty.", file=sys.stderr)
+        print("[Optimize] SSIMU2 benchmark/config did not produce a winner; leaving custom SSIMU2 settings empty.", file=sys.stderr)
 
 
 def _parse_cli(argv):
@@ -1201,7 +1380,11 @@ def _parse_cli(argv):
 
 if __name__ == "__main__":
     optimize, bat_arg = _parse_cli(sys.argv[1:])
-    if optimize:
-        run_optimize_mode(bat_arg)
-    else:
-        run_full_suite()
+    try:
+        if optimize:
+            run_optimize_mode(bat_arg)
+        else:
+            run_full_suite()
+    finally:
+        # This script is the last benchmark consumer of the shared sample.
+        delete_benchmark_sample()
