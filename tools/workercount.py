@@ -1,6 +1,7 @@
 import os
 import re
 import sys
+import json
 import glob
 import psutil
 import subprocess
@@ -29,12 +30,22 @@ ENCODER_PARAMS = " --preset 4 --crf 30 --lp 3"
 # power/thermally limited CPUs (especially laptops), where adding workers
 # collapses clock speeds: CPU usage still reads 100%, but fps drops hard.
 RAM_HEADROOM = 0.90              # Candidates that push RAM past 90% are rejected
-FIRST_FRAME_TIMEOUT = 420        # Max seconds to wait for the FIRST encoded frame
+RAM_ABORT_PERCENT = 90.0         # LIVE kill-switch: system RAM use at/above this
+RAM_ABORT_MIN_AVAILABLE_MB = 2048  # ...or less than this much free -> the test is
+                                 # killed IMMEDIATELY (checked every 0.25s, armed
+                                 # from process start) so the benchmark can never
+                                 # starve the rest of the system of memory.
+RAM_GUARD_INTERVAL = 0.25        # Seconds between RAM safety checks
+FIRST_FRAME_TIMEOUT = 600        # Max seconds to wait for the FIRST encoded frame
                                  # of the first candidate (includes one-time scene
-                                 # detection + source indexing at slow presets)
-WARMUP_AFTER_FIRST_FRAME = 15    # Seconds of settling after frames start flowing
-                                 # before the measurement window opens
-MEASURE_WINDOW = 45              # Seconds of steady-state throughput measured
+                                 # detection, source indexing, and lookahead fill,
+                                 # which takes minutes at preset <= 2)
+FPS_SETTLE_DELTA = 0.5           # Settled = av1an's fps readings stay within this
+FPS_SETTLE_SPAN = 30.0           # ...range over this many seconds -> stop the test
+FPS_MAX_MEASURE_SECONDS = 180    # Never watch a candidate longer than this after
+                                 # its first fps reading (median of the last
+                                 # readings is used if it never settles)
+COOLDOWN_BETWEEN_TESTS = 10      # Idle seconds between candidates (clock recovery)
 MAX_CANDIDATE_SECONDS = 900      # Hard safety timeout per candidate
 POLL_INTERVAL = 1.0              # Seconds between frame-count/RAM polls
 SEARCH_BUDGET = 6                # Max worker counts tested (typical runs use 3-4)
@@ -464,6 +475,110 @@ def parse_lp(params):
 # THROUGHPUT MEASUREMENT (frames actually encoded per second)
 # ---------------------------------------------------------------------------
 
+class ConsoleFpsReader:
+    """Reads av1an's live fps from the Windows console screen buffer.
+
+    av1an hides its progress bar when stdout/stderr are piped, so the
+    benchmark leaves av1an's output attached to the console (fully visible to
+    the user) and samples the fps number av1an itself prints, e.g.:
+        00:00:13 [1/8 Chunks] [...]  29% 192/655 (14.15 fps, eta 33s, ...)
+    Reading the buffer never disturbs what is on screen. On failure (or on
+    non-Windows systems) .ok is False and the caller falls back to counting
+    frames in av1an's temp folder."""
+
+    FPS_RE = re.compile(r"([0-9]+(?:[.,][0-9]+)?)\s*fps", re.IGNORECASE)
+
+    def __init__(self):
+        self.ok = False
+        if os.name != "nt":
+            return
+        try:
+            import ctypes
+            from ctypes import wintypes
+            self._ctypes = ctypes
+            self._k32 = ctypes.windll.kernel32
+
+            class COORD(ctypes.Structure):
+                _fields_ = [("X", ctypes.c_short), ("Y", ctypes.c_short)]
+
+            class SMALL_RECT(ctypes.Structure):
+                _fields_ = [("Left", ctypes.c_short), ("Top", ctypes.c_short),
+                            ("Right", ctypes.c_short), ("Bottom", ctypes.c_short)]
+
+            class CSBI(ctypes.Structure):
+                _fields_ = [("dwSize", COORD), ("dwCursorPosition", COORD),
+                            ("wAttributes", ctypes.c_ushort), ("srWindow", SMALL_RECT),
+                            ("dwMaximumWindowSize", COORD)]
+
+            self._COORD = COORD
+            self._CSBI = CSBI
+            # Open the console output buffer directly; works even if this
+            # process's own stdout has been redirected.
+            GENERIC_READ, GENERIC_WRITE = 0x80000000, 0x40000000
+            FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING = 1, 2, 3
+            self._handle = self._k32.CreateFileW(
+                "CONOUT$", GENERIC_READ | GENERIC_WRITE,
+                FILE_SHARE_READ | FILE_SHARE_WRITE, None, OPEN_EXISTING, 0, None)
+            if self._handle in (None, -1):
+                return
+            csbi = CSBI()
+            if not self._k32.GetConsoleScreenBufferInfo(self._handle, ctypes.byref(csbi)):
+                return
+            self._DWORD = wintypes.DWORD
+            self.ok = True
+        except Exception:
+            self.ok = False
+
+    def read_latest_fps(self, rows_back=12):
+        """Latest fps value visible near the cursor, or None."""
+        if not self.ok:
+            return None
+        try:
+            ctypes = self._ctypes
+            csbi = self._CSBI()
+            if not self._k32.GetConsoleScreenBufferInfo(self._handle, ctypes.byref(csbi)):
+                return None
+            width = csbi.dwSize.X
+            cursor_y = csbi.dwCursorPosition.Y
+            latest = None
+            for row in range(max(0, cursor_y - rows_back), cursor_y + 1):
+                buf = ctypes.create_unicode_buffer(width + 1)
+                nread = self._DWORD(0)
+                if not self._k32.ReadConsoleOutputCharacterW(
+                        self._handle, buf, width, self._COORD(0, row), ctypes.byref(nread)):
+                    continue
+                matches = self.FPS_RE.findall(buf.value)
+                if matches:
+                    try:
+                        latest = float(matches[-1].replace(",", "."))
+                    except ValueError:
+                        pass
+            return latest
+        except Exception:
+            return None
+
+
+def kill_svt_stragglers():
+    """Kill every SvtAv1EncApp instance on the system. av1an's own tree kill
+    covers normal cases; this sweep guarantees no encoder keeps burning CPU
+    into the cooldown or the next test."""
+    for proc in psutil.process_iter(["name"]):
+        try:
+            if (proc.info.get("name") or "").lower().startswith("svtav1encapp"):
+                proc.kill()
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+
+
+def _median(values):
+    ordered = sorted(values)
+    n = len(ordered)
+    if n == 0:
+        return 0.0
+    mid = n // 2
+    return ordered[mid] if n % 2 else (ordered[mid - 1] + ordered[mid]) / 2.0
+
+
 def count_ivf_frames(path):
     """Count complete frames in a (possibly still-growing) IVF file by walking
     its 12-byte frame headers. Safe to run while the encoder is writing."""
@@ -490,26 +605,164 @@ def count_ivf_frames(path):
     return frames
 
 
-def count_encoded_frames(temp_dir):
-    """Total frames written so far across all chunk .ivf files in an av1an temp dir."""
+def _ebml_vint_len(b0):
+    for i in range(8):
+        if b0 & (0x80 >> i):
+            return i + 1
+    return 0
+
+
+def count_mkv_frames(path):
+    """Count video frames in a (possibly still-growing) Matroska file by
+    walking EBML elements and counting SimpleBlocks/BlockGroups.
+
+    av1an 0.5.x writes its chunk files as MKV (despite the .ivf name), so this
+    is the per-frame progress signal on those builds. Safe on partial files:
+    parsing stops cleanly at the growing tail. Laced SimpleBlocks are counted
+    frame-accurately."""
+    SEGMENT, CLUSTER = 0x18538067, 0x1F43B675
+    SIMPLEBLOCK, BLOCKGROUP = 0xA3, 0xA0
+    frames = 0
+    try:
+        size = os.path.getsize(path)
+        with open(path, "rb") as f:
+            while True:
+                pos = f.tell()
+                if pos >= size:
+                    break
+                # --- element ID (marker bits kept) ---
+                b = f.read(1)
+                if not b:
+                    break
+                idlen = _ebml_vint_len(b[0])
+                if idlen == 0 or pos + idlen > size:
+                    break
+                idb = b + f.read(idlen - 1)
+                if len(idb) < idlen:
+                    break
+                eid = int.from_bytes(idb, "big")
+                # --- element size (marker bits masked) ---
+                sb = f.read(1)
+                if not sb:
+                    break
+                slen = _ebml_vint_len(sb[0])
+                if slen == 0 or f.tell() + slen - 1 > size:
+                    break
+                szb = bytearray(sb + f.read(slen - 1))
+                if len(szb) < slen:
+                    break
+                szb[0] &= (0xFF >> slen)
+                esize = int.from_bytes(szb, "big")
+                unknown = esize == (1 << (7 * slen)) - 1
+
+                if eid in (SEGMENT, CLUSTER):
+                    continue  # descend: children follow immediately
+                if unknown:
+                    break     # unknown-size non-master: cannot continue safely
+                payload_start = f.tell()
+                if payload_start + esize > size:
+                    break     # partial element at the growing tail
+                if eid == SIMPLEBLOCK:
+                    # frame-accurate: honor lacing (flags bit 0x06 -> count byte)
+                    head = f.read(min(esize, 8))
+                    n = 1
+                    if head:
+                        tlen = _ebml_vint_len(head[0])
+                        flag_idx = tlen + 2  # track vint + 2-byte timestamp
+                        if tlen and len(head) > flag_idx:
+                            if head[flag_idx] & 0x06 and len(head) > flag_idx + 1:
+                                n = head[flag_idx + 1] + 1
+                    frames += n
+                    f.seek(payload_start + esize)
+                elif eid == BLOCKGROUP:
+                    frames += 1
+                    f.seek(payload_start + esize)
+                else:
+                    f.seek(payload_start + esize)
+    except OSError:
+        return 0
+    return frames
+
+
+def count_chunk_frames(path):
+    """Frames in one av1an chunk file, container detected by magic bytes:
+    DKIF -> IVF walk, EBML -> Matroska block count. Anything else is not a
+    chunk file and counts 0."""
+    try:
+        with open(path, "rb") as f:
+            magic = f.read(4)
+    except OSError:
+        return 0
+    if magic == b"DKIF":
+        return count_ivf_frames(path)
+    if magic == b"\x1a\x45\xdf\xa3":
+        return count_mkv_frames(path)
+    return 0
+
+
+def count_done_json_frames(temp_dir):
+    """Frames av1an itself has marked complete in its temp done.json (the
+    resume ledger). Chunk-level granularity, so it lags the IVF walk, but it
+    is layout-independent and works across av1an versions."""
+    path = os.path.join(temp_dir, "done.json")
+    if not os.path.exists(path):
+        return 0
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            data = json.load(f)
+    except Exception:
+        return 0
     total = 0
-    for root, _dirs, files in os.walk(temp_dir):
-        for name in files:
-            if name.lower().endswith(".ivf"):
-                total += count_ivf_frames(os.path.join(root, name))
+    done = data.get("done", {}) if isinstance(data, dict) else {}
+    if isinstance(done, dict):
+        for value in done.values():
+            if isinstance(value, (int, float)):
+                total += int(value)
+            elif isinstance(value, dict):
+                for key in ("frames", "frame_count", "frames_encoded"):
+                    if isinstance(value.get(key), (int, float)):
+                        total += int(value[key])
+                        break
     return total
 
 
+def count_encoded_frames(temp_dir):
+    """Total frames written so far in an av1an temp dir.
+
+    Chunk files are identified by magic bytes rather than filename or
+    extension (av1an 0.4 writes IVF chunks; av1an 0.5 writes MKV chunks that
+    are still named .ivf), because av1an versions differ in temp layout.
+    av1an's own done.json (completed chunks) is used as a second signal and
+    the larger of the two counts wins."""
+    chunk_total = 0
+    for root, _dirs, files in os.walk(temp_dir):
+        for name in files:
+            chunk_total += count_chunk_frames(os.path.join(root, name))
+    return max(chunk_total, count_done_json_frames(temp_dir))
+
+
 def measure_encode_fps(input_path, encoder_params, workers, scenes_file, first_candidate):
-    """Run av1an with `workers` workers and measure real steady-state encode
-    throughput by counting frames written into the chunk files.
+    """Run av1an with `workers` workers and measure its real encode fps.
 
-    Timeline: wait for the first encoded frame (scene detection and lookahead
-    happen before it), let things settle for WARMUP_AFTER_FIRST_FRAME, then
-    measure frames over MEASURE_WINDOW and kill the encode. If the whole clip
-    finishes early, fps is computed over the full encoding span instead.
+    av1an's output stays ATTACHED TO THE CONSOLE so the user sees its normal
+    progress bar. The fps number av1an prints is sampled once per second from
+    the console screen buffer (ConsoleFpsReader); if the buffer cannot be
+    read, cumulative fps derived from counting frames in av1an's temp folder
+    is used instead - same rule either way:
 
-    Returns (fps, rss_peak_bytes)."""
+      * SETTLED: the readings over the last FPS_SETTLE_SPAN seconds stayed
+        within FPS_SETTLE_DELTA fps -> stop, use the latest reading.
+      * FINISHED EARLY: the encode completed first -> use the median of the
+        last few readings (the most stable numbers from the end).
+      * NEVER SETTLED: after FPS_MAX_MEASURE_SECONDS, median of the last few.
+
+    After each test the whole av1an tree is killed plus a global sweep of any
+    SvtAv1EncApp.exe stragglers. The live RAM kill-switch (every
+    RAM_GUARD_INTERVAL from process start) is unchanged: system RAM at
+    RAM_ABORT_PERCENT or free RAM under RAM_ABORT_MIN_AVAILABLE_MB kills the
+    test instantly.
+
+    Returns (fps, rss_peak_bytes, ram_aborted)."""
     candidate_temp = os.path.join(BENCH_TEMP_DIR, f"av1an_w{workers}")
     shutil.rmtree(candidate_temp, ignore_errors=True)
     os.makedirs(candidate_temp, exist_ok=True)
@@ -521,7 +774,7 @@ def measure_encode_fps(input_path, encoder_params, workers, scenes_file, first_c
 
     cmd = [
         AV1AN_PATH,
-        "-i", input_path,
+        "-i", str(input_path),
         "-y",
         "--workers", str(workers),
         "-e", "svt-av1",
@@ -532,29 +785,65 @@ def measure_encode_fps(input_path, encoder_params, workers, scenes_file, first_c
         "-v", " " + encoder_params.strip(),
     ]
 
+    reader = CONSOLE_FPS_READER_FACTORY()
+    if reader.ok:
+        print(f"   Watching av1an's fps readout below. Settle rule: readings stay "
+              f"within {FPS_SETTLE_DELTA} fps for {FPS_SETTLE_SPAN:.0f}s.", file=sys.stderr)
+    else:
+        print(f"   (console fps readout unavailable - falling back to frame counting; "
+              f"same settle rule: within {FPS_SETTLE_DELTA} fps for {FPS_SETTLE_SPAN:.0f}s)",
+              file=sys.stderr)
+
     try:
-        process = subprocess.Popen(cmd, cwd=BASE_DIR,
-                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        # stdout/stderr are NOT redirected: av1an's progress bar stays visible.
+        process = subprocess.Popen(cmd, cwd=BASE_DIR)
     except FileNotFoundError:
         print("Error: av1an executable not found.", file=sys.stderr)
-        return 0.0, 0
+        return 0.0, 0, False
 
     start = time.time()
-    init_timeout = FIRST_FRAME_TIMEOUT if first_candidate else max(120, FIRST_FRAME_TIMEOUT // 2)
-    first_frame_time = None
-    frames_seen = 0          # monotonic max (av1an deletes its temp on completion)
-    f0 = t0 = None
-    fps = 0.0
+    init_timeout = FIRST_FRAME_TIMEOUT if first_candidate else max(240, FIRST_FRAME_TIMEOUT // 2)
+    fps_samples = []            # (timestamp, fps) once av1an reports moving fps
+    first_signal_time = None
+    first_frame_time = None     # fallback path bookkeeping
+    frames_seen = 0
+    result_fps = 0.0
     rss_peak = 0
+    ram_aborted = False
+    heavy_due = 0.0
+
+    def tail_median():
+        return _median([f for _, f in fps_samples[-5:]])
 
     try:
         while True:
             exited = process.poll() is not None
             now = time.time()
 
+            # --- FAST RAM SAFETY GUARD (every RAM_GUARD_INTERVAL) ---
+            if not exited:
+                vm = psutil.virtual_memory()
+                if (vm.percent >= RAM_ABORT_PERCENT
+                        or vm.available < RAM_ABORT_MIN_AVAILABLE_MB * 1024 * 1024):
+                    print(f"\n   !! SYSTEM RAM CRITICAL ({vm.percent:.0f}% used, "
+                          f"{vm.available // (1024**2)} MB free) - killing this test "
+                          f"immediately to protect the system.", file=sys.stderr)
+                    ram_aborted = True
+                    kill_process_tree(process.pid)
+                    kill_svt_stragglers()
+                    break
+
             if now - start > MAX_CANDIDATE_SECONDS:
-                print("   ! Candidate hit the hard safety timeout.", file=sys.stderr)
+                print("\n   ! Candidate hit the hard safety timeout.", file=sys.stderr)
+                result_fps = tail_median()
                 break
+
+            # Heavier bookkeeping runs once per POLL_INTERVAL; the loop spins
+            # faster purely for the RAM guard above.
+            if now < heavy_due and not exited:
+                time.sleep(RAM_GUARD_INTERVAL)
+                continue
+            heavy_due = now + POLL_INTERVAL
 
             # Track peak RAM of the whole process tree
             if not exited:
@@ -571,38 +860,56 @@ def measure_encode_fps(input_path, encoder_params, workers, scenes_file, first_c
                 except (psutil.NoSuchProcess, psutil.AccessDenied):
                     pass
 
-            frames_seen = max(frames_seen, count_encoded_frames(candidate_temp))
-
-            if first_frame_time is None:
+            # --- fps signal: av1an's own readout, else counted frames ---
+            fps_now = reader.read_latest_fps() if reader.ok else None
+            if fps_now is None or fps_now <= 0:
+                new_count = count_encoded_frames(candidate_temp)
+                if new_count > frames_seen:
+                    frames_seen = new_count
                 if frames_seen > 0:
-                    first_frame_time = now
-                elif exited:
-                    break  # process ended without producing any frames
-                elif now - start > init_timeout:
-                    print("   ! Timed out waiting for the first encoded frame.", file=sys.stderr)
-                    break
+                    if first_frame_time is None:
+                        first_frame_time = now
+                    span = now - first_frame_time
+                    if span >= 2.0:
+                        fps_now = frames_seen / span
 
-            if first_frame_time is not None:
-                if f0 is None and (exited or now - first_frame_time >= WARMUP_AFTER_FIRST_FRAME):
-                    f0, t0 = frames_seen, now
-                if f0 is not None and (exited or now - t0 >= MEASURE_WINDOW):
-                    f1, t1 = frames_seen, now
-                    if exited or f1 <= f0:
-                        # Encode finished (or too fast to window): use the whole span
-                        span = t1 - first_frame_time
-                        fps = (f1 / span) if span > 0 and f1 > 0 else 0.0
-                    else:
-                        span = t1 - t0
-                        fps = (f1 - f0) / span if span > 0 else 0.0
-                    break
-
-            if exited:
+            if fps_now is not None and fps_now > 0:
+                if first_signal_time is None:
+                    first_signal_time = now
+                fps_samples.append((now, fps_now))
+            elif first_signal_time is None and not exited and now - start > init_timeout:
+                print("\n   ! Timed out waiting for av1an to report encoding progress.",
+                      file=sys.stderr)
                 break
 
-            time.sleep(POLL_INTERVAL)
+            # --- stop conditions ---
+            if exited:
+                # Encode finished: most stable numbers from the end
+                result_fps = tail_median()
+                break
+
+            if fps_samples and first_signal_time is not None:
+                span_covered = now - first_signal_time
+                window = [f for t, f in fps_samples if t >= now - FPS_SETTLE_SPAN]
+                if (span_covered >= FPS_SETTLE_SPAN and window
+                        and max(window) - min(window) <= FPS_SETTLE_DELTA):
+                    result_fps = fps_samples[-1][1]
+                    print(f"\n   fps settled at {result_fps:.2f} "
+                          f"(varied <= {FPS_SETTLE_DELTA} fps over the last "
+                          f"{FPS_SETTLE_SPAN:.0f}s) - stopping this test.", file=sys.stderr)
+                    break
+                if span_covered >= FPS_MAX_MEASURE_SECONDS:
+                    result_fps = tail_median()
+                    print(f"\n   fps never fully settled within "
+                          f"{FPS_MAX_MEASURE_SECONDS}s - using the median of the "
+                          f"last readings ({result_fps:.2f} fps).", file=sys.stderr)
+                    break
+
+            time.sleep(RAM_GUARD_INTERVAL)
     finally:
         if process.poll() is None:
             kill_process_tree(process.pid)
+        kill_svt_stragglers()
         time.sleep(1)
         shutil.rmtree(candidate_temp, ignore_errors=True)
         if os.path.exists(TEST_OUTPUT_FILE):
@@ -613,7 +920,11 @@ def measure_encode_fps(input_path, encoder_params, workers, scenes_file, first_c
                 except OSError:
                     time.sleep(1)
 
-    return fps, rss_peak
+    return result_fps, rss_peak, ram_aborted
+
+
+# Factory hook (kept swappable for testing)
+CONSOLE_FPS_READER_FACTORY = ConsoleFpsReader
 
 
 # ---------------------------------------------------------------------------
@@ -700,20 +1011,68 @@ def run_benchmark(input_path, encoder_params):
     print(f"Encoder params: {encoder_params.strip()}", file=sys.stderr)
     print(f"CPU: {physical_cores} cores / {cpu_threads} threads (--lp {lp}) | "
           f"starting at {start} workers", file=sys.stderr)
-    print("Each candidate is measured on REAL encode throughput for "
-          f"~{WARMUP_AFTER_FIRST_FRAME + MEASURE_WINDOW}s of steady encoding "
-          "(1-3 minutes per test; scene detection runs once).", file=sys.stderr)
+    print("Each candidate runs av1an with its normal output visible and is "
+          f"stopped once av1an's fps readout settles (varies <= {FPS_SETTLE_DELTA} fps "
+          f"over {FPS_SETTLE_SPAN:.0f}s), followed by a {COOLDOWN_BETWEEN_TESTS}s "
+          "cooldown. Scene detection runs once.", file=sys.stderr)
 
-    state = {"first": True}
+    # Pre-flight: if the system is ALREADY under memory pressure, warn - the
+    # live guard will keep everything safe, but results will skew low.
+    vm0 = psutil.virtual_memory()
+    if vm0.percent >= 80:
+        print(f"   ! System RAM is already {vm0.percent:.0f}% used before the "
+              f"benchmark starts. Close other programs for a representative "
+              f"result; the benchmark will protect the system either way.", file=sys.stderr)
+
+    state = {"first": True, "per_worker_rss": 0, "ram_cap": None}
     ram_limited = []
 
+    def mark_unsafe(w):
+        ram_limited.append(w)
+        state["ram_cap"] = w if state["ram_cap"] is None else min(state["ram_cap"], w)
+
     def measure(w):
-        fps, rss_peak = measure_encode_fps(input_path, encoder_params, w, scenes_file, state["first"])
+        # Hard cap: once any count has tripped the RAM guard, everything at or
+        # above it is refused outright.
+        if state["ram_cap"] is not None and w >= state["ram_cap"]:
+            print(f"   ! {w} workers is at/above the RAM-unsafe count "
+                  f"({state['ram_cap']}) - not testing.", file=sys.stderr)
+            return 0.0
+
+        # Prospective skip: using the per-worker RSS learned from completed
+        # candidates, don't even LAUNCH counts that are clearly hopeless
+        # (borderline ones still run under the live kill-switch).
+        if state["per_worker_rss"] > 0:
+            vm = psutil.virtual_memory()
+            projected_available = vm.available - state["per_worker_rss"] * w
+            if projected_available < RAM_ABORT_MIN_AVAILABLE_MB * 1024 * 1024 * 0.5:
+                print(f"   ! {w} workers is projected to need ~"
+                      f"{(state['per_worker_rss'] * w) // (1024**2)} MB "
+                      f"(only {vm.available // (1024**2)} MB free) - not launching.",
+                      file=sys.stderr)
+                mark_unsafe(w)
+                return 0.0
+
+        fps, rss_peak, ram_aborted = measure_encode_fps(
+            input_path, encoder_params, w, scenes_file, state["first"])
         state["first"] = False
+
+        # Cooldown after every launched test so clocks/thermals recover before
+        # the next candidate (skipped tests don't need one).
+        print(f"   Cooling down {COOLDOWN_BETWEEN_TESTS}s...", file=sys.stderr)
+        time.sleep(COOLDOWN_BETWEEN_TESTS)
+
+        if not ram_aborted and rss_peak > 0:
+            state["per_worker_rss"] = max(state["per_worker_rss"], rss_peak // max(1, w))
+
+        if ram_aborted:
+            print(f"   ! {w} workers tripped the live RAM guard - marked unsafe.", file=sys.stderr)
+            mark_unsafe(w)
+            return 0.0
         if rss_peak > total_ram * RAM_HEADROOM:
             print(f"   ! {w} workers pushed RAM to {rss_peak // (1024**2)} MB "
                   f"(>{int(RAM_HEADROOM * 100)}% of system RAM) - rejected.", file=sys.stderr)
-            ram_limited.append(w)
+            mark_unsafe(w)
             return 0.0
         return fps
 
@@ -727,7 +1086,7 @@ def run_benchmark(input_path, encoder_params):
         fps_str = f"{results[w]:.2f} fps" if results[w] > 0 else "failed/unsafe"
         print(f"   - {w} workers: {fps_str}{marker}")
     if ram_limited:
-        print(f"   - RAM-limited counts: {sorted(ram_limited)}")
+        print(f"   - RAM-limited counts (unsafe on this system): {sorted(set(ram_limited))}")
     if best is None:
         best = max(1, cpu_threads // (lp + 1))
         print(f"   - WARNING: No candidate produced throughput. "

@@ -45,6 +45,9 @@ STALL_TIMEOUT = 10.0  # Seconds to wait before killing stalled process
 VSZIP_TEST_DURATION = 12        # Seconds of rendering measured per candidate
 VSZIP_TIE_MARGIN = 0.03         # Within 3% fps counts as a tie -> prefer FEWER workers
 VSZIP_RAM_HEADROOM = 0.85       # Candidates that push RAM past 85% are rejected
+VSZIP_RAM_ABORT_PERCENT = 90.0  # LIVE kill-switch: abort the render immediately when
+VSZIP_RAM_ABORT_MIN_MB = 2048   # system RAM crosses 90% used or free RAM drops
+                                # below 2 GB, protecting the rest of the system.
 CPU_WARMUP_SECONDS = 3.0        # Ignore vs-zip spin-up before sampling CPU usage
 
 # GPU / Plugin Paths
@@ -1111,6 +1114,15 @@ def _run_vszip_internal(workers, encoded_file, duration, source_clip=None):
                 max_rss[0] = max(max_rss[0], psutil.Process(os.getpid()).memory_info().rss)
             except:
                 pass
+            try:
+                vm = psutil.virtual_memory()
+                if (vm.percent >= VSZIP_RAM_ABORT_PERCENT
+                        or vm.available < VSZIP_RAM_ABORT_MIN_MB * 1024 * 1024):
+                    raise RuntimeError("RAMAbort")
+            except RuntimeError:
+                raise
+            except Exception:
+                pass
 
         if elapsed > duration:
             raise KeyboardInterrupt
@@ -1118,6 +1130,13 @@ def _run_vszip_internal(workers, encoded_file, duration, source_clip=None):
     try:
         clip_async_render(res, outfile=None, progress=p)
     except RuntimeError as re_err:
+        if "RAMAbort" in str(re_err):
+            cpu_sampler.stop()
+            sys.stderr.write("\n!! SYSTEM RAM CRITICAL - aborting this vs-zip test "
+                             "immediately to protect the system.\n")
+            # Report RSS as total system RAM so the caller rejects this count
+            # and caps the ladder.
+            return 0, psutil.virtual_memory().total, 0.0, 0.0
         if "Stalled" in str(re_err):
             cpu_sampler.stop()
             sys.stderr.write("\n[Timeout] vs-zip stalled.\n")

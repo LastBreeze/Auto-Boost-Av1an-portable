@@ -81,13 +81,13 @@ def find_active_bat_file(tools_dir, root_dir):
 
 
 def read_bat_optimize_settings(tools_dir, root_dir):
-    """Parse optimize-workers / custom-av1an-workers / custom-ssim2-workers from
-    the active .bat. Returns an empty dict when the settings are absent, so
+    """Parse optimize-workers, custom av1an workers, and custom SSIMU2
+    tool/worker settings from the active .bat. Returns an empty dict when the settings are absent, so
     callers proceed exactly as before."""
     bat_path = find_active_bat_file(tools_dir, root_dir)
     if not bat_path:
         return {}
-    wanted = {"optimize-workers", "custom-av1an-workers", "custom-ssim2-workers"}
+    wanted = {"optimize-workers", "custom-av1an-workers", "custom-ssim2-workers", "custom-ssim2-tool"}
     settings = {}
     try:
         with open(bat_path, "r", encoding="utf-8", errors="replace") as f:

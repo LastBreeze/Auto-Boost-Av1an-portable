@@ -88,13 +88,13 @@ def find_active_bat_file(tools_dir, root_dir):
 
 
 def read_bat_optimize_settings(tools_dir, root_dir):
-    """Parse optimize-workers / custom-av1an-workers / custom-ssim2-workers from
-    the active .bat. Returns an empty dict when the settings are absent, so
+    """Parse optimize-workers, custom av1an workers, and custom SSIMU2
+    tool/worker settings from the active .bat. Returns an empty dict when the settings are absent, so
     callers proceed exactly as before."""
     bat_path = find_active_bat_file(tools_dir, root_dir)
     if not bat_path:
         return {}
-    wanted = {"optimize-workers", "custom-av1an-workers", "custom-ssim2-workers"}
+    wanted = {"optimize-workers", "custom-av1an-workers", "custom-ssim2-workers", "custom-ssim2-tool"}
     settings = {}
     try:
         with open(bat_path, "r", encoding="utf-8", errors="replace") as f:
@@ -446,10 +446,15 @@ def main():
             _override_flag_value("--workers", custom_enc)
             print(f"\033[94m[Dispatch] Using optimized av1an worker count from bat: {custom_enc}\033[0m")
 
+        custom_ssimu2_tool = bat_opt.get("custom-ssim2-tool", "").strip()
+        if custom_ssimu2_tool:
+            _override_flag_value("--ssimu2", custom_ssimu2_tool.replace(" ", "-"))
+            print(f"\033[94m[Dispatch] Using optimized SSIMU2 tool from bat: {custom_ssimu2_tool}\033[0m")
+
         custom_ssimu2 = bat_opt.get("custom-ssim2-workers", "").strip()
         if custom_ssimu2.isdigit() and int(custom_ssimu2) > 0:
             _override_flag_value("--ssimu2-cpu-workers", custom_ssimu2)
-            print(f"\033[94m[Dispatch] Using optimized SSIMU2 CPU worker count from bat: {custom_ssimu2}\033[0m")
+            print(f"\033[94m[Dispatch] Using optimized SSIMU2 worker/stream count from bat: {custom_ssimu2}\033[0m")
 
     setup_svt_av1_fork(tools_dir, selected_fork, avx512=avx512, verbose=True)
 
