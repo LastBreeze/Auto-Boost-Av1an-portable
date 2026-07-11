@@ -46,7 +46,7 @@ import numpy as np
 import concurrent.futures
 from svt_fork_setup import setup_svt_av1_fork
 
-ver_str = "v2.3"
+ver_str = "v2.5"
 
 # --- TOOL PATHS HELPER ---
 def resolve_tool(portable_path_str: str, binary_name: str) -> Path:
@@ -112,6 +112,7 @@ parser.add_argument("-v", "--version", action='version', version = f"Auto-Boost-
 parser.add_argument("--debug", action='store_true', help = "Checks the installation and provides relevant information for troubleshooting | Default: not active")
 parser.add_argument("--fork", help="SVT-AV1 fork to copy before encoding: 5fish, essential, hdr, custom | Default: essential", default="essential")
 parser.add_argument("--avx512", action='store_true', help="Use AVX-512 SVT-AV1 build when the selected fork provides one")
+parser.add_argument("--tonemap", nargs="?", const="true", default="false", help="Tonemap HDR to SDR (BT.709) via libplacebo inside the VapourSynth script: true/false | Default: false")
 
 args = parser.parse_args()
 
@@ -268,6 +269,7 @@ verbose = args.verbose
 resume = args.resume
 no_boosting = args.no_boosting
 convert_yuv420p10 = args.convert_to_YUV420P10
+tonemap_bool = str(args.tonemap).strip().lower() in ("1", "true", "yes", "y", "on")
 
 # Worker Logic
 av1an_workers_arg = args.workers
@@ -395,6 +397,8 @@ def report_crop_status(mode: str, top: int, bottom: int, left: int, right: int) 
 
 def report_filter_status() -> None:
     active_filters = []
+    if tonemap_bool:
+        active_filters.append("tonemap: HDR -> SDR (BT.709) via libplacebo")
     if do_downscale_bool:
         active_filters.append(f"downscale: target_resolution={s_target_res}, kernel_type={s_kernel}")
     if do_denoise_bool:
@@ -567,7 +571,18 @@ else:
     console.print(f"[yellow]Unknown crop mode {s_crop_mode!r}; using auto.[/yellow]")
     crop_mode = "auto"
 
-if not os.path.exists(vpy_file):
+rebuild_vpy = not os.path.exists(vpy_file)
+if not rebuild_vpy:
+    try:
+        with open(vpy_file, "r", encoding="utf-8", errors="replace") as _f:
+            _existing_vpy_text = _f.read()
+        if ("do_tonemap = True" in _existing_vpy_text) != tonemap_bool:
+            console.print("[yellow]Existing VapourSynth script tonemap state differs from --tonemap; rebuilding.[/yellow]")
+            rebuild_vpy = True
+    except Exception:
+        rebuild_vpy = True
+
+if rebuild_vpy:
     
     crop_top, crop_bottom, crop_left, crop_right = 0, 0, 0, 0
     if crop_mode == "auto":
@@ -594,6 +609,20 @@ if {convert}:
 
 # Initialize (Fixes Placebo bitdepth error by ensuring 16-bit)
 src = initialize_clip(src)
+
+# Tonemap HDR -> SDR (libplacebo; libvs_placebo.dll autoloads from the plugins directory)
+do_tonemap = {tonemap}
+if do_tonemap:
+    src = core.fmtc.bitdepth(src, bits=16)
+    src = core.placebo.Tonemap(src, src_csp=1, dst_csp=0, dynamic_peak_detection=1, gamut_mapping=1, tone_mapping_function=1, metadata=0, contrast_recovery=0.0, smoothing_period=20.0, percentile=100.0)
+    # Tonemap returns RGB or 4:4:4 output; SVT-AV1 only supports 4:2:0, so convert
+    # back to YUV420P16 here. finalize_clip then produces the same 10-bit
+    # YUV420P10 output as the non-tonemap pipeline.
+    if src.format.color_family == vs.RGB:
+        src = src.resize.Bicubic(format=vs.YUV420P16, matrix_s="709")
+    elif src.format.id != vs.YUV420P16:
+        src = src.resize.Bicubic(format=vs.YUV420P16)
+    src = src.std.SetFrameProps(_Matrix=1, _Transfer=1, _Primaries=1)
 
 # 1. CROP
 if {ct} > 0 or {cb} > 0 or {cl} > 0 or {cr} > 0:
@@ -665,7 +694,8 @@ final.set_output(0)
             downscale=str(do_downscale_bool),
             target_res=s_target_res,
             kernel=s_kernel,
-            convert=convert_yuv420p10
+            convert=convert_yuv420p10,
+            tonemap=str(tonemap_bool)
         ))
 else:
     existing_crop_values = parse_crop_values_from_vpy(vpy_file)

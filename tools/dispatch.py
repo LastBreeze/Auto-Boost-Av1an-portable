@@ -11,6 +11,7 @@ from wakepy import keep
 from svt_fork_setup import setup_svt_av1_fork
 
 BLUE = "\033[94m"
+RED = "\033[91m"
 RESET = "\033[0m"
 
 def scene_detection_env():
@@ -133,6 +134,302 @@ def parse_bool_setting(value, default=False):
     if value is None:
         return default
     return str(value).strip().lower() in ("1", "true", "yes", "y", "on")
+
+
+def is_hdr_fork(fork):
+    return (fork or "").strip().lower() in ("svt-av1-hdr", "hdr")
+
+
+def parse_mediainfo_color_metadata(mediainfo_text):
+    """Return detected color metadata from MediaInfo text."""
+    metadata = {
+        "primaries": "",
+        "transfer": "",
+        "matrix": "",
+        "hdr_format": "",
+        "chroma_position": "",
+        "color_range_full": False,
+        "mastering_primaries": "",
+        "mastering_luminance": "",
+        "max_cll": "",
+        "max_fall": "",
+        "is_bt709": False,
+        "is_bt601": False,
+        "is_hdr": False,
+    }
+    for line in mediainfo_text.splitlines():
+        if ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        key_l = key.strip().lower()
+        value = value.strip()
+        value_l = value.lower()
+        if key_l == "color primaries":
+            metadata["primaries"] = value
+        elif key_l == "transfer characteristics":
+            metadata["transfer"] = value
+        elif key_l == "matrix coefficients":
+            metadata["matrix"] = value
+        elif key_l == "hdr format":
+            metadata["hdr_format"] = value
+        elif key_l == "chroma subsampling":
+            type_match = re.search(r"type\s*(\d)", value_l)
+            if type_match:
+                metadata["chroma_position"] = type_match.group(1)
+        elif key_l == "color range":
+            metadata["color_range_full"] = value_l == "full"
+        elif key_l == "mastering display color primaries":
+            metadata["mastering_primaries"] = value
+        elif key_l == "mastering display luminance":
+            metadata["mastering_luminance"] = value
+        elif key_l == "maximum content light level":
+            metadata["max_cll"] = value
+        elif key_l == "maximum frame-average light level":
+            metadata["max_fall"] = value
+
+    prim_l = metadata["primaries"].lower()
+    trans_l = metadata["transfer"].lower()
+    mat_l = metadata["matrix"].lower()
+    hdr_format_l = metadata["hdr_format"].lower()
+    metadata["is_bt709"] = (
+        metadata["primaries"] == "BT.709"
+        and metadata["transfer"] == "BT.709"
+        and metadata["matrix"] == "BT.709"
+    )
+    metadata["is_bt601"] = "bt.601" in prim_l and "bt.601" in trans_l and "bt.601" in mat_l
+    hdr_markers = (
+        "hdr", "dolby vision", "smpte st 2084", "st 2084", "pq",
+        "hlg", "arib std-b67", "bt.2020", "bt2020", "smpte 2086"
+    )
+    metadata["is_hdr"] = any(marker in hdr_format_l for marker in hdr_markers) or any(
+        marker in text for text in (prim_l, trans_l, mat_l) for marker in hdr_markers
+    )
+    return metadata
+
+
+# --- MediaInfo -> SVT-AV1-HDR color flag mapping (Appendix A.2 of the SVT-AV1 User Guide) ---
+
+# CIE 1931 G/B/R coordinates for common mastering display primaries (white point D65).
+KNOWN_MASTERING_PRIMARIES = {
+    "display p3": "G(0.265,0.690)B(0.15,0.06)R(0.68,0.32)",
+    "p3 d65": "G(0.265,0.690)B(0.15,0.06)R(0.68,0.32)",
+    "dci p3": "G(0.265,0.690)B(0.15,0.06)R(0.68,0.32)",
+    "p3": "G(0.265,0.690)B(0.15,0.06)R(0.68,0.32)",
+    "bt.2020": "G(0.17,0.797)B(0.131,0.046)R(0.708,0.292)",
+    "bt.2100": "G(0.17,0.797)B(0.131,0.046)R(0.708,0.292)",
+    "bt.709": "G(0.30,0.60)B(0.15,0.06)R(0.64,0.33)",
+}
+
+
+def _format_nits(value):
+    """4000.0 -> '4000', 0.0050 -> '0.005', 0.0001 -> '0.0001' (matches StaxRip-style output)."""
+    return f"{value:g}"
+
+
+def map_color_primaries_code(value):
+    v = (value or "").lower()
+    if "bt.2020" in v or "bt.2100" in v:
+        return "9"
+    if "bt.709" in v:
+        return "1"
+    if "display p3" in v or "p3 d65" in v or "smpte 432" in v or "smpte eg 432" in v:
+        return "12"
+    if "dci p3" in v or "p3 dci" in v or "smpte 431" in v or "smpte rp 431" in v:
+        return "11"
+    if "bt.601" in v:
+        return "6"
+    if "bt.470 system m" in v:
+        return "4"
+    if "bt.470" in v:
+        return "5"
+    if "smpte 240" in v:
+        return "7"
+    if "xyz" in v or "smpte 428" in v:
+        return "10"
+    if "ebu" in v:
+        return "22"
+    return None
+
+
+def map_transfer_code(value):
+    v = (value or "").lower()
+    if "pq" in v or "2084" in v:
+        return "16"
+    if "hlg" in v or "b67" in v:
+        return "18"
+    if "bt.2020" in v:
+        return "15" if "12" in v else "14"
+    if "bt.709" in v:
+        return "1"
+    if "bt.601" in v:
+        return "6"
+    if "srgb" in v or "sycc" in v:
+        return "13"
+    if "smpte 428" in v or "st 428" in v:
+        return "17"
+    if "linear" in v:
+        return "8"
+    if "smpte 240" in v:
+        return "7"
+    if "bt.470 system m" in v:
+        return "4"
+    if "bt.470" in v:
+        return "5"
+    return None
+
+
+def map_matrix_code(value):
+    v = (value or "").lower()
+    if "ictcp" in v:
+        return "14"
+    if "bt.2020" in v and "constant" in v and "non" not in v:
+        return "10"
+    if "bt.2020" in v or "bt.2100" in v:
+        return "9"
+    if "bt.709" in v:
+        return "1"
+    if "bt.601" in v:
+        return "6"
+    if "ycgco" in v:
+        return "8"
+    if "smpte 240" in v:
+        return "7"
+    if "fcc" in v:
+        return "4"
+    if "bt.470" in v:
+        return "5"
+    if "identity" in v:
+        return "0"
+    return None
+
+
+def build_mastering_display_value(metadata):
+    """Build the --mastering-display G(x,y)B(x,y)R(x,y)WP(x,y)L(max,min) value from MediaInfo text."""
+    prim_text = (metadata.get("mastering_primaries") or "").strip()
+    lum_text = (metadata.get("mastering_luminance") or "").strip()
+    if not prim_text or not lum_text:
+        return None
+
+    gbr_wp = None
+    # Coordinate form: "R: x=0.680000 y=0.320000, G: ..., B: ..., White point: x=... y=..."
+    coords = re.findall(
+        r"(R|G|B|White point)\s*:?\s*x\s*=?\s*([0-9.]+)[ ,;]+y\s*=?\s*([0-9.]+)",
+        prim_text,
+        re.IGNORECASE,
+    )
+    coord_map = {name.lower(): (x, y) for name, x, y in coords}
+    if all(k in coord_map for k in ("g", "b", "r")):
+        wp = coord_map.get("white point", ("0.3127", "0.329"))
+        gbr_wp = (
+            f"G({coord_map['g'][0]},{coord_map['g'][1]})"
+            f"B({coord_map['b'][0]},{coord_map['b'][1]})"
+            f"R({coord_map['r'][0]},{coord_map['r'][1]})"
+            f"WP({wp[0]},{wp[1]})"
+        )
+    else:
+        # Named form: "Display P3", "BT.2020", etc.
+        prim_l = prim_text.lower()
+        for name, value in KNOWN_MASTERING_PRIMARIES.items():
+            if name in prim_l:
+                gbr_wp = value + "WP(0.3127,0.329)"
+                break
+    if not gbr_wp:
+        return None
+
+    min_match = re.search(r"min\s*:\s*([0-9.]+)", lum_text, re.IGNORECASE)
+    max_match = re.search(r"max\s*:\s*([0-9.]+)", lum_text, re.IGNORECASE)
+    if not (min_match and max_match):
+        return None
+    try:
+        l_max = _format_nits(float(max_match.group(1)))
+        l_min = _format_nits(float(min_match.group(1)))
+    except ValueError:
+        return None
+    return f"{gbr_wp}L({l_max},{l_min})"
+
+
+def build_content_light_value(metadata):
+    """Build the --content-light max_cll,max_fall value from MediaInfo text like '1 264 cd/m2'."""
+    def _int_of(text):
+        if not text:
+            return None
+        head = re.split(r"cd", text, flags=re.IGNORECASE)[0]
+        digits = re.sub(r"[^\d]", "", head)
+        return digits or None
+
+    max_cll = _int_of(metadata.get("max_cll", ""))
+    max_fall = _int_of(metadata.get("max_fall", ""))
+    if max_cll and max_fall:
+        return f"{max_cll},{max_fall}"
+    return None
+
+
+def build_hdr_color_flags(metadata):
+    """Return the SVT-AV1-HDR color flag string for an HDR source, or None if
+    the primaries/transfer/matrix could not be mapped. Values never contain
+    spaces so they survive param-string whitespace splitting."""
+    primaries_code = map_color_primaries_code(metadata.get("primaries", ""))
+    transfer_code = map_transfer_code(metadata.get("transfer", ""))
+    matrix_code = map_matrix_code(metadata.get("matrix", ""))
+    if not (primaries_code and transfer_code and matrix_code):
+        return None
+
+    flags = (
+        f" --color-primaries {primaries_code}"
+        f" --transfer-characteristics {transfer_code}"
+        f" --matrix-coefficients {matrix_code}"
+    )
+    if metadata.get("chroma_position") in ("1", "2"):
+        flags += f" --chroma-sample-position {metadata['chroma_position']}"
+    if metadata.get("color_range_full"):
+        flags += " --color-range 1"
+    mastering_display = build_mastering_display_value(metadata)
+    if mastering_display:
+        flags += f" --mastering-display {mastering_display}"
+    content_light = build_content_light_value(metadata)
+    if content_light:
+        flags += f" --content-light {content_light}"
+    return flags
+
+
+def detect_color_metadata(input_path, mediainfo_exe):
+    if not os.path.exists(mediainfo_exe):
+        return None
+    try:
+        res = subprocess.run(
+            [mediainfo_exe, input_path],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="ignore",
+        )
+    except Exception as e:
+        print(f"[Dispatch] Warning: MediaInfo color detection failed: {e}")
+        return None
+    if res.returncode != 0:
+        print(f"[Dispatch] Warning: MediaInfo color detection failed with exit code {res.returncode}.")
+        return None
+    return parse_mediainfo_color_metadata(res.stdout)
+
+
+def pause_for_hdr_color_settings(input_path, color_metadata):
+    print("\n" + "=" * 80)
+    print(f"{RED}[Dispatch] ERROR: HDR color settings are detected in the input file, but they could not be auto-mapped.{RESET}")
+    print(f"{RED}[Dispatch] Input: {os.path.basename(input_path)}{RESET}")
+    print(f"{RED}[Dispatch] You need to manually edit the color settings for your .bat file before using the SVT-AV1-HDR fork,{RESET}")
+    print(f"{RED}[Dispatch] or set tonemap=True in the .bat to tonemap HDR to SDR.{RESET}")
+    print(f"{RED}[Dispatch] Detected color settings:{RESET}")
+    print(f"{RED}[Dispatch]   Color primaries: {color_metadata.get('primaries') or 'unknown'}{RESET}")
+    print(f"{RED}[Dispatch]   Transfer characteristics: {color_metadata.get('transfer') or 'unknown'}{RESET}")
+    print(f"{RED}[Dispatch]   Matrix coefficients: {color_metadata.get('matrix') or 'unknown'}{RESET}")
+    if color_metadata.get("hdr_format"):
+        print(f"{RED}[Dispatch]   HDR format: {color_metadata['hdr_format']}{RESET}")
+    print("=" * 80)
+    try:
+        input("Press Enter to exit...")
+    except EOFError:
+        pass
+    sys.exit(1)
 
 
 def resolve_configured_path(configured_path, root_dir, tools_dir, default_filename="ntfy.txt"):
@@ -402,11 +699,19 @@ def main():
     worker_count = None
     selected_fork = "essential"
     avx512 = False
+    tonemap_enabled = False
     passthrough_args = []
     idx = 0
     while idx < len(args):
         arg = args[idx]
-        if arg == "--workers" and idx + 1 < len(args):
+        if arg == "--tonemap":
+            if idx + 1 < len(args) and not args[idx + 1].startswith("--"):
+                tonemap_enabled = parse_bool_setting(args[idx + 1])
+                idx += 2
+            else:
+                tonemap_enabled = True
+                idx += 1
+        elif arg == "--workers" and idx + 1 < len(args):
             try:
                 worker_count = int(args[idx + 1])
             except ValueError:
@@ -423,6 +728,11 @@ def main():
             else:
                 avx512 = True
                 idx += 1
+        elif arg == "--crf" and idx + 1 < len(args):
+            # Auto-Boost-Av1an.py still names its base CRF input --quality internally.
+            # Generated/user .bat files now expose this as CRF, so translate here.
+            passthrough_args.extend(["--quality", args[idx + 1]])
+            idx += 2
         else:
             passthrough_args.append(arg)
             idx += 1
@@ -518,39 +828,40 @@ def main():
                 except subprocess.CalledProcessError:
                     print("[Dispatch] Scene detection failed.")
             
-            # 2. Color Space Detection
-            is_bt709 = False
-            is_bt601 = False
-            f_prim_709 = f_trans_709 = f_mat_709 = False
-            f_prim_601 = f_trans_601 = f_mat_601 = False
-            
-            if os.path.exists(mediainfo_exe):
-                try:
-                    mi_cmd = [mediainfo_exe, input_abspath_origin]
-                    res = subprocess.run(mi_cmd, capture_output=True, text=True, encoding='utf-8', errors='ignore')
-                    if res.returncode == 0:
-                        for line in res.stdout.splitlines():
-                            if ":" in line:
-                                k, v = line.split(":", 1)
-                                k, v = k.strip(), v.strip()
-                                if k == "Color primaries":
-                                    if v == "BT.709": f_prim_709 = True
-                                    elif "BT.601" in v: f_prim_601 = True
-                                elif k == "Transfer characteristics":
-                                    if v == "BT.709": f_trans_709 = True
-                                    elif "BT.601" in v: f_trans_601 = True
-                                elif k == "Matrix coefficients":
-                                    if v == "BT.709": f_mat_709 = True
-                                    elif "BT.601" in v: f_mat_601 = True
-                        
-                        if f_prim_709 and f_trans_709 and f_mat_709:
-                            is_bt709 = True
-                            print("[Dispatch] MediaInfo confirmed full BT.709 source.")
-                        elif f_prim_601 and f_trans_601 and f_mat_601:
-                            is_bt601 = True
-                            print("[Dispatch] MediaInfo confirmed full BT.601 source.")
-                except Exception:
-                    pass
+            # 2. Color Space Detection / HDR handling
+            color_metadata = detect_color_metadata(input_abspath_origin, mediainfo_exe)
+            is_bt709 = bool(color_metadata and color_metadata["is_bt709"])
+            is_bt601 = bool(color_metadata and color_metadata["is_bt601"])
+            is_hdr_source = bool(color_metadata and color_metadata["is_hdr"])
+            tonemap_this_file = tonemap_enabled and is_hdr_source
+
+            bt709_flags = " --color-primaries 1 --transfer-characteristics 1 --matrix-coefficients 1"
+            bt601_flags = " --color-primaries 6 --transfer-characteristics 6 --matrix-coefficients 6"
+            current_color_flags = ""
+            if tonemap_this_file:
+                # Tonemapped output is SDR BT.709.
+                current_color_flags = bt709_flags
+                print(f"{BLUE}[Dispatch] HDR source detected; tonemapping HDR to SDR (BT.709) via libplacebo.{RESET}")
+            elif is_hdr_source and is_hdr_fork(selected_fork):
+                # Auto detect: build SVT-AV1-HDR color settings from MediaInfo.
+                hdr_flags = build_hdr_color_flags(color_metadata)
+                if hdr_flags:
+                    current_color_flags = hdr_flags
+                    print(f"{BLUE}[Dispatch] HDR source detected; auto-applying SVT-AV1-HDR color settings:{RESET}")
+                    print(f"{BLUE}[Dispatch]  {hdr_flags.strip()}{RESET}")
+                else:
+                    pause_for_hdr_color_settings(input_abspath_origin, color_metadata)
+            elif is_hdr_source:
+                print(f"{BLUE}[Dispatch] HDR source detected. This fork encodes it as-is (set tonemap=True in the .bat to tonemap to SDR).{RESET}")
+            elif is_bt709:
+                current_color_flags = bt709_flags
+                if is_hdr_fork(selected_fork):
+                    print("[Dispatch] MediaInfo confirmed full BT.709 source; copying BT.709 color settings for SVT-AV1-HDR fork.")
+                else:
+                    print("[Dispatch] MediaInfo confirmed full BT.709 source.")
+            elif is_bt601:
+                current_color_flags = bt601_flags
+                print("[Dispatch] MediaInfo confirmed full BT.601 source.")
 
             # 3. Encoding
             final_cmd = [
@@ -562,12 +873,8 @@ def main():
             ]
             if avx512:
                 final_cmd.append("--avx512")
-            
-            bt709_flags = " --color-primaries 1 --transfer-characteristics 1 --matrix-coefficients 1"
-            bt601_flags = " --color-primaries 6 --transfer-characteristics 6 --matrix-coefficients 6"
-            current_color_flags = ""
-            if is_bt709: current_color_flags = bt709_flags
-            elif is_bt601: current_color_flags = bt601_flags
+            if tonemap_this_file:
+                final_cmd.extend(["--tonemap", "true"])
             
             skip_next = False
             for i, a in enumerate(args):

@@ -28,7 +28,8 @@ def main():
     print("================================================\n")
     print("This tool will create a batch script to encode your videos")
     print("Just answer the questions below and your script will be ready to run.")
-    print("SVT-AV1-HDR fork requires manually editing the output .bat file for color settings.\n")    
+    print("HDR sources: the SVT-AV1-HDR fork can auto-detect HDR and apply matching color")
+    print("settings, or any fork can tonemap HDR content down to SDR (BT.709) via libplacebo.\n")
 
     # --- 1. Pass Type ---
     print("--------------------------------------------------------")
@@ -87,6 +88,26 @@ def main():
         avx_choice = input("Does your CPU support AVX-512? [1 Yes / 2 No] (Press Enter for No): ").strip()
         if avx_choice == "1":
             avx512_value = "True"
+
+    # --- HDR Handling (SVT-AV1-HDR fork only; other forks are asked at the end) ---
+    tonemap_value = "False"
+    if fork == "hdr":
+        print("\n--------------------------------------------------------")
+        print("HDR Handling (SVT-AV1-HDR fork)")
+        print("--------------------------------------------------------")
+        print("How should HDR source content be handled?\n")
+        print("  1: Auto detect SDR/HDR content")
+        print("     MediaInfo detects each source. SDR sources get standard")
+        print("     BT.709/BT.601 color settings. HDR sources automatically get")
+        print("     matching SVT-AV1-HDR color settings (primaries, transfer,")
+        print("     matrix, mastering display, content light) -- HDR stays HDR.\n")
+        print("  2: Tonemap HDR to SDR")
+        print("     HDR sources are converted to SDR (BT.709) via libplacebo")
+        print("     inside the VapourSynth script. Uses GPU. SDR sources are")
+        print("     encoded normally.\n")
+        hdr_handling_choice = input("Select [1/2] (Press Enter for 1): ").strip()
+        if hdr_handling_choice == "2":
+            tonemap_value = "True"
 
     denoise_value = "True" if fork == "5fish" else "False"
     if fork == "5fish":
@@ -269,9 +290,28 @@ def main():
     optimize_input = input("Select [1 Yes / 2 No] (Press Enter for No): ").strip()
     optimize_workers = optimize_input == "1"
 
+    # --- HDR Handling (non-HDR forks, asked last) ---
+    if fork != "hdr":
+        print("\n--------------------------------------------------------")
+        print("HDR Handling")
+        print("--------------------------------------------------------")
+        print("This fork is intended for SDR output. If an HDR source is")
+        print("dropped into video-input, how should it be handled?\n")
+        print("  1: SDR encoding")
+        print("     Sources are encoded as-is. SDR sources get standard")
+        print("     BT.709/BT.601 color settings when detected.\n")
+        print("  2: Tonemap HDR to SDR")
+        print("     HDR sources are converted to SDR (BT.709) via libplacebo")
+        print("     inside the VapourSynth script. Uses GPU. SDR sources are")
+        print("     encoded normally.\n")
+        sdr_handling_choice = input("Select [1/2] (Press Enter for the default of 1): ").strip()
+        if sdr_handling_choice == "2":
+            tonemap_value = "True"
+
     # --- Construct Script Content ---
     autocrop_suffix = "-autocrop" if use_autocrop else ""
-    output_filename = f"batbuilder-{mode}-{fork}{dist_filename_suffix}-crf{crf}-p{speed}{autocrop_suffix}.bat"
+    tonemap_suffix = "-tonemap" if tonemap_value == "True" else ""
+    output_filename = f"batbuilder-{mode}-{fork}{dist_filename_suffix}-crf{crf}-p{speed}{autocrop_suffix}{tonemap_suffix}.bat"
     
     script = "@echo off\n"
     
@@ -285,13 +325,16 @@ def main():
         script += f'set "av1an_settings={final_params}"\n'
 
     script += f'set "FINAL_SPEED={speed}"\n'
-    script += f'set "QUALITY={crf}"\n'
+    script += f'set "CRF={crf}"\n'
     script += f'set "fork={fork}"\n'
     script += ":: example forks: 5fish, essential, hdr, custom\n"
     script += f'set "DENOISE={denoise_value}"\n'
     script += ":: DENOISE updates denoise=True/False in settings.txt before dispatch. 5fish defaults to True; all other forks default to False.\n"
     script += f'set "AVX512={avx512_value}"\n'
-    script += ":: Set AVX512=True only if your CPU supports AVX-512 and the fork has an AVX-512 build.\n\n"
+    script += ":: Set AVX512=True only if your CPU supports AVX-512 and the fork has an AVX-512 build.\n"
+    script += f'set "tonemap={tonemap_value}"\n'
+    script += ":: tonemap=True converts HDR sources to SDR (BT.709) via libplacebo inside the VapourSynth script (uses GPU).\n"
+    script += ":: tonemap=False: the hdr fork auto-detects HDR sources and applies matching SVT-AV1-HDR color settings; other forks encode as-is.\n\n"
 
     if optimize_workers:
         script += 'set "optimize-workers=true"\n'
@@ -410,9 +453,9 @@ def main():
         script += film_grain_note
         
     if mode == "autoboost":
-        script += f"\"VapourSynth\\python.exe\" \"tools\\dispatch.py\" --fork %fork% --avx512 %AVX512% --denoise %DENOISE% --quality %QUALITY%{autocrop_flag} --ssimu2 \"%SSIMU2_TOOL%\" --verbose --ssimu2-cpu-workers %SSIMU2_WORKERS% --resume --fast-speed 8 --final-speed %FINAL_SPEED% --workers %WORKER_COUNT% --fast-params \"%FAST_PARAMS%\" --final-params \"%FINAL_PARAMS%\"\n\n"
+        script += f"\"VapourSynth\\python.exe\" \"tools\\dispatch.py\" --fork %fork% --avx512 %AVX512% --denoise %DENOISE% --tonemap %tonemap% --crf %CRF%{autocrop_flag} --ssimu2 \"%SSIMU2_TOOL%\" --verbose --ssimu2-cpu-workers %SSIMU2_WORKERS% --resume --fast-speed 8 --final-speed %FINAL_SPEED% --workers %WORKER_COUNT% --fast-params \"%FAST_PARAMS%\" --final-params \"%FINAL_PARAMS%\"\n\n"
     else:
-        script += f"\"VapourSynth\\python.exe\" \"tools\\av1an-dispatch.py\" --resume --fork %fork% --avx512 %AVX512% --denoise %DENOISE%{autocrop_flag} --quality %QUALITY% --workers %WORKER_COUNT% --final-speed %FINAL_SPEED% --final-params \"%av1an_settings%\"\n\n"
+        script += f"\"VapourSynth\\python.exe\" \"tools\\av1an-dispatch.py\" --resume --fork %fork% --avx512 %AVX512% --denoise %DENOISE% --tonemap %tonemap%{autocrop_flag} --crf %CRF% --workers %WORKER_COUNT% --final-speed %FINAL_SPEED% --final-params \"%av1an_settings%\"\n\n"
 
     script += "echo.\necho All tasks finished.\npause\n\n"
     step_num += 1

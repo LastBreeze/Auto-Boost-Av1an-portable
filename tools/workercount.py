@@ -11,7 +11,11 @@ import shutil
 # --- CONFIGURATION ---
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TOOLS_DIR = os.path.join(BASE_DIR, "tools")
-AV1AN_PATH = "av1an"
+# Prefer the portable av1an.exe in tools\av1an; fall back to "av1an" on PATH.
+# (The generated .bat prepends tools\av1an to PATH anyway, but this keeps the
+# portable copy first even when workercount.py is launched standalone.)
+_PORTABLE_AV1AN = os.path.join(TOOLS_DIR, "av1an", "av1an.exe")
+AV1AN_PATH = _PORTABLE_AV1AN if os.path.exists(_PORTABLE_AV1AN) else "av1an"
 MKVMERGE_EXE = os.path.join(TOOLS_DIR, "MKVToolNix", "mkvmerge.exe")
 VIDEO_INPUT_DIR = os.path.join(BASE_DIR, "video-input")
 SAMPLE_FILE = os.path.join(TOOLS_DIR, "sample.mkv")                  # legacy fallback
@@ -45,7 +49,7 @@ FPS_SETTLE_SPAN = 30.0           # ...range over this many seconds -> stop the t
 FPS_MAX_MEASURE_SECONDS = 180    # Never watch a candidate longer than this after
                                  # its first fps reading (median of the last
                                  # readings is used if it never settles)
-COOLDOWN_BETWEEN_TESTS = 10      # Idle seconds between candidates (clock recovery)
+COOLDOWN_BETWEEN_TESTS = 5       # Idle seconds between candidates (clock recovery)
 MAX_CANDIDATE_SECONDS = 900      # Hard safety timeout per candidate
 POLL_INTERVAL = 1.0              # Seconds between frame-count/RAM polls
 SEARCH_BUDGET = 6                # Max worker counts tested (typical runs use 3-4)
@@ -192,11 +196,13 @@ def settings_filters_enabled(values=None):
     return any(values.get(key, "false").lower() == "true" for key in FILTER_SETTING_KEYS)
 
 
-def build_filtered_vpy(values, source_path):
+def build_filtered_vpy(values, source_path, tonemap=False):
     """Build a temporary VapourSynth script mirroring the real dispatch/Auto-Boost
-    pipeline (initialize_clip -> denoise/deband -> downscale -> finalize_clip) so
-    the benchmark includes the cost of the user's filtering. Crop is left off
-    for the benchmark; that only makes the result slightly conservative."""
+    pipeline (initialize_clip -> tonemap -> denoise/deband -> downscale ->
+    finalize_clip) so the benchmark includes the cost of the user's filtering.
+    When the launching .bat has tonemap=True, the libplacebo HDR->SDR tonemap
+    is included so the benchmark measures the true CPU+GPU load. Crop is left
+    off for the benchmark; that only makes the result slightly conservative."""
     os.makedirs(BENCH_TEMP_DIR, exist_ok=True)
     vpy_path = os.path.join(BENCH_TEMP_DIR, "bench_source.vpy")
     cache_path = os.path.join(BENCH_TEMP_DIR, "bench_source.ffindex")
@@ -225,6 +231,20 @@ src = core.ffms2.Source(source=r"{source}", cachefile=r"{cache}")
 
 # Initialize (Fixes Placebo bitdepth error by ensuring 16-bit)
 src = initialize_clip(src)
+
+# Tonemap HDR -> SDR (libplacebo; libvs_placebo.dll autoloads from the plugins directory)
+do_tonemap = {tonemap}
+if do_tonemap:
+    src = core.fmtc.bitdepth(src, bits=16)
+    src = core.placebo.Tonemap(src, src_csp=1, dst_csp=0, dynamic_peak_detection=1, gamut_mapping=1, tone_mapping_function=1, metadata=0, contrast_recovery=0.0, smoothing_period=20.0, percentile=100.0)
+    # Tonemap returns RGB or 4:4:4 output; SVT-AV1 only supports 4:2:0, so convert
+    # back to YUV420P16 here. finalize_clip then produces the same 10-bit
+    # YUV420P10 output as the non-tonemap pipeline.
+    if src.format.color_family == vs.RGB:
+        src = src.resize.Bicubic(format=vs.YUV420P16, matrix_s="709")
+    elif src.format.id != vs.YUV420P16:
+        src = src.resize.Bicubic(format=vs.YUV420P16)
+    src = src.std.SetFrameProps(_Matrix=1, _Transfer=1, _Primaries=1)
 
 # Optional settings.txt denoise/deband hooks
 {denoise_line}
@@ -279,6 +299,7 @@ final.set_output(0)
         f.write(vpy_template.format(
             source=source_path,
             cache=cache_path,
+            tonemap=str(bool(tonemap)),
             denoise_line=denoise_line,
             deband_line=deband_line,
             downscale=str(do_downscale),
@@ -319,6 +340,14 @@ def delete_benchmark_sample():
                 pass
 
 
+def _sample_source_signature(source):
+    try:
+        st = os.stat(source)
+        return f"{os.path.basename(source)}|{st.st_size}|{int(st.st_mtime)}"
+    except OSError:
+        return None
+
+
 def ensure_benchmark_sample(force=False):
     """Create tools/benchmark-sample.mkv: a 90 second, audio-free cut of the
     first video in video-input, made with mkvmerge exactly like
@@ -326,16 +355,28 @@ def ensure_benchmark_sample(force=False):
     Falls back to the first 90 seconds for short sources. Reuses a recent
     sample so workercount.py and ssimu2-workercount.py share one file.
     Returns the sample path, or None if it could not be created."""
+    source = find_first_input_video()
+    sidecar = BENCH_SAMPLE_FILE + ".source.txt"
+
     if not force and os.path.exists(BENCH_SAMPLE_FILE):
         try:
-            if time.time() - os.path.getmtime(BENCH_SAMPLE_FILE) < SAMPLE_MAX_AGE_SECONDS:
+            fresh = time.time() - os.path.getmtime(BENCH_SAMPLE_FILE) < SAMPLE_MAX_AGE_SECONDS
+            recorded = open(sidecar, encoding="utf-8").read().strip() if os.path.exists(sidecar) else None
+            # Reuse ONLY when the sample provably came from the CURRENT first
+            # source file - if video-input changed, a fresh cut is made so the
+            # benchmark always measures the exact content this run will encode.
+            if fresh and source and recorded and recorded == _sample_source_signature(source):
+                print(f"[Sample] Reusing benchmark sample (same source: "
+                      f"{os.path.basename(source)}).", file=sys.stderr)
+                return BENCH_SAMPLE_FILE
+            if fresh and recorded and not source:
+                # video-input is empty now; the recent sample is still the
+                # best available representative content.
                 print(f"[Sample] Reusing recent benchmark sample: "
                       f"{os.path.basename(BENCH_SAMPLE_FILE)}", file=sys.stderr)
                 return BENCH_SAMPLE_FILE
         except OSError:
             pass
-
-    source = find_first_input_video()
     if not source:
         print("[Sample] No source video found in video-input.", file=sys.stderr)
         return None
@@ -382,6 +423,13 @@ def ensure_benchmark_sample(force=False):
                         pass
 
         if produced:
+            sig = _sample_source_signature(source)
+            if sig:
+                try:
+                    with open(sidecar, "w", encoding="utf-8") as f:
+                        f.write(sig + "\n")
+                except OSError:
+                    pass
             print(f"[Sample] Created 90s benchmark sample (no audio) from "
                   f"{os.path.basename(source)} [{time_range}].", file=sys.stderr)
             return produced
@@ -1136,15 +1184,19 @@ def maybe_delete_benchmark_sample(bat_path=None):
 
 
 def run_normal_mode():
-    input_path = resolve_benchmark_input()
-    if not input_path:
-        print("Error: No benchmark source available (video-input is empty and "
-              "tools\\sample.mkv is missing). Defaulting to 1.")
-        workers = 1
+    """GENERAL (non-optimized) benchmark: generates the shared
+    tools\\workercount-config.txt using the bundled tools\\sample.mkv with
+    default encoder params. settings.txt is NOT read and the user's sources
+    are NOT touched - this config is a generic default shared by every bat
+    without optimize-workers=true."""
+    if not os.path.exists(SAMPLE_FILE):
+        fallback = max(1, (os.cpu_count() or 4) // 4)
+        print(f"Error: tools\\sample.mkv is missing - cannot run the general "
+              f"benchmark. Falling back to {fallback} workers (threads/4).")
+        workers = fallback
     else:
-        workers = run_benchmark(input_path, ENCODER_PARAMS)
+        workers = run_benchmark(SAMPLE_FILE, ENCODER_PARAMS)
         cleanup_temp_folders()
-        maybe_delete_benchmark_sample()
 
     if write_config(workers):
         print("\nOne-time test complete. Auto worker count set.")
@@ -1200,25 +1252,49 @@ def run_optimize_mode(bat_arg=None):
         print(f"[Optimize] Warning: Could not set up SVT-AV1 fork '{fork}': {e}")
 
     # --- Build the real encoder parameters from the bat ---
-    quality = bat.get("quality", "30").strip() or "30"
+    crf = (bat.get("crf") or bat.get("quality", "30")).strip() or "30"
     speed = bat.get("final_speed", "4").strip() or "4"
     extra = (bat.get("final_params") or bat.get("av1an_settings") or "").strip()
-    encoder_params = " ".join(f"--crf {quality} --preset {speed} {extra}".split())
+    encoder_params = " ".join(f"--crf {crf} --preset {speed} {extra}".split())
 
-    # --- Include the user's filtering chain when enabled ---
+    # --- Build the VapourSynth input script (ALWAYS, matching the real run:
+    #     Auto-Boost feeds av1an a .vpy unconditionally, so even with all
+    #     filters off the encode decodes through VapourSynth with
+    #     initialize_clip/finalize_clip bit-depth handling) ---
     input_path = source_path
     values = read_settings_values()
-    if settings_filters_enabled(values):
-        try:
-            input_path = build_filtered_vpy(values, source_path)
-            print("[Optimize] settings.txt filtering detected - benchmarking through a "
-                  "temporary VapourSynth script so filter cost is included.")
-        except Exception as e:
-            print(f"[Optimize] Warning: Could not build filtered VapourSynth script ({e}). "
-                  f"Benchmarking unfiltered sample instead.")
-            input_path = source_path
-    else:
-        print("[Optimize] No settings.txt filtering enabled - benchmarking unfiltered sample.")
+
+    # The bat's DENOISE setting is what dispatch will write into settings.txt
+    # right before encoding, so it must override whatever settings.txt says
+    # NOW for the benchmark to match the real encode exactly.
+    bat_denoise = bat.get("denoise", "").strip().lower()
+    if bat_denoise in ("true", "false"):
+        if values.get("denoise", "").lower() != bat_denoise:
+            print(f"[Optimize] Using the bat's DENOISE={bat_denoise.capitalize()} "
+                  f"(overrides settings.txt for this benchmark; dispatch applies "
+                  f"the same value before encoding).", file=sys.stderr)
+        values["denoise"] = bat_denoise
+
+    # The bat's tonemap setting: when True, the real encode runs the libplacebo
+    # HDR->SDR tonemap inside the VapourSynth script, so the benchmark must
+    # include it to measure the true CPU+GPU load.
+    bat_tonemap = bat.get("tonemap", "").strip().lower() in ("true", "1", "yes", "on")
+
+    try:
+        input_path = build_filtered_vpy(values, source_path, tonemap=bat_tonemap)
+        active = [k for k in FILTER_SETTING_KEYS if values.get(k, "false").lower() == "true"]
+        if bat_tonemap:
+            active.append("tonemap (libplacebo HDR->SDR, CPU+GPU)")
+        if active:
+            print(f"[Optimize] Benchmarking through a temporary VapourSynth script "
+                  f"(mirrors the real encode; active filters: {', '.join(active)}).")
+        else:
+            print("[Optimize] Benchmarking through a temporary VapourSynth script "
+                  "(mirrors the real encode; no settings.txt filters active).")
+    except Exception as e:
+        print(f"[Optimize] Warning: Could not build the VapourSynth script ({e}). "
+              f"Benchmarking the raw sample instead.")
+        input_path = source_path
 
     workers = run_benchmark(input_path, encoder_params)
 

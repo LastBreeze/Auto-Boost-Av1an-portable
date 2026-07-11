@@ -32,6 +32,30 @@
 #   of silently continuing.
 # - Improved the missing stats file assertion message to list the files
 #   actually present in the x264.logs directory for easier debugging.
+# - Fixed "FRAME MISMATCH" / "encoder crashed: exit code: 0" failures
+#   during x264 based scene detection on HDR/UHD HEVC sources (and
+#   other open-GOP sources). The seek-based ffms2 source filter is
+#   known to truncate or misdecode such streams, delivering fewer
+#   frames to x264 than expected before hitting EOF. The script now
+#   automatically uses the linear, frame-exact BestSource plugin for
+#   the source video whenever it is available (the officially
+#   recommended BestSource configuration of this script), while still
+#   using the faster ffms2 to read Progression Boost's probe encodes.
+#   If BestSource is not installed, the script falls back to the old
+#   ffms2 behaviour and prints a warning.
+# - BestSource is now only used when the source's colour primaries are
+#   detected as BT.2020 (HDR/wide-gamut sources, which are the ones
+#   affected by the ffms2 truncation issue). Detection is done via the
+#   portable package's bundled ffprobe (tools\av1an\ffprobe.exe),
+#   falling back to MediaInfo CLI (tools\MediaInfo_CLI\MediaInfo.exe),
+#   then to any ffprobe/mediainfo found on PATH. If the colour
+#   primaries are anything other than BT.2020, or cannot be detected,
+#   the original ffms2 method is used unchanged.
+# - Fixed `raise subprocess.CalledProcessError` being called without
+#   arguments (which would itself crash with a TypeError) after a
+#   failed av1an based scene detection run, and made the error message
+#   after a failed x264 based scene detection run explain the likely
+#   cause.
 
 import argparse
 from collections.abc import Callable
@@ -197,6 +221,76 @@ if not resume:
 # ---------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------
+# Colour primaries detection for the portable package.
+# Sources with BT.2020 colour primaries (HDR/wide-gamut) are the ones
+# affected by the ffms2 truncation issue during x264 based scene
+# detection ("FRAME MISMATCH" / "encoder crashed: exit code: 0"), so
+# only they are switched to the linear, frame-exact BestSource plugin.
+# Everything else keeps the original, faster ffms2 method.
+# Detection uses the executables bundled with the portable package,
+# relative to this script:
+#     tools\av1an\ffprobe.exe            (primary)
+#     tools\MediaInfo_CLI\MediaInfo.exe  (fallback)
+# and falls back to ffprobe/mediainfo found on PATH if neither bundled
+# executable exists.
+def _detect_bt2020_color_primaries(file: Path) -> bool:
+    try:
+        script_dir = Path(__file__).resolve().parent
+    except NameError:
+        script_dir = Path.cwd()
+    file = file.expanduser().resolve()
+
+    # Primary method: ffprobe bundled with the portable package
+    ffprobe_candidates = [script_dir / "av1an" / "ffprobe.exe",
+                          script_dir / "av1an" / "ffprobe"]
+    ffprobe = next((str(candidate) for candidate in ffprobe_candidates if candidate.exists()), None)
+    if ffprobe is None:
+        ffprobe = shutil.which("ffprobe")
+    if ffprobe is not None:
+        try:
+            result = subprocess.run([ffprobe, "-v", "quiet",
+                                     "-select_streams", "v:0",
+                                     "-show_entries", "stream=color_primaries",
+                                     "-of", "default=noprint_wrappers=1:nokey=1",
+                                     str(file)],
+                                    capture_output=True, text=True, timeout=120)
+            if result.returncode == 0 and (primaries := result.stdout.strip().splitlines()[0].strip() if result.stdout.strip() else ""):
+                detected = "bt2020" in primaries.lower().replace(".", "")
+                print(f"\r\033[KColour primaries \"{primaries}\" detected by ffprobe / "
+                      f"{'BT.2020 source, using BestSource for reliable decoding' if detected else 'using the original ffms2 method'}", flush=True)
+                return detected
+        except (OSError, subprocess.SubprocessError, IndexError):
+            pass
+
+    # Fallback method: MediaInfo CLI bundled with the portable package
+    mediainfo_candidates = [script_dir / "MediaInfo_CLI" / "MediaInfo.exe",
+                            script_dir / "MediaInfo_CLI" / "mediainfo"]
+    mediainfo = next((str(candidate) for candidate in mediainfo_candidates if candidate.exists()), None)
+    if mediainfo is None:
+        mediainfo = shutil.which("mediainfo")
+    if mediainfo is not None:
+        try:
+            result = subprocess.run([mediainfo, "--Output=Video;%colour_primaries%\\n", str(file)],
+                                    capture_output=True, text=True, timeout=120)
+            if result.returncode == 0 and (primaries := result.stdout.strip().splitlines()[0].strip() if result.stdout.strip() else ""):
+                detected = "bt2020" in primaries.lower().replace(".", "")
+                print(f"\r\033[KColour primaries \"{primaries}\" detected by MediaInfo / "
+                      f"{'BT.2020 source, using BestSource for reliable decoding' if detected else 'using the original ffms2 method'}", flush=True)
+                return detected
+        except (OSError, subprocess.SubprocessError, IndexError):
+            pass
+
+    print("\r\033[K\033[33mWarning: could not detect the source's colour primaries "
+          "(ffprobe and MediaInfo CLI unavailable or returned nothing). "
+          "Using the original ffms2 method. If this is an HDR/BT.2020 source and you see "
+          "\"FRAME MISMATCH\" errors during x264 based scene detection, check that "
+          "tools\\av1an\\ffprobe.exe or tools\\MediaInfo_CLI\\MediaInfo.exe exists in the portable package.\033[0m", flush=True)
+    return False
+
+source_is_bt2020 = _detect_bt2020_color_primaries(input_file)
+
+
 class DefaultZone:
 # ---------------------------------------------------------------------
 # ---------------------------------------------------------------------
@@ -205,11 +299,44 @@ class DefaultZone:
 # ---------------------------------------------------------------------
 # How should this script load your source video? Select the video
 # provider for both this Python script and for av1an.
-    source_clip = core.ffms2.Source(input_file.expanduser().resolve(), cachefile=temp_dir.joinpath("source.ffindex").expanduser().resolve())
-    source_clip_cache = temp_dir.joinpath("source.ffindex")
-    source_provider = lambda self, file: core.ffms2.Source(file.expanduser().resolve(), cachefile=file.with_suffix(".ffindex").expanduser().resolve())
-    source_provider_cache = lambda self, file: file.with_suffix(".ffindex")
-    source_provider_av1an = "ffms2"
+# Portable package fix: seek-based source filters (ffms2, lsmas) are
+# known to truncate or misdecode HDR/UHD HEVC and other open-GOP
+# sources. During the av1an x264 scene detection pass this surfaces as
+#     WARN Encoder failed (on chunk N):
+#     encoder crashed: exit code: 0
+#     FRAME MISMATCH: chunk N: x/y (actual/expected frames)
+# because the decoder hits EOF after delivering fewer frames than were
+# indexed. BestSource decodes linearly and is frame-exact.
+# Only sources detected as having BT.2020 colour primaries (see the
+# `_detect_bt2020_color_primaries` detector above the class) are
+# switched to BestSource, while the faster ffms2 is still used to read
+# Progression Boost's probe encodes (this is the officially
+# recommended BestSource configuration of this script). All other
+# sources use the original all-ffms2 method. If a BT.2020 source is
+# detected but the BestSource plugin is not installed, the script
+# falls back to the original ffms2 behaviour and prints a warning.
+    if source_is_bt2020 and hasattr(core, "bs"):
+        source_clip = core.bs.VideoSource(input_file.expanduser().resolve())
+        source_clip_cache = None
+        source_provider_av1an = "bestsource"
+        if hasattr(core, "ffms2"):
+            source_provider = lambda self, file: core.ffms2.Source(file.expanduser().resolve(), cachefile=file.with_suffix(".ffindex").expanduser().resolve())
+            source_provider_cache = lambda self, file: file.with_suffix(".ffindex")
+        else:
+            source_provider = core.bs.VideoSource
+            source_provider_cache = lambda self, file: None
+    else:
+        if source_is_bt2020 and not hasattr(core, "bs"):
+            print("\033[33mWarning: this source has BT.2020 colour primaries but the BestSource VapourSynth "
+                  "plugin (`bs`) is not installed. Falling back to ffms2, which is known to truncate or "
+                  "misdecode HDR/UHD HEVC and other open-GOP sources (\"FRAME MISMATCH\" errors during "
+                  "x264 based scene detection). Install BestSource into your portable VapourSynth plugins "
+                  "folder for reliable results.\033[0m", flush=True)
+        source_clip = core.ffms2.Source(input_file.expanduser().resolve(), cachefile=temp_dir.joinpath("source.ffindex").expanduser().resolve())
+        source_clip_cache = temp_dir.joinpath("source.ffindex")
+        source_provider = lambda self, file: core.ffms2.Source(file.expanduser().resolve(), cachefile=file.with_suffix(".ffindex").expanduser().resolve())
+        source_provider_cache = lambda self, file: file.with_suffix(".ffindex")
+        source_provider_av1an = "ffms2"
 # If you want to use BestSource, the recommended way is to use
 # BestSource for source, and then use faster ffms2 to read Progression
 # Boost's probe encodes. To use this option, comment the lines above
@@ -1914,7 +2041,7 @@ if not resume or not scene_detection_scenes_file.exists():
     if scene_detection_perform_av1an:
         scene_detection_process.wait()
         if scene_detection_process.returncode != 0:
-            raise subprocess.CalledProcessError
+            raise subprocess.CalledProcessError(scene_detection_process.returncode, "av1an (av1an based scene detection)")
 
         assert scene_detection_av1an_scenes_file.exists(), "Unexpected result from av1an"
 
@@ -1935,6 +2062,11 @@ if not resume or not scene_detection_scenes_file.exists():
             time.sleep(1)
         scene_detection_x264_process.wait()
         if scene_detection_x264_process.returncode != 0:
+            print("\r\033[K\033[31mav1an failed during x264 based scene detection. "
+                  "If av1an reported \"FRAME MISMATCH\" with \"encoder crashed: exit code: 0\", the source filter "
+                  "delivered fewer frames than expected. This is typical of ffms2/lsmas on HDR/UHD HEVC or other "
+                  "open-GOP sources; make sure the BestSource VapourSynth plugin is installed so this script can "
+                  "use it, and delete the temporary scene-detection folder before rerunning.\033[0m", flush=True)
             raise subprocess.CalledProcessError(scene_detection_x264_process.returncode, "av1an (x264 based scene detection)")
         print(f"\r\033[K{frame_print(scene_detection_x264_total_frames_print)} / 100.0% / x264 based scene detection finished", end="\n", flush=True)
 
