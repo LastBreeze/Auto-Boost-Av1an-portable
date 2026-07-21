@@ -1,5 +1,20 @@
 Changelog
 
+v2.6
+---------------------------------
+• Improved the worker count bat-specific benchmark, helping it choose a more accurate number of CPU workers.
+• Added extras\create-discord-10mb-sample.bat for making a video-only MKV sample small enough to upload to Discord.
+• Scene detection now hides harmless audio warnings.
+
+v2.5
+---------------------------------
+• HDR support added for svt-av1-hdr fork. Tonemapping HDR to SDR support added for all forks.
+
+v2.41
+---------------------------------
+• Optimize worker count benchmarks to address CPU oversaturation
+• Reimplement zones.txt for scene based encoding settings
+
 v2.4
 ---------------------------------
 • Auto-Boost-Av1an Portable can notify your phone when encoding is complete via the ntfy app
