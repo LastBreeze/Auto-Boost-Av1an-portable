@@ -56,6 +56,12 @@
 #   failed av1an based scene detection run, and made the error message
 #   after a failed x264 based scene detection run explain the likely
 #   cause.
+# - Suppressed av1an WARN messages that mention audio (e.g. "WARN
+#   FFmpeg failed to encode audio!"). All av1an runs launched by this
+#   script use "-an" so audio is intentionally discarded, making these
+#   warnings harmless noise. Any WARN line containing the word "audio"
+#   is now filtered out of the av1an subprocess output; all other
+#   output, including progress bars, passes through unchanged.
 
 import argparse
 from collections.abc import Callable
@@ -73,6 +79,8 @@ import re
 # from scipy import fftpack, interpolate, signal, stats
 import shutil
 import subprocess
+import sys
+import threading
 import time
 from typing import Optional
 import traceback
@@ -90,6 +98,69 @@ class NumpyEncoder(json.JSONEncoder):
             return object.tolist()
         else:
             return super(NumpyEncoder, self).default(object)
+
+# ---------------------------------------------------------------------
+# Suppress harmless audio-related WARN messages from av1an.
+# av1an prints warnings such as "WARN FFmpeg failed to encode audio!"
+# directly to the console. Since this script always runs av1an with
+# "-an" (audio is intentionally discarded for scene detection and probe
+# encodes), these warnings are expected and only clutter the progress
+# output. The av1an subprocesses are therefore launched with their
+# stdout/stderr piped through a small filter that drops any WARN line
+# containing the word "audio" and passes everything else (including
+# progress bars drawn with carriage returns and ANSI escapes) through
+# unchanged.
+# ---------------------------------------------------------------------
+
+def _suppressing_pump(pipe, out_stream):
+    def emit(segment):
+        low = segment.lower()
+        if b"warn" in low and b"audio" in low:
+            return
+        try:
+            out_stream.buffer.write(segment)
+            out_stream.flush()
+        except (ValueError, OSError):
+            pass
+
+    buffer = b""
+    try:
+        while True:
+            try:
+                chunk = pipe.read(4096)
+            except (ValueError, OSError):
+                break
+            if not chunk:
+                break
+            buffer += chunk
+            while True:
+                indices = [i for i in (buffer.find(b"\n"), buffer.find(b"\r")) if i != -1]
+                if not indices:
+                    break
+                cut = min(indices) + 1
+                # Keep "\r\n" together as a single terminator
+                if buffer[cut - 1:cut] == b"\r" and buffer[cut:cut + 1] == b"\n":
+                    cut += 1
+                emit(buffer[:cut])
+                buffer = buffer[cut:]
+        if buffer:
+            emit(buffer)
+    finally:
+        try:
+            pipe.close()
+        except (ValueError, OSError):
+            pass
+
+def popen_suppress_audio_warns(command):
+    """Drop-in replacement for `subprocess.Popen(command, text=True)` for
+    console-inheriting av1an runs. Pipes the child's stdout and stderr
+    through a filter that hides WARN lines mentioning audio while passing
+    all other output through to this script's own stdout/stderr.
+    `poll()`, `wait()` and `returncode` work as usual."""
+    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    threading.Thread(target=_suppressing_pump, args=(process.stdout, sys.stdout), daemon=True).start()
+    threading.Thread(target=_suppressing_pump, args=(process.stderr, sys.stderr), daemon=True).start()
+    return process
 
 parser = argparse.ArgumentParser(prog="Progressive Scene Detection")
 parser.add_argument("-i", "--input", type=Path, required=True, help="Source video file")
@@ -1854,7 +1925,7 @@ if not resume or not scene_detection_scenes_file.exists():
             "--audio-params", "-an",
             "--concat", "mkvmerge"
         ]
-        scene_detection_x264_process = subprocess.Popen(command, text=True)
+        scene_detection_x264_process = popen_suppress_audio_warns(command)
 
         scene_detection_match_x264_stats_frame = re.compile(r"^in:\d+ ", re.MULTILINE)
         def scene_detection_x264_count_stats_frames():
@@ -1912,7 +1983,7 @@ if not resume or not scene_detection_scenes_file.exists():
             *zone_default.scene_detection_av1an_parameters(),
             "--force-keyframes", ",".join(scene_detection_av1an_force_keyframes)
         ]
-        scene_detection_process = subprocess.Popen(command, text=True)
+        scene_detection_process = popen_suppress_audio_warns(command)
 
         
     if not scene_detection_diffs_available:
@@ -3510,7 +3581,7 @@ if metric_has_metric:
             "--scenes", probing_scenes_file,
             *zone_default.probing_av1an_parameters(f"[K[0m[1;3m> Progression Boost [0m[3m{probing_output_file.stem}[0m[1;3m <[0m")
         ]
-        return subprocess.Popen(command, text=True)
+        return popen_suppress_audio_warns(command)
     
     probing_first_tmp_dir = progression_boost_temp_dir / f"probe-encode-first.tmp"
     probing_first_done_file = probing_first_tmp_dir / "done.json"
