@@ -41,9 +41,16 @@ RAM_ABORT_MIN_AVAILABLE_MB = 2048  # ...or less than this much free -> the test 
                                  # starve the rest of the system of memory.
 RAM_GUARD_INTERVAL = 0.25        # Seconds between RAM safety checks
 FIRST_FRAME_TIMEOUT = 600        # Max seconds to wait for the FIRST encoded frame
-                                 # of the first candidate (includes one-time scene
-                                 # detection, source indexing, and lookahead fill,
-                                 # which takes minutes at preset <= 2)
+                                 # AFTER scene detection is done (source indexing
+                                 # and lookahead fill can take minutes at
+                                 # preset <= 2). Scene detection itself is waited
+                                 # out separately (see SCENE_DETECT_TIMEOUT).
+SCENE_DETECT_TIMEOUT = 3600      # Max seconds to wait for av1an's ONE-TIME scene
+                                 # detection pass. The benchmark clock does NOT
+                                 # run during this phase: fps measurement only
+                                 # starts once av1an reports scene detection is
+                                 # done and saves the scenes file to the temp
+                                 # folder, and the SVT-AV1 encode begins.
 FPS_SETTLE_DELTA = 0.5           # Settled = av1an's fps readings stay within this
 FPS_SETTLE_SPAN = 30.0           # ...range over this many seconds -> stop the test
 FPS_MAX_MEASURE_SECONDS = 180    # Never watch a candidate longer than this after
@@ -523,6 +530,14 @@ def parse_lp(params):
 # THROUGHPUT MEASUREMENT (frames actually encoded per second)
 # ---------------------------------------------------------------------------
 
+# av1an prints a "Scene detection" header/progress while it runs its one-time
+# scene detection pass - that bar has its OWN fps number which must never be
+# mistaken for encode throughput. The real encode progress line is the one
+# that contains the chunk counter, e.g. "[1/8 Chunks]".
+SCENE_TEXT_RE = re.compile(r"scene\s*detection", re.IGNORECASE)
+CHUNK_TEXT_RE = re.compile(r"chunk", re.IGNORECASE)
+
+
 class ConsoleFpsReader:
     """Reads av1an's live fps from the Windows console screen buffer.
 
@@ -530,14 +545,57 @@ class ConsoleFpsReader:
     benchmark leaves av1an's output attached to the console (fully visible to
     the user) and samples the fps number av1an itself prints, e.g.:
         00:00:13 [1/8 Chunks] [...]  29% 192/655 (14.15 fps, eta 33s, ...)
+    ONLY that encode progress line (identified by its "Chunks" counter) is
+    accepted as an fps source - the fps shown by av1an's one-time scene
+    detection bar is explicitly ignored, otherwise the benchmark would settle
+    on scene-detection speed and kill av1an before SVT-AV1 ever starts.
+
+    Below 1 fps av1an switches units and prints SECONDS PER FRAME instead,
+    e.g. "(1.56 s/fr, eta 55m)". Those readings are parsed too and converted
+    to fps (fps = 1 / s_per_frame), so very slow candidates are measured
+    correctly instead of being invisible.
+
+    STALE-LINE PROTECTION: the finished progress line of the PREVIOUS
+    candidate stays frozen on screen above the new one. Two filters stop it
+    from ever being read as the current candidate's fps: (1) mark_candidate_
+    start() records the console cursor row when av1an launches and rows
+    printed before that are ignored; (2) a reading is only accepted from a
+    row whose text CHANGED since the previous poll - a live av1an progress
+    line updates every second (its elapsed-time field ticks), a dead one
+    never changes.
+
     Reading the buffer never disturbs what is on screen. On failure (or on
     non-Windows systems) .ok is False and the caller falls back to counting
     frames in av1an's temp folder."""
 
     FPS_RE = re.compile(r"([0-9]+(?:[.,][0-9]+)?)\s*fps", re.IGNORECASE)
+    # Matches BOTH units av1an uses on its progress line: "14.15 fps" and,
+    # below 1 fps, "1.56 s/fr" (seconds per frame). "Kb/s" can never match.
+    RATE_RE = re.compile(r"([0-9]+(?:[.,][0-9]+)?)\s*(fps|s/fr)", re.IGNORECASE)
+
+    @classmethod
+    def parse_rate_fps(cls, text):
+        """Latest throughput on a line, normalized to fps. '1.56 s/fr' ->
+        0.641 fps. Returns None if the line carries no fps/s-per-frame."""
+        latest = None
+        for m in cls.RATE_RE.finditer(text):
+            try:
+                val = float(m.group(1).replace(",", "."))
+            except ValueError:
+                continue
+            if m.group(2).lower() == "s/fr":
+                if val <= 0:
+                    continue
+                val = 1.0 / val
+            if val > 0:
+                latest = val
+        return latest
 
     def __init__(self):
         self.ok = False
+        self._baseline_row = 0   # console row where the CURRENT candidate's
+                                 # output starts (mark_candidate_start)
+        self._prev_rows = {}     # row index -> last text seen there (staleness)
         if os.name != "nt":
             return
         try:
@@ -577,33 +635,75 @@ class ConsoleFpsReader:
         except Exception:
             self.ok = False
 
-    def read_latest_fps(self, rows_back=12):
-        """Latest fps value visible near the cursor, or None."""
+    def _read_rows(self, rows_back=12):
+        """[(absolute_row_index, text), ...] for the last rows up to cursor."""
         if not self.ok:
-            return None
+            return []
+        rows = []
         try:
             ctypes = self._ctypes
             csbi = self._CSBI()
             if not self._k32.GetConsoleScreenBufferInfo(self._handle, ctypes.byref(csbi)):
-                return None
+                return []
             width = csbi.dwSize.X
             cursor_y = csbi.dwCursorPosition.Y
-            latest = None
             for row in range(max(0, cursor_y - rows_back), cursor_y + 1):
                 buf = ctypes.create_unicode_buffer(width + 1)
                 nread = self._DWORD(0)
                 if not self._k32.ReadConsoleOutputCharacterW(
                         self._handle, buf, width, self._COORD(0, row), ctypes.byref(nread)):
                     continue
-                matches = self.FPS_RE.findall(buf.value)
-                if matches:
-                    try:
-                        latest = float(matches[-1].replace(",", "."))
-                    except ValueError:
-                        pass
-            return latest
+                rows.append((row, buf.value))
+            return rows
         except Exception:
-            return None
+            return []
+
+    def read_recent_lines(self, rows_back=12):
+        """Raw text of the last `rows_back` console rows up to the cursor."""
+        return [text for _row, text in self._read_rows(rows_back)]
+
+    def mark_candidate_start(self):
+        """Call right when a candidate's av1an process launches: everything
+        already on screen (including the PREVIOUS candidate's frozen progress
+        line and its old fps) is above this row and will be ignored."""
+        self._prev_rows = {}
+        if not self.ok:
+            return
+        try:
+            ctypes = self._ctypes
+            csbi = self._CSBI()
+            if self._k32.GetConsoleScreenBufferInfo(self._handle, ctypes.byref(csbi)):
+                self._baseline_row = csbi.dwCursorPosition.Y
+        except Exception:
+            pass
+
+    def read_latest_fps(self, rows_back=12):
+        """Latest LIVE encode throughput near the cursor as fps, or None.
+
+        Accepts both av1an units ("14.15 fps" and "1.56 s/fr" -> 1/1.56 fps).
+        Only rows that carry av1an's chunk counter ("[n/m Chunks]") are
+        parsed; the scene-detection bar is skipped. Rows printed before this
+        candidate launched (mark_candidate_start) are skipped, and a value is
+        only taken from a row whose text changed since the previous poll -
+        so the frozen final line of an earlier test can never be re-read as
+        the current candidate's speed."""
+        latest = None
+        for row_idx, text in self._read_rows(rows_back):
+            prev_text = self._prev_rows.get(row_idx)
+            self._prev_rows[row_idx] = text
+            if row_idx < self._baseline_row:
+                continue  # printed before this candidate started
+            if SCENE_TEXT_RE.search(text):
+                continue  # scene detection line - not encode throughput
+            if not CHUNK_TEXT_RE.search(text):
+                continue  # only trust the encode (Chunks) progress line
+            if prev_text is None or prev_text == text:
+                continue  # not (yet) proven live: a real progress line's
+                          # elapsed-time field changes every second
+            rate = self.parse_rate_fps(text)
+            if rate is not None:
+                latest = rate
+        return latest
 
 
 def kill_svt_stragglers():
@@ -792,11 +892,22 @@ def count_encoded_frames(temp_dir):
 def measure_encode_fps(input_path, encoder_params, workers, scenes_file, first_candidate):
     """Run av1an with `workers` workers and measure its real encode fps.
 
+    PHASE 0 - SCENE DETECTION GATE: av1an first runs its ONE-TIME scene
+    detection pass (visible as "Scene detection" in its terminal output).
+    That phase is NOT the benchmark: the loop watches the console text for
+    "Scene detection" and simply waits - collecting no fps samples and
+    running no timers except the RAM guard - until av1an finishes detection
+    and saves the scenes file into the temp folder (or the encode's own
+    "Chunks" progress line appears). Only then does the SVT-AV1 encode begin
+    and the fps measurement clocks start. Later candidates reuse the saved
+    scenes file, so the gate passes instantly for them.
+
     av1an's output stays ATTACHED TO THE CONSOLE so the user sees its normal
-    progress bar. The fps number av1an prints is sampled once per second from
-    the console screen buffer (ConsoleFpsReader); if the buffer cannot be
-    read, cumulative fps derived from counting frames in av1an's temp folder
-    is used instead - same rule either way:
+    progress bar. The fps number av1an prints on its encode ("Chunks")
+    progress line is sampled once per second from the console screen buffer
+    (ConsoleFpsReader); if the buffer cannot be read, cumulative fps derived
+    from counting frames in av1an's temp folder is used instead - same rule
+    either way:
 
       * SETTLED: the readings over the last FPS_SETTLE_SPAN seconds stayed
         within FPS_SETTLE_DELTA fps -> stop, use the latest reading.
@@ -844,6 +955,10 @@ def measure_encode_fps(input_path, encoder_params, workers, scenes_file, first_c
 
     try:
         # stdout/stderr are NOT redirected: av1an's progress bar stays visible.
+        # Baseline the console cursor FIRST so anything already on screen
+        # (the previous candidate's frozen progress line, old fps values) is
+        # excluded from this candidate's readings.
+        reader.mark_candidate_start()
         process = subprocess.Popen(cmd, cwd=BASE_DIR)
     except FileNotFoundError:
         print("Error: av1an executable not found.", file=sys.stderr)
@@ -859,6 +974,21 @@ def measure_encode_fps(input_path, encoder_params, workers, scenes_file, first_c
     rss_peak = 0
     ram_aborted = False
     heavy_due = 0.0
+
+    # --- Scene detection gate state ---
+    # The scenes file already existing (with content) means av1an will load it
+    # instead of re-detecting, so the gate can be skipped entirely.
+    def _scenes_file_ready():
+        try:
+            return os.path.getsize(scenes_file) > 0
+        except OSError:
+            return False
+
+    scene_done = _scenes_file_ready()
+    scene_seen = False          # "Scene detection" text observed in the console
+    phase_start = start         # reset when the gate opens: all measurement
+                                # timeouts count from the START OF THE ENCODE,
+                                # never from the start of scene detection
 
     def tail_median():
         return _median([f for _, f in fps_samples[-5:]])
@@ -881,7 +1011,10 @@ def measure_encode_fps(input_path, encoder_params, workers, scenes_file, first_c
                     kill_svt_stragglers()
                     break
 
-            if now - start > MAX_CANDIDATE_SECONDS:
+            # Hard safety timeout counts from the start of the ENCODE phase
+            # (phase_start), so a long one-time scene detection pass can never
+            # eat into - or trip - the per-candidate measurement budget.
+            if scene_done and now - phase_start > MAX_CANDIDATE_SECONDS:
                 print("\n   ! Candidate hit the hard safety timeout.", file=sys.stderr)
                 result_fps = tail_median()
                 break
@@ -908,6 +1041,48 @@ def measure_encode_fps(input_path, encoder_params, workers, scenes_file, first_c
                 except (psutil.NoSuchProcess, psutil.AccessDenied):
                     pass
 
+            # --- ONE-TIME SCENE DETECTION GATE ---
+            # Nothing is measured until av1an's scene detection pass is done.
+            # Completion = the scenes file has been saved to the temp folder,
+            # OR the encode's own "Chunks" progress line has appeared (belt
+            # and suspenders; either one means SVT-AV1 encoding has begun).
+            if not scene_done:
+                rows = reader.read_recent_lines() if reader.ok else []
+                if not scene_seen and any(SCENE_TEXT_RE.search(r) for r in rows):
+                    scene_seen = True
+                    print("\n   av1an is running its one-time scene detection "
+                          "pass - waiting for it to finish (this is NOT part "
+                          "of the benchmark; fps measurement starts when the "
+                          "SVT-AV1 encode begins)...", file=sys.stderr)
+
+                encode_signal = any(CHUNK_TEXT_RE.search(r)
+                                    and ConsoleFpsReader.RATE_RE.search(r)
+                                    for r in rows)
+                if not encode_signal and not reader.ok:
+                    # No console access: encoded chunk data appearing in the
+                    # temp folder proves scene detection is over.
+                    encode_signal = count_encoded_frames(candidate_temp) > 0
+
+                if _scenes_file_ready() or encode_signal:
+                    scene_done = True
+                    phase_start = now  # measurement clocks start NOW
+                    print("\n   Scene detection done - scenes file saved to "
+                          "the temp folder. SVT-AV1 encoding is starting; "
+                          "beginning the fps measurement.", file=sys.stderr)
+                    # fall through to normal measurement this same iteration
+                else:
+                    if exited:
+                        print("\n   ! av1an exited before scene detection "
+                              "completed - no throughput for this candidate.",
+                              file=sys.stderr)
+                        break
+                    if now - start > SCENE_DETECT_TIMEOUT:
+                        print("\n   ! Timed out waiting for av1an's scene "
+                              "detection to finish.", file=sys.stderr)
+                        break
+                    time.sleep(RAM_GUARD_INTERVAL)
+                    continue
+
             # --- fps signal: av1an's own readout, else counted frames ---
             fps_now = reader.read_latest_fps() if reader.ok else None
             if fps_now is None or fps_now <= 0:
@@ -925,7 +1100,10 @@ def measure_encode_fps(input_path, encoder_params, workers, scenes_file, first_c
                 if first_signal_time is None:
                     first_signal_time = now
                 fps_samples.append((now, fps_now))
-            elif first_signal_time is None and not exited and now - start > init_timeout:
+            elif first_signal_time is None and not exited and now - phase_start > init_timeout:
+                # phase_start = when scene detection finished, so this timeout
+                # covers only source indexing / lookahead fill, never the
+                # one-time scene detection pass itself.
                 print("\n   ! Timed out waiting for av1an to report encoding progress.",
                       file=sys.stderr)
                 break
@@ -1062,7 +1240,10 @@ def run_benchmark(input_path, encoder_params):
     print("Each candidate runs av1an with its normal output visible and is "
           f"stopped once av1an's fps readout settles (varies <= {FPS_SETTLE_DELTA} fps "
           f"over {FPS_SETTLE_SPAN:.0f}s), followed by a {COOLDOWN_BETWEEN_TESTS}s "
-          "cooldown. Scene detection runs once.", file=sys.stderr)
+          "cooldown. av1an's one-time scene detection runs first and is NOT "
+          "measured: the benchmark waits for it to finish (watching for 'Scene "
+          "detection' in av1an's output), lets the scenes file save to the temp "
+          "folder, and only then measures the SVT-AV1 encode.", file=sys.stderr)
 
     # Pre-flight: if the system is ALREADY under memory pressure, warn - the
     # live guard will keep everything safe, but results will skew low.
