@@ -8,6 +8,42 @@ import subprocess
 import time
 import shutil
 
+DISPLAY_USERNAME = "av1enjoyer"
+_WINDOWS_USER_PATH_RE = re.compile(
+    r"([\\/]+users[\\/]+)[A-Za-z0-9._-]+",
+    re.IGNORECASE,
+)
+
+
+def anonymize_user_paths(text):
+    """Hide the real Windows profile name in user-facing console output."""
+    if not isinstance(text, str):
+        return text
+    return _WINDOWS_USER_PATH_RE.sub(
+        lambda match: f"{match.group(1)}{DISPLAY_USERNAME}",
+        text,
+    )
+
+
+class AnonymizedTextStream:
+    """Proxy a text stream while anonymizing C:\\Users\\<name> paths."""
+
+    def __init__(self, stream):
+        self._stream = stream
+
+    def write(self, text):
+        return self._stream.write(anonymize_user_paths(text))
+
+    def writelines(self, lines):
+        return self._stream.writelines(anonymize_user_paths(line) for line in lines)
+
+    def __getattr__(self, name):
+        return getattr(self._stream, name)
+
+
+sys.stdout = AnonymizedTextStream(sys.stdout)
+sys.stderr = AnonymizedTextStream(sys.stderr)
+
 # --- CONFIGURATION ---
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TOOLS_DIR = os.path.join(BASE_DIR, "tools")

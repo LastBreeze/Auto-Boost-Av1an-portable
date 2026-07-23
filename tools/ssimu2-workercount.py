@@ -15,6 +15,42 @@ import statistics
 from pathlib import Path
 import vapoursynth as vs
 
+DISPLAY_USERNAME = "av1enjoyer"
+_WINDOWS_USER_PATH_RE = re.compile(
+    r"([\\/]+users[\\/]+)[A-Za-z0-9._-]+",
+    re.IGNORECASE,
+)
+
+
+def anonymize_user_paths(text):
+    """Hide the real Windows profile name in user-facing console output."""
+    if not isinstance(text, str):
+        return text
+    return _WINDOWS_USER_PATH_RE.sub(
+        lambda match: f"{match.group(1)}{DISPLAY_USERNAME}",
+        text,
+    )
+
+
+class AnonymizedTextStream:
+    """Proxy a text stream while anonymizing C:\\Users\\<name> paths."""
+
+    def __init__(self, stream):
+        self._stream = stream
+
+    def write(self, text):
+        return self._stream.write(anonymize_user_paths(text))
+
+    def writelines(self, lines):
+        return self._stream.writelines(anonymize_user_paths(line) for line in lines)
+
+    def __getattr__(self, name):
+        return getattr(self._stream, name)
+
+
+sys.stdout = AnonymizedTextStream(sys.stdout)
+sys.stderr = AnonymizedTextStream(sys.stderr)
+
 # --- CONFIGURATION ---
 VERBOSE = False  # Set to True to see all raw output for troubleshooting
 
@@ -63,6 +99,12 @@ except ImportError:
 
 FILTER_SETTING_KEYS = ("downscale", "denoise", "deband")
 
+# Optional overrides applied on top of settings.txt (set by run_optimize_mode
+# from the launching .bat, mirroring what dispatch writes into settings.txt
+# right before encoding).
+SETTINGS_OVERRIDES = {}
+
+
 def read_settings_values() -> dict:
     settings_paths = [BASE_DIR / "settings.txt", TOOLS_DIR / "settings.txt"]
     values = {}
@@ -78,6 +120,7 @@ def read_settings_values() -> dict:
                 values[key.strip().lower()] = value.strip()
         except Exception:
             pass
+    values.update(SETTINGS_OVERRIDES)
     return values
 
 def settings_filters_enabled() -> bool:
@@ -420,6 +463,14 @@ def delete_benchmark_sample():
                 pass
 
 
+def _sample_source_signature(source):
+    try:
+        st = Path(source).stat()
+        return f"{Path(source).name}|{st.st_size}|{int(st.st_mtime)}"
+    except OSError:
+        return None
+
+
 def ensure_benchmark_sample(force=False):
     """Create tools/benchmark-sample.mkv: a 90 second, audio-free cut of the
     first video in video-input, made with mkvmerge exactly like
@@ -427,15 +478,23 @@ def ensure_benchmark_sample(force=False):
     Falls back to the first 90 seconds for short sources. Reuses a recent
     sample so workercount.py and ssimu2-workercount.py share one file.
     Returns the sample Path, or None if it could not be created."""
+    source = find_first_input_video()
+    sidecar = Path(str(BENCH_SAMPLE_FILE) + ".source.txt")
+
     if not force and BENCH_SAMPLE_FILE.exists():
         try:
-            if time.time() - BENCH_SAMPLE_FILE.stat().st_mtime < SAMPLE_MAX_AGE_SECONDS:
+            fresh = time.time() - BENCH_SAMPLE_FILE.stat().st_mtime < SAMPLE_MAX_AGE_SECONDS
+            recorded = sidecar.read_text(encoding="utf-8").strip() if sidecar.exists() else None
+            # Reuse ONLY when the sample provably came from the CURRENT first
+            # source file (same rule as workercount.py).
+            if fresh and source and recorded and recorded == _sample_source_signature(source):
+                print(f"[Sample] Reusing benchmark sample (same source: {source.name}).", file=sys.stderr)
+                return BENCH_SAMPLE_FILE
+            if fresh and recorded and not source:
                 print(f"[Sample] Reusing recent benchmark sample: {BENCH_SAMPLE_FILE.name}", file=sys.stderr)
                 return BENCH_SAMPLE_FILE
         except OSError:
             pass
-
-    source = find_first_input_video()
     if not source:
         print("[Sample] No source video found in video-input.", file=sys.stderr)
         return None
@@ -481,6 +540,12 @@ def ensure_benchmark_sample(force=False):
                         pass
 
         if produced:
+            sig = _sample_source_signature(source)
+            if sig:
+                try:
+                    sidecar.write_text(sig + "\n", encoding="utf-8")
+                except OSError:
+                    pass
             print(f"[Sample] Created 90s benchmark sample (no audio) from "
                   f"{source.name} [{time_range}].", file=sys.stderr)
             return produced
@@ -1202,8 +1267,10 @@ def run_full_suite(target_fork="5fish", use_filters=False):
     try:
         cleanup_temp_files()
 
-        # Benchmark against a 90s cut of the user's real source when available
-        adopt_benchmark_sample()
+        # OPTIMIZE mode (use_filters=True): benchmark against a 90s cut of the
+        # user's real source. GENERAL mode keeps the bundled tools/sample.mkv.
+        if use_filters:
+            adopt_benchmark_sample()
 
         # Setup specific SVT-AV1 fork with AVX-512 detection before pass
         setup_svt_av1_fork(target_fork=target_fork)
@@ -1353,6 +1420,12 @@ def run_optimize_mode(bat_arg=None):
         return
 
     fork = (bat.get("fork", "5fish") or "5fish").strip()
+
+    # The bat's DENOISE is what dispatch writes into settings.txt at encode
+    # time - apply it now so the benchmark's filtering matches exactly.
+    bat_denoise = bat.get("denoise", "").strip().lower()
+    if bat_denoise in ("true", "false"):
+        SETTINGS_OVERRIDES["denoise"] = bat_denoise
 
     print("\n-------------------------------------------------------------------------------", file=sys.stderr)
     print(f"[Optimize] One-time optimized SSIMU2 benchmark for: {bat_path.name}", file=sys.stderr)

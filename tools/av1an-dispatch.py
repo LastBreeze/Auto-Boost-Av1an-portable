@@ -6,6 +6,7 @@ import glob
 import shutil
 import shlex
 import re
+import time
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -15,6 +16,58 @@ from svt_fork_setup import setup_svt_av1_fork
 BLUE = "\033[94m"
 RED = "\033[91m"
 RESET = "\033[0m"
+
+DISPLAY_USERNAME = "av1enjoyer"
+_WINDOWS_USER_PATH_RE = re.compile(
+    r"([\\/]+users[\\/]+)[A-Za-z0-9._-]+",
+    re.IGNORECASE,
+)
+
+
+def anonymize_user_paths(text):
+    """Hide the real Windows profile name in user-facing console output."""
+    if not isinstance(text, str):
+        return text
+    return _WINDOWS_USER_PATH_RE.sub(
+        lambda match: f"{match.group(1)}{DISPLAY_USERNAME}",
+        text,
+    )
+
+
+class AnonymizedTextStream:
+    """Proxy a text stream while anonymizing C:\\Users\\<name> paths."""
+
+    def __init__(self, stream):
+        self._stream = stream
+
+    def write(self, text):
+        return self._stream.write(anonymize_user_paths(text))
+
+    def writelines(self, lines):
+        return self._stream.writelines(anonymize_user_paths(line) for line in lines)
+
+    def __getattr__(self, name):
+        return getattr(self._stream, name)
+
+
+sys.stdout = AnonymizedTextStream(sys.stdout)
+sys.stderr = AnonymizedTextStream(sys.stderr)
+
+
+def format_elapsed_hhmmss(seconds):
+    """Format elapsed seconds as hh:mm:ss, allowing totals longer than 24 hours."""
+    total_seconds = max(0, int(float(seconds) + 0.5))
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+
+def print_av1an_timing_report(report):
+    print("\n" + "-" * 80)
+    print(f"Av1an time report for: {report['filename']}")
+    print("Time format legend: hh:mm:ss = hours:minutes:seconds")
+    print(f"Av1an encoding time: {format_elapsed_hhmmss(report['av1an_encoding'])}")
+    print("-" * 80)
 
 def scene_detection_env():
     """Environment for scene detection subprocesses.
@@ -940,6 +993,47 @@ final.set_output(0)
     return vpy_file
 
 
+def resolve_fgs_table_path(param_str, root_dir, tools_dir=None):
+    """Rewrite any relative '--fgs-table <path>' in an encoder params string
+    to an absolute path so av1an worker processes (which run in their own
+    working directories) can find the table file.
+
+    Relative paths are resolved against the portable package root first,
+    then the tools directory, then the current working directory. The
+    resolved path uses forward slashes (accepted by Windows and safe for
+    av1an's shell-style splitting of --video-params) and is double-quoted
+    only when it contains whitespace.
+    """
+    if not param_str or "--fgs-table" not in param_str:
+        return param_str
+
+    pattern = re.compile(r'(--fgs-table[ \t]+)("([^"]*)"|\'([^\']*)\'|(\S+))')
+
+    def _repl(match):
+        raw = match.group(3) or match.group(4) or match.group(5) or ""
+        if not raw:
+            return match.group(0)
+        if os.path.isabs(raw):
+            resolved = os.path.abspath(raw)
+        else:
+            candidates = [os.path.join(root_dir, raw)]
+            if tools_dir:
+                candidates.append(os.path.join(tools_dir, raw))
+            candidates.append(os.path.abspath(raw))
+            resolved = next((c for c in candidates if os.path.isfile(c)), candidates[0])
+            resolved = os.path.abspath(resolved)
+        if not os.path.isfile(resolved):
+            print(f"{RED}[Dispatch] WARNING: film grain table not found: {resolved}{RESET}")
+            print(f"{RED}[Dispatch]          Place '{raw}' in the package root next to the .bat file.{RESET}")
+        resolved = resolved.replace("\\", "/")
+        if any(ch.isspace() for ch in resolved):
+            resolved = f'"{resolved}"'
+        print(f"[Dispatch] Resolved film grain table path: {resolved}")
+        return match.group(1) + resolved
+
+    return pattern.sub(_repl, param_str)
+
+
 def main():
     # --- Configuration ---
     script_path = os.path.abspath(__file__)
@@ -1037,6 +1131,10 @@ def main():
         else:
             i += 1
 
+    # Rewrite relative --fgs-table paths in the encoder params to absolute
+    # paths anchored at the package root, so SvtAv1EncApp can open the table
+    # regardless of the working directory av1an spawns its workers in.
+    final_params = resolve_fgs_table_path(final_params, root_dir, tools_dir)
 
     # --- Optimized worker override from the generating .bat (optional) ---
     # Written by the one-time benchmark (workercount.py --optimize-bat).
@@ -1077,6 +1175,8 @@ def main():
     print(f"[Dispatch] Found {len(input_files)} files to process.")
 
     # --- Main Processing Loop ---
+    timing_reports = []
+    batch_started_at = time.monotonic()
     input_index = 0
     while input_index < len(input_files):
         input_abspath_origin = input_files[input_index]
@@ -1195,6 +1295,7 @@ def main():
                 
             print(f"[Dispatch] Starting Av1an Encoding...")
             print(f"svt-av1 fork: {svt_fork_display_name(selected_fork)}")
+            av1an_started_at = time.monotonic()
             
             try:
                 with keep.running():
@@ -1210,6 +1311,8 @@ def main():
                     "An encode failed.",
                 )
                 continue
+
+            av1an_elapsed = time.monotonic() - av1an_started_at
 
             # 3. Move Av1an Artifacts from video-input to Temp
             # Artifacts are: {basename}-av1.mkv and {basename} (folder)
@@ -1281,6 +1384,13 @@ def main():
                 print(f"[Dispatch] Error: Expected output file not found: {temp_output_mkv}")
 
             if output_moved:
+                timing_report = {
+                    "filename": filename,
+                    "av1an_encoding": av1an_elapsed,
+                }
+                timing_reports.append(timing_report)
+                print_av1an_timing_report(timing_report)
+
                 newly_detected_files = scan_for_new_input_files(video_input_dir, extensions, known_input_files)
                 if newly_detected_files:
                     warn_and_pause_if_paths_too_long(newly_detected_files, video_output_dir, temp_dir)
@@ -1296,6 +1406,8 @@ def main():
                 "An encode failed.",
             )
 
+    batch_elapsed = time.monotonic() - batch_started_at
+
     send_ntfy_notification(
         ntfy_settings,
         root_dir,
@@ -1307,6 +1419,14 @@ def main():
     print("\n" + "="*80)
     print("Av1an Direct Batch Complete.")
     print("="*80)
+
+    if timing_reports:
+        print("\nFinal Av1an time reports:")
+        for timing_report in timing_reports:
+            print_av1an_timing_report(timing_report)
+
+    print("\nTime format legend: hh:mm:ss = hours:minutes:seconds")
+    print(f"Total time for all files: {format_elapsed_hhmmss(batch_elapsed)}")
 
 if __name__ == "__main__":
     main()

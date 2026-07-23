@@ -5,6 +5,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import glob
 import re
 import shutil
+import threading
+import time
 import urllib.parse
 import urllib.request
 from wakepy import keep
@@ -13,6 +15,136 @@ from svt_fork_setup import setup_svt_av1_fork
 BLUE = "\033[94m"
 RED = "\033[91m"
 RESET = "\033[0m"
+
+DISPLAY_USERNAME = "av1enjoyer"
+_WINDOWS_USER_PATH_RE = re.compile(
+    r"([\\/]+users[\\/]+)[A-Za-z0-9._-]+",
+    re.IGNORECASE,
+)
+
+
+def anonymize_user_paths(text):
+    """Hide the real Windows profile name in user-facing console output."""
+    if not isinstance(text, str):
+        return text
+    return _WINDOWS_USER_PATH_RE.sub(
+        lambda match: f"{match.group(1)}{DISPLAY_USERNAME}",
+        text,
+    )
+
+
+class AnonymizedTextStream:
+    """Proxy a text stream while anonymizing C:\\Users\\<name> paths."""
+
+    def __init__(self, stream):
+        self._stream = stream
+
+    def write(self, text):
+        return self._stream.write(anonymize_user_paths(text))
+
+    def writelines(self, lines):
+        return self._stream.writelines(anonymize_user_paths(line) for line in lines)
+
+    def __getattr__(self, name):
+        return getattr(self._stream, name)
+
+
+sys.stdout = AnonymizedTextStream(sys.stdout)
+sys.stderr = AnonymizedTextStream(sys.stderr)
+
+
+def format_elapsed_hhmmss(seconds):
+    """Format elapsed seconds as hh:mm:ss, allowing totals longer than 24 hours."""
+    total_seconds = max(0, int(float(seconds) + 0.5))
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+
+def print_dispatch_timing_report(report):
+    print("\n" + "-" * 80)
+    print(f"Time report for: {report['filename']}")
+    print("Time format legend: hh:mm:ss = hours:minutes:seconds")
+    print(f"Scene detection:   {format_elapsed_hhmmss(report['scene_detection'])}")
+    print(f"Visual metrics:    {format_elapsed_hhmmss(report['visual_metrics'])}")
+    print(f"Encoding:          {format_elapsed_hhmmss(report['encoding'])}")
+    print(f"Output MKV muxing: {format_elapsed_hhmmss(report['muxing'])}")
+    print(f"Total time: {format_elapsed_hhmmss(report['total'])}")
+    print("-" * 80)
+
+
+class StageTimingMonitor:
+    """Observe Auto-Boost's stage file without changing its normal one-process flow."""
+
+    def __init__(self, stage_file):
+        self.stage_file = stage_file
+        self.transitions = []
+        self._stop_event = threading.Event()
+        self._last_signature = None
+        self.initial_stage = self._read_stage()[1]
+        initial = self._read_stage()
+        self._last_signature = initial[0]
+        self._thread = threading.Thread(target=self._run, name="auto-boost-stage-timer", daemon=True)
+
+    def _read_stage(self):
+        try:
+            stat = os.stat(self.stage_file)
+            with open(self.stage_file, "r", encoding="utf-8", errors="replace") as f:
+                value = int(f.readline().strip())
+            return (stat.st_mtime_ns, stat.st_size, value), value
+        except (OSError, ValueError):
+            return None, None
+
+    def _sample(self):
+        signature, stage = self._read_stage()
+        if signature is None:
+            self._last_signature = None
+            return
+        if signature != self._last_signature:
+            self.transitions.append((stage, time.monotonic()))
+            self._last_signature = signature
+
+    def _run(self):
+        while not self._stop_event.wait(0.02):
+            self._sample()
+
+    def start(self):
+        self._thread.start()
+
+    def stop(self):
+        self._sample()
+        self._stop_event.set()
+        self._thread.join(timeout=1)
+        self._sample()
+
+
+def summarize_auto_boost_stage_timings(started_at, ended_at, transitions, initial_stage=1):
+    """Return visual-metric and encoding seconds from Auto-Boost stage transitions.
+
+    Stage 1 is the fast encode, stage 2 calculates visual metrics, stage 3 builds
+    zones, and stage 4 is the final encode. Encoding combines stages 1 and 4.
+    """
+    current_stage = initial_stage if initial_stage in (1, 2, 3, 4) else 1
+    cursor = started_at
+    visual_metrics = 0.0
+    encoding = 0.0
+
+    for next_stage, transition_at in sorted(transitions, key=lambda item: item[1]):
+        transition_at = min(ended_at, max(cursor, transition_at))
+        elapsed = transition_at - cursor
+        if current_stage in (1, 4):
+            encoding += elapsed
+        elif current_stage == 2:
+            visual_metrics += elapsed
+        current_stage = next_stage
+        cursor = transition_at
+
+    remaining = max(0.0, ended_at - cursor)
+    if current_stage in (1, 4):
+        encoding += remaining
+    elif current_stage == 2:
+        visual_metrics += remaining
+    return visual_metrics, encoding
 
 def scene_detection_env():
     """Environment for scene detection subprocesses.
@@ -622,6 +754,47 @@ def scan_for_new_input_files(video_input_dir, extensions, known_input_files):
         known_input_files.update(new_files)
     return new_files
 
+def resolve_fgs_table_path(param_str, root_dir, tools_dir=None):
+    """Rewrite any relative '--fgs-table <path>' in an encoder params string
+    to an absolute path so av1an worker processes (which run in their own
+    working directories) can find the table file.
+
+    Relative paths are resolved against the portable package root first,
+    then the tools directory, then the current working directory. The
+    resolved path uses forward slashes (accepted by Windows and safe for
+    av1an's shell-style splitting of --video-params) and is double-quoted
+    only when it contains whitespace.
+    """
+    if not param_str or "--fgs-table" not in param_str:
+        return param_str
+
+    pattern = re.compile(r'(--fgs-table[ \t]+)("([^"]*)"|\'([^\']*)\'|(\S+))')
+
+    def _repl(match):
+        raw = match.group(3) or match.group(4) or match.group(5) or ""
+        if not raw:
+            return match.group(0)
+        if os.path.isabs(raw):
+            resolved = os.path.abspath(raw)
+        else:
+            candidates = [os.path.join(root_dir, raw)]
+            if tools_dir:
+                candidates.append(os.path.join(tools_dir, raw))
+            candidates.append(os.path.abspath(raw))
+            resolved = next((c for c in candidates if os.path.isfile(c)), candidates[0])
+            resolved = os.path.abspath(resolved)
+        if not os.path.isfile(resolved):
+            print(f"{RED}[Dispatch] WARNING: film grain table not found: {resolved}{RESET}")
+            print(f"{RED}[Dispatch]          Place '{raw}' in the package root next to the .bat file.{RESET}")
+        resolved = resolved.replace("\\", "/")
+        if any(ch.isspace() for ch in resolved):
+            resolved = f'"{resolved}"'
+        print(f"[Dispatch] Resolved film grain table path: {resolved}")
+        return match.group(1) + resolved
+
+    return pattern.sub(_repl, param_str)
+
+
 def main():
     # --- Configuration ---
     # Paths relative to this script (tools/dispatch.py)
@@ -789,6 +962,8 @@ def main():
     print(f"[Dispatch] Found {len(input_files)} files to process.")
 
     # --- Main Processing Loop ---
+    timing_reports = []
+    batch_started_at = time.monotonic()
     input_index = 0
     while input_index < len(input_files):
         input_abspath_origin = input_files[input_index]
@@ -808,6 +983,12 @@ def main():
             print("[Dispatch] Skipping...")
             continue
 
+        file_started_at = time.monotonic()
+        scene_elapsed = 0.0
+        visual_metrics_elapsed = 0.0
+        encoding_elapsed = 0.0
+        mux_elapsed = 0.0
+
         try:
             # 1. Scene Detection
             json_file = f"{basename}_scenedetect.json"
@@ -823,10 +1004,13 @@ def main():
                     "-i", input_abspath_origin,
                     "-o", json_file 
                 ]
+                scene_started_at = time.monotonic()
                 try:
                     subprocess.check_call(cmd_scene, cwd=temp_dir, env=scene_detection_env())
                 except subprocess.CalledProcessError:
                     print("[Dispatch] Scene detection failed.")
+                finally:
+                    scene_elapsed = time.monotonic() - scene_started_at
             
             # 2. Color Space Detection / HDR handling
             color_metadata = detect_color_metadata(input_abspath_origin, mediainfo_exe)
@@ -892,6 +1076,9 @@ def main():
                             param_str = param_str.replace("--lp 3", "")
                         if current_color_flags:
                             param_str += current_color_flags
+                        # Rewrite relative --fgs-table paths to absolute so the
+                        # encoder can open the table from any working directory.
+                        param_str = resolve_fgs_table_path(param_str, root_dir, tools_dir)
                         final_cmd.append(param_str)
                         skip_next = True
                     else:
@@ -902,6 +1089,11 @@ def main():
             print(f"[Dispatch] Processing {filename}...")
             print("[Dispatch] Starting Encoding...")
             print(f"svt-av1 fork: {svt_fork_display_name(selected_fork)}")
+            stage_file = os.path.join(video_input_dir, basename, f"{basename}_stage.txt")
+            stage_monitor = StageTimingMonitor(stage_file)
+            resume_requested = "-r" in args or "--resume" in args
+            auto_boost_started_at = time.monotonic()
+            stage_monitor.start()
             try:
                 with keep.running():
                     subprocess.check_call(final_cmd, cwd=temp_dir)
@@ -915,6 +1107,17 @@ def main():
                     "An encode failed.",
                 )
                 continue 
+            finally:
+                auto_boost_ended_at = time.monotonic()
+                stage_monitor.stop()
+
+            initial_stage = stage_monitor.initial_stage if resume_requested else 1
+            visual_metrics_elapsed, encoding_elapsed = summarize_auto_boost_stage_timings(
+                auto_boost_started_at,
+                auto_boost_ended_at,
+                stage_monitor.transitions,
+                initial_stage=initial_stage,
+            )
 
             # 4. Move Av1an Artifacts from video-input to Temp
             # Artifacts are: {basename}-av1.mkv and {basename} (folder)
@@ -965,11 +1168,14 @@ def main():
 
             # 6. Muxing
             print("[Dispatch] Muxing...")
+            mux_started_at = time.monotonic()
             try:
                 subprocess.check_call([sys.executable, mux_script], cwd=temp_dir)
             except subprocess.CalledProcessError:
                 print("[Dispatch] Muxing failed.")
                 continue
+            finally:
+                mux_elapsed = time.monotonic() - mux_started_at
                 
             # 7. Move Output
             temp_output_mkv = os.path.join(temp_dir, f"{basename}-output.mkv")
@@ -986,6 +1192,17 @@ def main():
                 print(f"[Dispatch] Error: Expected output file not found: {temp_output_mkv}")
 
             if output_moved:
+                timing_report = {
+                    "filename": filename,
+                    "scene_detection": scene_elapsed,
+                    "visual_metrics": visual_metrics_elapsed,
+                    "encoding": encoding_elapsed,
+                    "muxing": mux_elapsed,
+                    "total": time.monotonic() - file_started_at,
+                }
+                timing_reports.append(timing_report)
+                print_dispatch_timing_report(timing_report)
+
                 newly_detected_files = scan_for_new_input_files(video_input_dir, extensions, known_input_files)
                 if newly_detected_files:
                     warn_and_pause_if_paths_too_long(newly_detected_files, video_output_dir, temp_dir)
@@ -1001,6 +1218,8 @@ def main():
                 "An encode failed.",
             )
 
+    batch_elapsed = time.monotonic() - batch_started_at
+
     send_ntfy_notification(
         ntfy_settings,
         root_dir,
@@ -1012,6 +1231,14 @@ def main():
     print("\n" + "="*80)
     print("Dispatch Batch Complete.")
     print("="*80)
+
+    if len(timing_reports) > 1:
+        print("\nAll completed MKV time reports:")
+        for timing_report in timing_reports:
+            print_dispatch_timing_report(timing_report)
+
+    print("\nTime format legend: hh:mm:ss = hours:minutes:seconds")
+    print(f"Total time for all files: {format_elapsed_hhmmss(batch_elapsed)}")
 
 if __name__ == "__main__":
     main()
