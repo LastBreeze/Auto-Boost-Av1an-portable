@@ -572,6 +572,11 @@ def parse_lp(params):
 # that contains the chunk counter, e.g. "[1/8 Chunks]".
 SCENE_TEXT_RE = re.compile(r"scene\s*detection", re.IGNORECASE)
 CHUNK_TEXT_RE = re.compile(r"chunk", re.IGNORECASE)
+# av1an dumps the failed encoder's output with "stdout:"/"stderr:" sections
+# when a worker crashes. Any of these markers on screen = a crashed run.
+CRASH_TEXT_RE = re.compile(
+    r"encoder crashed|Encoder failed|shutting down worker|\bstderr:",
+    re.IGNORECASE)
 
 
 class ConsoleFpsReader:
@@ -712,6 +717,35 @@ class ConsoleFpsReader:
                 self._baseline_row = csbi.dwCursorPosition.Y
         except Exception:
             pass
+
+    def erase_candidate_output(self):
+        """Blank every console row from the candidate baseline down to the
+        cursor and move the cursor back to the baseline row. Used to HIDE the
+        entire output of a crashed av1an run (its multi-page encoder crash
+        dumps included) so a single clean status line can replace it."""
+        if not self.ok:
+            return False
+        try:
+            ctypes = self._ctypes
+            csbi = self._CSBI()
+            if not self._k32.GetConsoleScreenBufferInfo(self._handle, ctypes.byref(csbi)):
+                return False
+            width = csbi.dwSize.X
+            cursor_y = csbi.dwCursorPosition.Y
+            first = max(0, min(self._baseline_row, cursor_y))
+            length = width * (cursor_y - first + 1)
+            if length <= 0:
+                return False
+            start = self._COORD(0, first)
+            written = self._DWORD(0)
+            self._k32.FillConsoleOutputCharacterW(
+                self._handle, ctypes.c_wchar(" "), length, start, ctypes.byref(written))
+            self._k32.FillConsoleOutputAttribute(
+                self._handle, csbi.wAttributes, length, start, ctypes.byref(written))
+            self._k32.SetConsoleCursorPosition(self._handle, start)
+            return True
+        except Exception:
+            return False
 
     def read_latest_fps(self, rows_back=12):
         """Latest LIVE encode throughput near the cursor as fps, or None.
@@ -911,17 +945,39 @@ def count_done_json_frames(temp_dir):
 
 
 def count_encoded_frames(temp_dir):
-    """Total frames written so far in an av1an temp dir.
+    """Total frames ENCODED so far in an av1an temp dir.
 
-    Chunk files are identified by magic bytes rather than filename or
-    extension (av1an 0.4 writes IVF chunks; av1an 0.5 writes MKV chunks that
-    are still named .ivf), because av1an versions differ in temp layout.
+    CRITICAL EXCLUSION: av1an also writes SOURCE video segments into
+    <temp>/split/ (Matroska files holding the ORIGINAL frames) while it
+    prepares chunks - during/right after the one-time scene detection pass.
+    Counting those once made the benchmark report scene detection / source
+    splitting as "encode fps" (e.g. a stable 42 fps that was really
+    2160 source frames / 51s of scene detection). Rules now:
+      * anything under a directory named "split" is NEVER counted
+      * Matroska (EBML) files only count inside a directory named "encode"
+        (av1an's encoder-output folder) - source segments are Matroska too,
+        so location is the only reliable discriminator
+      * IVF (DKIF) files count anywhere outside "split" (IVF is always
+        encoder output)
     av1an's own done.json (completed chunks) is used as a second signal and
     the larger of the two counts wins."""
     chunk_total = 0
     for root, _dirs, files in os.walk(temp_dir):
+        parts = {p.lower() for p in os.path.normpath(root).split(os.sep)}
+        if "split" in parts:
+            continue  # av1an's SOURCE segments live here - not encoder output
+        in_encode_dir = "encode" in parts
         for name in files:
-            chunk_total += count_chunk_frames(os.path.join(root, name))
+            path = os.path.join(root, name)
+            try:
+                with open(path, "rb") as f:
+                    magic = f.read(4)
+            except OSError:
+                continue
+            if magic == b"DKIF":
+                chunk_total += count_ivf_frames(path)
+            elif magic == b"\x1a\x45\xdf\xa3" and in_encode_dir:
+                chunk_total += count_mkv_frames(path)
     return max(chunk_total, count_done_json_frames(temp_dir))
 
 
@@ -989,6 +1045,38 @@ def measure_encode_fps(input_path, encoder_params, workers, scenes_file, first_c
               f"same settle rule: within {FPS_SETTLE_DELTA} fps for {FPS_SETTLE_SPAN:.0f}s)",
               file=sys.stderr)
 
+    # --- Scene detection gate state (decided BEFORE av1an launches so nothing
+    #     is printed while av1an owns the console) ---
+    # A VALID scenes file means av1an will load it instead of re-detecting,
+    # so the gate can be skipped. A corrupt/partial scenes file (earlier
+    # interrupted run) would make av1an error out or silently re-detect while
+    # the gate wrongly believed detection was done - delete it up front.
+    def _scenes_file_ready(delete_corrupt=False):
+        try:
+            if os.path.getsize(scenes_file) <= 0:
+                return False
+            with open(scenes_file, "r", encoding="utf-8", errors="replace") as f:
+                json.load(f)
+            return True
+        except OSError:
+            return False
+        except ValueError:
+            if delete_corrupt:
+                try:
+                    os.remove(scenes_file)
+                except OSError:
+                    pass
+            return False
+
+    scene_done = _scenes_file_ready(delete_corrupt=True)
+    if not scene_done:
+        # Printed BEFORE launch: from here until this test ends the console
+        # belongs to av1an alone - the benchmark stays silent while av1an is
+        # drawing (printing into its redraw region garbles its output).
+        print("   av1an runs its one-time scene detection first. It is NOT "
+              "measured: fps measurement starts only after detection finishes "
+              "and the scenes file is saved to the temp folder.", file=sys.stderr)
+
     try:
         # stdout/stderr are NOT redirected: av1an's progress bar stays visible.
         # Baseline the console cursor FIRST so anything already on screen
@@ -1010,21 +1098,22 @@ def measure_encode_fps(input_path, encoder_params, workers, scenes_file, first_c
     rss_peak = 0
     ram_aborted = False
     heavy_due = 0.0
-
-    # --- Scene detection gate state ---
-    # The scenes file already existing (with content) means av1an will load it
-    # instead of re-detecting, so the gate can be skipped entirely.
-    def _scenes_file_ready():
-        try:
-            return os.path.getsize(scenes_file) > 0
-        except OSError:
-            return False
-
-    scene_done = _scenes_file_ready()
-    scene_seen = False          # "Scene detection" text observed in the console
     phase_start = start         # reset when the gate opens: all measurement
                                 # timeouts count from the START OF THE ENCODE,
                                 # never from the start of scene detection
+
+    def _candidate_crashed():
+        """Kill everything, HIDE the crashed run's console output, and print
+        the one status line the user should see instead."""
+        nonlocal ram_aborted, result_fps
+        ram_aborted = True      # steers the search toward FEWER workers
+        result_fps = 0.0
+        if process.poll() is None:
+            kill_process_tree(process.pid)
+        kill_svt_stragglers()
+        time.sleep(0.5)
+        reader.erase_candidate_output()
+        print("   ram oversaturated, lowering worker count", file=sys.stderr)
 
     def tail_median():
         return _median([f for _, f in fps_samples[-5:]])
@@ -1077,40 +1166,46 @@ def measure_encode_fps(input_path, encoder_params, workers, scenes_file, first_c
                 except (psutil.NoSuchProcess, psutil.AccessDenied):
                     pass
 
+            # --- CRASH DETECTION ---
+            # A crashed encoder makes av1an dump the worker's output with
+            # "stdout:" / "stderr:" sections ("Encoder failed", "encoder
+            # crashed"). Any of those markers on screen = a crashed run:
+            # kill everything, ERASE the whole crashed av1an output from the
+            # console, and report it as RAM oversaturation so the search
+            # lowers the worker count.
+            if reader.ok and any(CRASH_TEXT_RE.search(r)
+                                 for r in reader.read_recent_lines(40)):
+                _candidate_crashed()
+                break
+
             # --- ONE-TIME SCENE DETECTION GATE ---
             # Nothing is measured until av1an's scene detection pass is done.
             # Completion = the scenes file has been saved to the temp folder,
             # OR the encode's own "Chunks" progress line has appeared (belt
             # and suspenders; either one means SVT-AV1 encoding has begun).
+            # DELIBERATELY SILENT: nothing is printed while av1an is running
+            # and drawing its progress bars (printing into av1an's redraw
+            # region can garble/erase its output on screen). The wait was
+            # announced before launch.
             if not scene_done:
                 rows = reader.read_recent_lines() if reader.ok else []
-                if not scene_seen and any(SCENE_TEXT_RE.search(r) for r in rows):
-                    scene_seen = True
-                    print("\n   av1an is running its one-time scene detection "
-                          "pass - waiting for it to finish (this is NOT part "
-                          "of the benchmark; fps measurement starts when the "
-                          "SVT-AV1 encode begins)...", file=sys.stderr)
-
                 encode_signal = any(CHUNK_TEXT_RE.search(r)
                                     and ConsoleFpsReader.RATE_RE.search(r)
                                     for r in rows)
                 if not encode_signal and not reader.ok:
                     # No console access: encoded chunk data appearing in the
-                    # temp folder proves scene detection is over.
+                    # temp folder proves scene detection is over. (Safe now:
+                    # count_encoded_frames ignores av1an's source segments.)
                     encode_signal = count_encoded_frames(candidate_temp) > 0
 
                 if _scenes_file_ready() or encode_signal:
                     scene_done = True
                     phase_start = now  # measurement clocks start NOW
-                    print("\n   Scene detection done - scenes file saved to "
-                          "the temp folder. SVT-AV1 encoding is starting; "
-                          "beginning the fps measurement.", file=sys.stderr)
                     # fall through to normal measurement this same iteration
                 else:
                     if exited:
-                        print("\n   ! av1an exited before scene detection "
-                              "completed - no throughput for this candidate.",
-                              file=sys.stderr)
+                        # av1an died before detection finished = crashed run
+                        _candidate_crashed()
                         break
                     if now - start > SCENE_DETECT_TIMEOUT:
                         print("\n   ! Timed out waiting for av1an's scene "
@@ -1146,6 +1241,11 @@ def measure_encode_fps(input_path, encoder_params, workers, scenes_file, first_c
 
             # --- stop conditions ---
             if exited:
+                if not fps_samples and frames_seen == 0:
+                    # av1an ended without ever producing encoded output: that
+                    # is a crashed/oversaturated run, not a finished encode.
+                    _candidate_crashed()
+                    break
                 # Encode finished: most stable numbers from the end
                 result_fps = tail_median()
                 break
@@ -1268,6 +1368,14 @@ def run_benchmark(input_path, encoder_params):
 
     os.makedirs(BENCH_TEMP_DIR, exist_ok=True)
     scenes_file = os.path.join(BENCH_TEMP_DIR, "bench_scenes.json")
+    # A scenes file left over from a previous run/video would pre-open the
+    # scene-detection gate while av1an actually re-detects (frame counts
+    # won't match), letting scene-detection activity leak into measurements.
+    # Delete it: exactly one fresh detection pass per benchmark run.
+    try:
+        os.remove(scenes_file)
+    except OSError:
+        pass
 
     print(f"\nFinding the worker-count sweet spot on {os.path.basename(str(input_path))}", file=sys.stderr)
     print(f"Encoder params: {encoder_params.strip()}", file=sys.stderr)
@@ -1326,12 +1434,16 @@ def run_benchmark(input_path, encoder_params):
         # the next candidate (skipped tests don't need one).
         print(f"   Cooling down {COOLDOWN_BETWEEN_TESTS}s...", file=sys.stderr)
         time.sleep(COOLDOWN_BETWEEN_TESTS)
+        # After the cooldown, silently kill any SvtAv1EncApp.exe still
+        # running so nothing bleeds CPU into the next candidate's numbers.
+        kill_svt_stragglers()
 
         if not ram_aborted and rss_peak > 0:
             state["per_worker_rss"] = max(state["per_worker_rss"], rss_peak // max(1, w))
 
         if ram_aborted:
-            print(f"   ! {w} workers tripped the live RAM guard - marked unsafe.", file=sys.stderr)
+            print(f"   ! {w} workers marked unsafe - steering the search "
+                  f"toward fewer workers.", file=sys.stderr)
             mark_unsafe(w)
             return 0.0
         if rss_peak > total_ram * RAM_HEADROOM:
