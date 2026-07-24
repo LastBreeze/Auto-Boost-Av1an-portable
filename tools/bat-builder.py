@@ -189,33 +189,39 @@ def main():
 
     # --- 5. Preset Speed ---
     print("\n--------------------------------------------------------")
-    print("STEP 5 OF 5: Encoding Speed")
+    print("STEP 5 OF 5: Encoding Speed (Preset)")
     print("--------------------------------------------------------")
-    print("This controls how much time and CPU power the encoder uses.")
-    print("Slower speeds = better compression and quality at the same file size.")
-    print("Faster speeds = quicker encode, but slightly less efficient.\n")
+    print("This controls how much time and CPU power the encoder spends")
+    print("searching for efficient ways to store your video.")
+    print("Slower presets = more effort, which usually means better")
+    print("quality for the file size (results vary by video).")
+    print("Faster presets = quicker encodes, but possibly less efficient")
+    print("and less quality.\n")
 
+    print("  Recommended presets for this fork:")
+    print("  0 -- Slowest. Maximum effort. Great if you can wait.")
     if fork == "hdr":
-        print("  Recommended speeds for the SVT-AV1-HDR fork:")
-        print("  0 -- Slowest. Best possible quality. Use if you have time.")
-        print("  1 -- Slower. Can offer some quality improvements with tune grain,")
-        print("       and also helps reduce artifacts.")
-        print("  2 -- DEFAULT. Ideal balance of quality and speed for SVT-AV1-HDR.")
-        print("       Highly recommended -- preserves grain and detail well.\n")
-        print("  Julio, the developer of SVT-AV1-HDR, highly recommends NOT using")
-        print("  preset 4. Speeds at or above preset 4 skip too many quality-preserving")
-        print("  tools and will hurt your output for this svt-av1 fork.\n")
-        default_speed = "2"
+        print("  1 -- Improves on preset 2, especially for grainy")
+        print("       video. Handles grain better and cleans up some")
+        print("       artifacts that other presets can leave behind.")
+        print("       With tune grain, it can bring extra quality")
+        print("       improvements.")
     else:
-        print("  Recommended speeds for this fork:")
-        print("  0 -- Slowest. Maximum quality. Great if you can wait.")
-        print("  2 -- Excellent quality. Still slow, but worth it for important encodes.")
-        print("  4 -- DEFAULT. Fastest recommended speed. Good quality/speed tradeoff.")
-        print("       Use this if you have a slower CPU or need faster results.\n")
-        print("  WARNING: Do not go faster than preset 4. Speeds above 4 skip")
-        print("  too many quality-preserving tools and will hurt your output.\n")
-        default_speed = "4"
+        print("  1 -- Possible slight improvement over preset 2,")
+        print("       at the cost of extra encode time.")
+    print("  2 -- Very high effort. Still slow, but a good choice")
+    print("       for encodes you care about.")
+    print("  3 -- Not useful at this time. Offers no significant")
+    print("       measurable advantage over preset 4.")
+    print("  4 -- DEFAULT. Fastest recommended preset. A solid")
+    print("       balance of speed and efficiency. Use this if you")
+    print("       have a slower CPU or need results sooner.\n")
+    print("  WARNING: Presets faster than 4 are not recommended.")
+    print("  They skip many of the tools designed to preserve")
+    print("  quality while staying efficient, so output quality")
+    print("  will suffer.\n")
 
+    default_speed = "4"
     speed = input(f"Enter a preset speed (Press Enter for the recommended default of {default_speed}): ").strip()
     if not speed:
         speed = default_speed
