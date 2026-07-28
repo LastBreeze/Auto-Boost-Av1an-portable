@@ -10,6 +10,7 @@ import time
 import urllib.parse
 import urllib.request
 from pathlib import Path
+import unicodedata
 from wakepy import keep
 from svt_fork_setup import setup_svt_av1_fork
 
@@ -132,6 +133,72 @@ def find_active_bat_file(tools_dir, root_dir):
         if os.path.isfile(bat_path):
             return bat_path
     return None
+
+
+def read_and_repair_workercount_config(tools_dir):
+    """Read tools\\workercount-config.txt tolerantly and repair it in place.
+
+    Users hand-edit this file, and Notepad likes to re-save it as UTF-16 or
+    UTF-8-with-BOM. Strict UTF-8 readers downstream (the Rust tools) then
+    fail with "stream did not contain valid UTF-8", and the .bat reads
+    garbage for the worker value. This reader accepts any common Windows
+    encoding, extracts the worker count, and - if the file was malformed -
+    rewrites it as plain ASCII 'workers=N'. Returns the worker count int,
+    or None if the file does not exist."""
+    path = os.path.join(tools_dir, "workercount-config.txt")
+    try:
+        with open(path, "rb") as f:
+            blob = f.read()
+    except OSError:
+        return None
+    text = None
+    for enc in ("utf-8-sig", "utf-16", "utf-16-le", "utf-16-be"):
+        try:
+            text = blob.decode(enc)
+            break
+        except (UnicodeDecodeError, UnicodeError):
+            continue
+    if text is None:
+        text = blob.decode("latin-1", errors="replace")
+    text = text.replace("\ufeff", "").replace("\x00", "")
+    m = re.search(r"workers\s*=\s*(\d+)", text, re.IGNORECASE)
+    if not m:
+        # Tolerate a file that is just a bare number
+        m = re.search(r"^\s*(\d+)\s*$", text, re.MULTILINE)
+    if m:
+        workers = max(1, int(m.group(1)))
+        broken = False
+    else:
+        workers = 1  # unreadable/garbage: safe default
+        broken = True
+    # Rewrite only if the on-disk bytes are not already the clean canonical
+    # form (either newline style counts as clean).
+    canonical = {f"workers={workers}\n".encode("ascii"),
+                 f"workers={workers}\r\n".encode("ascii")}
+    if blob not in canonical:
+        try:
+            with open(path, "w", encoding="ascii") as f:
+                f.write(f"workers={workers}\n")
+            reason = ("no readable worker count found - reset to the safe default"
+                      if broken else "re-saved as plain text (was UTF-16/BOM/malformed)")
+            print(f"\033[93m[Dispatch] Repaired workercount-config.txt -> "
+                  f"workers={workers} ({reason})\033[0m")
+        except OSError:
+            pass
+    return workers
+
+
+def sanitize_worker_value(raw, fallback):
+    """Return a clean positive-integer worker string from a possibly mangled
+    value (BOM/null/UTF-16 junk leaking out of a hand-edited config file via
+    the .bat). Returns `fallback` when no digits can be recovered."""
+    if raw is None:
+        return fallback
+    cleaned = str(raw).replace("\ufeff", "").replace("\x00", "").strip()
+    m = re.search(r"\d+", cleaned)
+    if not m:
+        return fallback
+    return str(max(1, int(m.group(0))))
 
 
 def read_bat_optimize_settings(tools_dir, root_dir):
@@ -624,28 +691,197 @@ def warn_and_pause_if_paths_too_long(input_files, video_output_dir, temp_dir):
         pause_for_long_paths(unique_long_paths)
 
 
+# --- Python-safe source filename normalization ---
+# Every source video is renamed before anything else runs so that its filename
+# contains ONLY "." , a-z, A-Z and 0-9. Characters outside that set are folded
+# to their closest plain-ASCII equivalent first (o-with-macron -> o, sharp s ->
+# ss, ae-ligature -> ae, Cyrillic and Greek letters transliterated) and are
+# dropped when no equivalent exists (CJK, emoji, punctuation, brackets, spaces).
+# Doing this up front means ffmpeg, ffms2/VapourSynth, x264, av1an,
+# SvtAv1EncApp, MediaInfo and mkvmerge only ever see a plain ASCII path.
+FILENAME_ALLOWED_CHARS = frozenset(
+    "abcdefghijklmnopqrstuvwxyz"
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    "0123456789"
+    "."
+)
+
+# What replaces spaces and every other kind of whitespace. "" deletes them,
+# which is the strictest and safest choice because no downstream command line
+# then needs quoting. Set this to "." instead if you would rather keep the word
+# boundaries readable in the renamed files.
+FILENAME_SPACE_REPLACEMENT = ""
+
+# Used when sanitizing leaves nothing behind (for example a fully CJK name).
+FILENAME_FALLBACK_STEM = "video"
+
+# Case-sensitive folds that must not go through the lowercase table below.
+_FILENAME_ASCII_FOLD_EXACT = {
+    "\u1e9e": "SS",   # capital sharp s
+    "\u0130": "I",    # capital I with dot above
+    "\u0131": "i",    # dotless i
+    "\u00b5": "u",    # micro sign (not the Greek letter mu)
+}
+
+# Lowercase-keyed folds for characters that Unicode decomposition alone cannot
+# reduce to ASCII. Capital letters reuse these entries and get re-capitalized.
+_FILENAME_ASCII_FOLD = {
+    # Latin
+    "\u00df": "ss", "\u00e6": "ae", "\u0153": "oe", "\u00f8": "o",
+    "\u0111": "d", "\u00f0": "d", "\u00fe": "th", "\u0142": "l",
+    "\u0127": "h", "\u014b": "ng", "\u0167": "t", "\u0138": "k",
+    "\u2116": "No",
+    # Cyrillic
+    "\u0430": "a", "\u0431": "b", "\u0432": "v", "\u0433": "g", "\u0434": "d",
+    "\u0435": "e", "\u0451": "e", "\u0436": "zh", "\u0437": "z", "\u0438": "i",
+    "\u0439": "y", "\u043a": "k", "\u043b": "l", "\u043c": "m", "\u043d": "n",
+    "\u043e": "o", "\u043f": "p", "\u0440": "r", "\u0441": "s", "\u0442": "t",
+    "\u0443": "u", "\u0444": "f", "\u0445": "kh", "\u0446": "ts", "\u0447": "ch",
+    "\u0448": "sh", "\u0449": "shch", "\u044a": "", "\u044b": "y", "\u044c": "",
+    "\u044d": "e", "\u044e": "yu", "\u044f": "ya",
+    "\u0454": "ye", "\u0456": "i", "\u0457": "yi", "\u0491": "g", "\u045e": "u",
+    # Greek
+    "\u03b1": "a", "\u03b2": "v", "\u03b3": "g", "\u03b4": "d", "\u03b5": "e",
+    "\u03b6": "z", "\u03b7": "i", "\u03b8": "th", "\u03b9": "i", "\u03ba": "k",
+    "\u03bb": "l", "\u03bc": "m", "\u03bd": "n", "\u03be": "x", "\u03bf": "o",
+    "\u03c0": "p", "\u03c1": "r", "\u03c2": "s", "\u03c3": "s", "\u03c4": "t",
+    "\u03c5": "y", "\u03c6": "f", "\u03c7": "ch", "\u03c8": "ps", "\u03c9": "o",
+}
+
+_FILENAME_LATIN_LETTER_RE = re.compile(r"^LATIN (SMALL|CAPITAL) LETTER ([A-Z])\b")
+
+
+def fold_char_to_ascii(ch):
+    """Return the closest plain-ASCII spelling of one character, or "" if none."""
+    if ch in _FILENAME_ASCII_FOLD_EXACT:
+        return _FILENAME_ASCII_FOLD_EXACT[ch]
+
+    lowered = ch.lower()
+    if lowered in _FILENAME_ASCII_FOLD:
+        folded = _FILENAME_ASCII_FOLD[lowered]
+        if folded and ch != lowered:
+            # Preserve the original capitalization: sharp-sh -> "Sh", not "SH".
+            folded = folded[0].upper() + folded[1:]
+        return folded
+
+    # Strip diacritics: o-with-macron decomposes to "o" + a combining macron.
+    kept = "".join(
+        c for c in unicodedata.normalize("NFKD", ch)
+        if c in FILENAME_ALLOWED_CHARS and not unicodedata.combining(c)
+    )
+    if kept:
+        return kept
+
+    # Accented Cyrillic/Greek letters decompose to a base letter that is still
+    # non-ASCII, so fold that base letter through the tables above.
+    base = unicodedata.normalize("NFKD", ch)[:1]
+    if base and base != ch:
+        return fold_char_to_ascii(base)
+
+    # Last resort: read the base letter out of the Unicode character name,
+    # e.g. "LATIN SMALL LETTER O WITH STROKE" -> "o".
+    try:
+        name = unicodedata.name(ch)
+    except ValueError:
+        return ""
+    match = _FILENAME_LATIN_LETTER_RE.match(name)
+    if not match:
+        return ""
+    return match.group(2).lower() if match.group(1) == "SMALL" else match.group(2)
+
+
+def sanitize_filename_stem(stem):
+    """Reduce a filename stem to "." , a-z, A-Z and 0-9 only."""
+    pieces = []
+    for ch in stem:
+        if ch in FILENAME_ALLOWED_CHARS:
+            pieces.append(ch)
+        elif ch.isspace():
+            pieces.append(FILENAME_SPACE_REPLACEMENT)
+        else:
+            pieces.append(fold_char_to_ascii(ch))
+    safe = "".join(pieces)
+    # A leading dot hides the file, Windows silently drops a trailing dot, and
+    # runs of dots confuse extension parsing - normalize all three.
+    safe = re.sub(r"\.{2,}", ".", safe).strip(".")
+    return safe or FILENAME_FALLBACK_STEM
+
+
+def sanitize_filename_extension(ext):
+    """Return a lowercase extension built only from a-z and 0-9."""
+    body = "".join(c for c in ext.lower() if c in FILENAME_ALLOWED_CHARS and c != ".")
+    return f".{body}" if body else ""
+
+
+def safe_input_filename(filename):
+    """Full Python-safe filename for a source video."""
+    stem, ext = os.path.splitext(filename)
+    safe_ext = sanitize_filename_extension(ext) or ext.lower()
+    return f"{sanitize_filename_stem(stem)}{safe_ext}"
+
+
+def _blocked_by_other_file(dst_path, src_path):
+    """True when dst_path already exists as a *different* file than src_path.
+
+    A case-only rename ("Movie.MKV" -> "Movie.mkv") makes os.path.exists()
+    report True on Windows even though it is the same file, and renaming a file
+    onto itself is exactly what we want in that case.
+    """
+    if not os.path.exists(dst_path):
+        return False
+    try:
+        return not os.path.samefile(dst_path, src_path)
+    except OSError:
+        return True
+
+
 def sanitize_input_filenames(video_input_dir, extensions):
-    """Replace parentheses in supported video filenames with safe inner spaces before processing."""
+    """Rename every source video so its name holds only "." , a-z, A-Z and 0-9.
+
+    This is the first step that touches the input files - it runs before scene
+    detection, encoding, tagging and muxing - so no downstream tool ever has to
+    cope with a non-ASCII path. "Dead End no Boken.mkv" (with a macron on the o)
+    becomes "DeadEndnoBoken.mkv".
+    """
     supported_exts = {pattern[1:].lower() for pattern in extensions if pattern.startswith("*")}
     renamed = 0
-    for filename in sorted(os.listdir(video_input_dir)):
+    try:
+        entries = sorted(os.listdir(video_input_dir))
+    except OSError as e:
+        print(f"{RED}[Dispatch] ERROR: could not list {video_input_dir}: {e}{RESET}")
+        return 0
+
+    for filename in entries:
         src_path = os.path.join(video_input_dir, filename)
         if not os.path.isfile(src_path):
             continue
-        stem, ext = os.path.splitext(filename)
-        if ext.lower() not in supported_exts or ("(" not in stem and ")" not in stem):
+        ext = os.path.splitext(filename)[1]
+        if ext.lower() not in supported_exts:
             continue
 
-        safe_stem = " ".join(stem.replace("(", " ").replace(")", " ").split()) or "video"
-        dst_path = os.path.join(video_input_dir, f"{safe_stem}{ext}")
+        safe_name = safe_input_filename(filename)
+        if safe_name == filename:
+            continue
+
+        safe_stem, safe_ext = os.path.splitext(safe_name)
+        dst_path = os.path.join(video_input_dir, safe_name)
         suffix = 1
-        while os.path.exists(dst_path):
-            dst_path = os.path.join(video_input_dir, f"{safe_stem}_{suffix}{ext}")
+        while _blocked_by_other_file(dst_path, src_path):
+            dst_path = os.path.join(video_input_dir, f"{safe_stem}{suffix}{safe_ext}")
             suffix += 1
 
-        os.rename(src_path, dst_path)
+        try:
+            os.rename(src_path, dst_path)
+        except OSError as e:
+            print(f"{RED}[Dispatch] ERROR: could not rename {filename} -> "
+                  f"{os.path.basename(dst_path)}: {e}{RESET}")
+            print(f"{RED}[Dispatch]        Close anything using that file, or rename it by hand "
+                  f"so it only contains '.', a-z and 0-9, then run this again.{RESET}")
+            continue
+
         renamed += 1
-        print(f"[Dispatch] Renamed input file for Python-safe filename: {filename} -> {os.path.basename(dst_path)}")
+        print(f"{BLUE}[Dispatch] Renamed source file to a fully safe name: {filename} -> "
+              f"{os.path.basename(dst_path)}{RESET}")
 
     return renamed
 
@@ -1039,6 +1275,10 @@ def main():
     script_path = os.path.abspath(__file__)
     tools_dir = os.path.dirname(script_path)
     root_dir = os.path.dirname(tools_dir)
+
+    # Read (and if hand-edited/mis-encoded, repair) the shared worker-count
+    # config up front, so every later consumer sees a clean file and value.
+    cfg_workers = read_and_repair_workercount_config(tools_dir)
     
     video_input_dir = os.path.join(root_dir, "video-input")
     video_output_dir = os.path.join(root_dir, "video-output")
@@ -1062,6 +1302,12 @@ def main():
         os.makedirs(video_output_dir)
     if not os.path.exists(temp_dir):
         os.makedirs(temp_dir)
+
+    # --- Rename Source Files To Python-Safe Names (must be the first step) ---
+    # Do this before argument parsing, scene detection or anything else touches
+    # the files, so every later stage only ever sees ".", a-z, A-Z and 0-9.
+    extensions = ("*.mkv", "*.mp4", "*.m2ts")
+    sanitize_input_filenames(video_input_dir, extensions)
         
     # --- Argument Parsing ---
     args = sys.argv[1:]
@@ -1146,6 +1392,31 @@ def main():
             workers = custom_enc
             print(f"{BLUE}[Dispatch] Using optimized av1an worker count from bat: {workers}{RESET}")
 
+    # --- Worker Safety Check ---
+    # The workers value can arrive mangled if a hand-edited (UTF-16/BOM)
+    # config file was read by the .bat - recover the number or substitute
+    # the repaired config value so av1an's -w always gets a clean integer.
+    raw_workers = workers
+    workers = sanitize_worker_value(
+        raw_workers, str(cfg_workers) if cfg_workers else "1")
+    if workers != str(raw_workers).strip():
+        print(f"\033[93m[Dispatch] --workers value {raw_workers!r} was "
+              f"invalid - using {workers} instead\033[0m")
+    # If tools\workercount-config.txt says workers=1 (e.g. the benchmark
+    # failed and wrote the safe fallback), do NOT pass --lp 3 to the encoder:
+    # with a single av1an worker, --lp 3 would cap SVT-AV1's threading and
+    # leave most of the CPU idle. Same rule when the effective worker count
+    # being passed to av1an is 1.
+    try:
+        _effective_workers = int(workers)
+    except (TypeError, ValueError):
+        _effective_workers = None
+    if (cfg_workers == 1 or _effective_workers == 1) \
+            and "--lp 3" in final_params:
+        final_params = " ".join(final_params.replace("--lp 3", "").split())
+        print("\033[93m[Dispatch] 1 worker detected, setting --lp mode to "
+              "default auto parallelism\033[0m")
+
     settings_path = os.path.join(root_dir, "settings.txt")
     settings = None
     if denoise_setting is not None:
@@ -1161,8 +1432,6 @@ def main():
     setup_svt_av1_fork(tools_dir, selected_fork, avx512=avx512, verbose=True)
             
     # --- Gather Input Files ---
-    extensions = ("*.mkv", "*.mp4", "*.m2ts")
-    sanitize_input_filenames(video_input_dir, extensions)
     input_files = gather_input_files(video_input_dir, extensions)
     known_input_files = set(input_files)
     
