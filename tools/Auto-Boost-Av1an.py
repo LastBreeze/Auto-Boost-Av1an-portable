@@ -22,8 +22,10 @@ try:
     from vstools.functions.progress import get_render_progress, FPSColumn
 except:
     from vstools.functions.render.progress import get_render_progress, FPSColumn
-from rich.progress import Progress, TextColumn, BarColumn, TimeElapsedColumn, TimeRemainingColumn, SpinnerColumn
-from rich.console import Console
+from rich.progress import Progress, TextColumn, BarColumn, TimeElapsedColumn, TimeRemainingColumn, SpinnerColumn, ProgressColumn
+from rich.console import Console, Group
+from rich.live import Live
+from rich.text import Text
 from statistics import quantiles
 from math import ceil, log10
 from pathlib import Path
@@ -42,11 +44,15 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import re
 import json
 import csv
+import time
+import threading
+import collections
+from contextlib import contextmanager
 import numpy as np
 import concurrent.futures
 from svt_fork_setup import setup_svt_av1_fork
 
-ver_str = "v2.5"
+ver_str = "v3.0"
 
 # --- TOOL PATHS HELPER ---
 def resolve_tool(portable_path_str: str, binary_name: str) -> Path:
@@ -365,6 +371,309 @@ if not os.path.exists(tmp_dir):
 
 core.max_cache_size = 1024
 console = Console()
+
+# ==========================================================================
+# Simple-mode (non --verbose) progress display
+#
+# Without --verbose, the noisy phases (fast pass, metric measuring, final
+# pass) are shown as Auto-Boost-Essential style progress bars with a short
+# beginner-friendly explanation underneath. The explanation for a phase
+# disappears as soon as that phase finishes. With --verbose, everything is
+# displayed the way it always has been.
+# ==========================================================================
+
+FAST_PASS_EXPLANATION = (
+    "Creating a quick, low-effort preview encode of your video. This is not your final\n"
+    "file - it's a fast draft used to measure how well each scene compresses."
+)
+SSIMU2_EXPLANATION = (
+    "Comparing the preview encode against your original video, scene by scene, using the\n"
+    "SSIMULACRA2 visual quality metric. Scenes that lost too much quality will be boosted\n"
+    "in the final encode."
+)
+XPSNR_EXPLANATION = (
+    "Comparing the preview encode against your original video, scene by scene, using the\n"
+    "XPSNR visual quality metric. Scenes that lost too much quality will be boosted in\n"
+    "the final encode."
+)
+FINAL_PASS_EXPLANATION = (
+    "Encoding your final video. Each scene gets its own fine-tuned crf level based\n"
+    "on the measurements that will influence bitate to maintain consistent quality."
+)
+
+SIMPLE_ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
+
+# All simple-mode bars pad their description to this width so every progress
+# bar in the workflow starts at the same column and stays aligned.
+SIMPLE_DESC_WIDTH = 42
+
+
+def simple_description(text):
+    return "[green]" + text.ljust(SIMPLE_DESC_WIDTH)
+
+
+class SimpleFPSColumn(ProgressColumn):
+    """fps readout on the right side of the bar (default color), fed via
+    task.fields['fps']. Renders fixed-width so bars stay aligned."""
+
+    def render(self, task):
+        fps = task.fields.get("fps")
+        if fps is None:
+            return Text(" " * 12)
+        return Text(f"{fps:>8.2f} fps")
+
+
+class TaskSpeedFPSColumn(ProgressColumn):
+    """fps derived from the task's measured speed (like vstools' FPSColumn),
+    rendered in the default color and fixed width so bars stay aligned."""
+
+    def render(self, task):
+        speed = task.finished_speed or task.speed
+        if speed is None:
+            return Text(" " * 12)
+        return Text(f"{speed:>8.2f} fps")
+
+
+class PlainTimeElapsedColumn(TimeElapsedColumn):
+    """Elapsed time in the default color instead of rich's cyan."""
+
+    def render(self, task):
+        text = super().render(task)
+        text.style = ""
+        return text
+
+
+class PlainTimeRemainingColumn(TimeRemainingColumn):
+    """Remaining time in the default color instead of rich's cyan."""
+
+    def render(self, task):
+        text = super().render(task)
+        text.style = ""
+        return text
+
+
+class PhaseRenderable:
+    """A progress display plus an explanation line that can be hidden."""
+
+    def __init__(self, progress, explanation):
+        self.progress = progress
+        self.explanation = explanation
+        self.show_explanation = explanation is not None
+
+    def __rich__(self):
+        if self.show_explanation:
+            return Group(self.progress, Text(self.explanation, style="dim"))
+        return self.progress
+
+
+def essential_style_progress(fps_column=None, indeterminate=False):
+    """Progress bar with the same appearance Auto-Boost-Essential uses.
+    Percentage, fps and time readouts use the default (white) color, and the
+    fps column is fixed-width so all bars in the workflow align."""
+    columns = [
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+    ]
+    if indeterminate:
+        columns.append(PlainTimeElapsedColumn())
+    else:
+        columns.append("{task.percentage:>3.0f}%")
+        columns.append(fps_column if fps_column is not None else TaskSpeedFPSColumn())
+        columns.extend([PlainTimeElapsedColumn(), PlainTimeRemainingColumn()])
+    return Progress(*columns, console=console)
+
+
+@contextmanager
+def metric_progress_display(description, total, explanation, indeterminate=False):
+    """Progress bar wrapper for the metric measuring phase.
+
+    Verbose mode keeps the original minimal bars; default mode shows an
+    Essential-style bar with the beginner explanation underneath, hidden
+    once the phase completes."""
+    if verbose:
+        if indeterminate:
+            with Progress(SpinnerColumn(), BarColumn(), TimeElapsedColumn(), console=console) as p:
+                yield p, p.add_task(description, total=total)
+        else:
+            with Progress(SpinnerColumn(), BarColumn(), FPSColumn(), console=console) as p:
+                yield p, p.add_task(description, total=total)
+        return
+    p = essential_style_progress(fps_column=TaskSpeedFPSColumn(), indeterminate=indeterminate)
+    task = p.add_task(simple_description(description), total=total)
+    renderable = PhaseRenderable(p, explanation)
+    with Live(renderable, console=console, refresh_per_second=8) as live:
+        completed_ok = False
+        try:
+            yield p, task
+            completed_ok = True
+        finally:
+            if completed_ok:
+                # Mark the task finished so the bar turns green like the
+                # other simple-mode bars.
+                finished_total = p.tasks[0].total
+                if finished_total is None:
+                    p.update(task, total=1, completed=1)
+                else:
+                    p.update(task, completed=finished_total)
+            renderable.show_explanation = False
+            live.refresh()
+
+
+def stream_subprocess_lines(proc, on_line):
+    """Read a subprocess's merged output, splitting on \\r and \\n so live
+    carriage-return progress updates are seen as individual lines."""
+    buf = b""
+    stream = proc.stdout
+    while True:
+        chunk = stream.read1(4096) if hasattr(stream, "read1") else stream.read(1)
+        if not chunk:
+            break
+        buf += chunk
+        parts = re.split(b"[\r\n]", buf)
+        buf = parts.pop()
+        for raw_line in parts:
+            if not raw_line:
+                continue
+            line = SIMPLE_ANSI_ESCAPE_RE.sub("", raw_line.decode("utf-8", "replace")).strip()
+            if line:
+                on_line(line)
+    if buf:
+        line = SIMPLE_ANSI_ESCAPE_RE.sub("", buf.decode("utf-8", "replace")).strip()
+        if line:
+            on_line(line)
+
+
+def find_av1an_done_json(search_dir, min_mtime):
+    """Find av1an's done.json in search_dir or one directory level below it,
+    ignoring stale files from earlier runs (mtime older than min_mtime)."""
+    candidates = []
+    direct = os.path.join(str(search_dir), "done.json")
+    if os.path.isfile(direct):
+        candidates.append(direct)
+    try:
+        names = os.listdir(str(search_dir))
+    except OSError:
+        names = []
+    for name in names:
+        candidate = os.path.join(str(search_dir), name, "done.json")
+        if os.path.isfile(candidate):
+            candidates.append(candidate)
+
+    def _mtime(path):
+        try:
+            return os.path.getmtime(path)
+        except OSError:
+            return 0.0
+
+    fresh = [path for path in candidates if _mtime(path) >= min_mtime]
+    if not fresh:
+        return None
+    return max(fresh, key=_mtime)
+
+
+def read_av1an_done_json(path):
+    """Return (total_frames or None, completed_frames) from av1an's done.json.
+    Handles both old (int) and new (dict) per-chunk formats, and returns None
+    if the file is mid-write or unreadable."""
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return None
+    if not isinstance(data, dict):
+        return None
+    total = data.get("frames")
+    if not isinstance(total, (int, float)) or total <= 0:
+        total = None
+    completed = 0
+    done = data.get("done", {})
+    if isinstance(done, dict):
+        for value in done.values():
+            if isinstance(value, dict):
+                try:
+                    completed += int(value.get("frames", 0))
+                except (TypeError, ValueError):
+                    pass
+            elif isinstance(value, (int, float)):
+                completed += int(value)
+    return total, completed
+
+
+def run_av1an_with_simple_progress(av1an_cmd, run_cwd, description, explanation):
+    """Run av1an behind a single Essential-style progress bar with a short
+    explanation underneath. Progress advances as av1an chunks complete, read
+    from av1an's done.json inside its temporary folder, with a rolling fps
+    readout on the right side of the bar.
+
+    Returns the av1an return code."""
+    progress = essential_style_progress(fps_column=SimpleFPSColumn())
+    task = progress.add_task(simple_description(description), total=None, fps=None)
+    renderable = PhaseRenderable(progress, explanation)
+    other_lines = collections.deque(maxlen=40)
+    stop_event = threading.Event()
+    started_wall_time = time.time()
+
+    def watch_done_json():
+        samples = collections.deque()
+        done_path = None
+        while not stop_event.wait(1.0):
+            if done_path is None or not os.path.isfile(done_path):
+                done_path = find_av1an_done_json(run_cwd, started_wall_time - 1.0)
+                if done_path is None:
+                    continue
+            info = read_av1an_done_json(done_path)
+            if info is None:
+                continue
+            total, completed = info
+            now = time.monotonic()
+            samples.append((now, completed))
+            while samples and now - samples[0][0] > 120.0:
+                samples.popleft()
+            fps = None
+            if len(samples) >= 2:
+                elapsed = samples[-1][0] - samples[0][0]
+                frames = samples[-1][1] - samples[0][1]
+                if elapsed > 0 and frames > 0:
+                    fps = frames / elapsed
+            progress.update(task, total=total, completed=completed, fps=fps)
+
+    proc = subprocess.Popen(av1an_cmd, cwd=run_cwd,
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    reader = threading.Thread(target=stream_subprocess_lines,
+                              args=(proc, other_lines.append), daemon=True)
+    watcher = threading.Thread(target=watch_done_json, daemon=True)
+    try:
+        with Live(renderable, console=console, refresh_per_second=8) as live:
+            reader.start()
+            watcher.start()
+            try:
+                returncode = proc.wait()
+                if returncode == 0:
+                    final_total = progress.tasks[0].total
+                    if final_total:
+                        progress.update(task, completed=final_total)
+                    else:
+                        progress.update(task, total=1, completed=1)
+            finally:
+                stop_event.set()
+                watcher.join(timeout=3)
+                reader.join(timeout=3)
+                renderable.show_explanation = False
+                live.refresh()
+    except KeyboardInterrupt:
+        stop_event.set()
+        try:
+            proc.wait(timeout=5)
+        except Exception:
+            proc.kill()
+        raise
+    if returncode != 0 and other_lines:
+        console.print(f"[red]Av1an output (last {len(other_lines)} lines):[/red]")
+        for line in other_lines:
+            console.print(f"  {line}")
+    return returncode
+
 
 def _read_crop_int(value: str, key_name: str) -> int:
     try:
@@ -744,7 +1053,7 @@ def get_file_info(vfile: Path, mode: str) -> tuple[list[int], bool, int, int, in
     
     # If external scenes are provided, use them instead of scanning
     if mode == "src" and external_scenes_file is not None:
-        console.print(f"[green]Using external scenes: {external_scenes_file.name}[/green]")
+        if verbose: console.print(f"[green]Using external scenes: {external_scenes_file.name}[/green]")
         try:
             with open(external_scenes_file, 'r') as f:
                 scene_data = json.load(f)
@@ -861,14 +1170,21 @@ def fast_pass() -> None:
         '-o', fast_output_file.name # Just the filename
     ])
     
-    print("-" * 50)
-    print(f"Running Fast Pass in: {obscure_user_path(str(tmp_dir))}")
-    print(f"Command:\n{obscure_user_path(' '.join(av1an_cmd))}")
-    print("-" * 50)
+    if verbose:
+        print("-" * 50)
+        print(f"Running Fast Pass in: {obscure_user_path(str(tmp_dir))}")
+        print(f"Command:\n{obscure_user_path(' '.join(av1an_cmd))}")
+        print("-" * 50)
 
     try:
-        # Run in tmp_dir so it picks up files from current dir
-        subprocess.run(av1an_cmd, check=True, cwd=tmp_dir)
+        if verbose:
+            # Run in tmp_dir so it picks up files from current dir
+            subprocess.run(av1an_cmd, check=True, cwd=tmp_dir)
+        else:
+            returncode = run_av1an_with_simple_progress(
+                av1an_cmd, tmp_dir, "Fast pass", FAST_PASS_EXPLANATION)
+            if returncode != 0:
+                raise subprocess.CalledProcessError(returncode, av1an_cmd)
     except subprocess.CalledProcessError as e:
         console.print(f"[red]Fast pass failed:[/red]\n{e}")
         raise SystemExit(1)
@@ -906,15 +1222,23 @@ def final_pass() -> None:
         v_params = append_encoder_photon_noise(["--preset", final_speed, "--crf", str(quality)] + (final_params.split() if final_params else []))
         av1an_cmd.extend(['-v', " ".join(v_params)])
 
-    # Show command ALWAYS per user request
-    print("-" * 50)
-    print(f"Running Final Pass in: {obscure_user_path(str(tmp_dir))}")
-    print(f"Command:\n{obscure_user_path(' '.join(av1an_cmd))}")
-    print("-" * 50)
+    # Command display is now part of verbose mode; default mode keeps the
+    # simple progress bar interface.
+    if verbose:
+        print("-" * 50)
+        print(f"Running Final Pass in: {obscure_user_path(str(tmp_dir))}")
+        print(f"Command:\n{obscure_user_path(' '.join(av1an_cmd))}")
+        print("-" * 50)
 
     try:
-        # Run in tmp_dir so it picks up files from current dir
-        subprocess.run(av1an_cmd, check=True, cwd=tmp_dir)
+        if verbose:
+            # Run in tmp_dir so it picks up files from current dir
+            subprocess.run(av1an_cmd, check=True, cwd=tmp_dir)
+        else:
+            returncode = run_av1an_with_simple_progress(
+                av1an_cmd, tmp_dir, "Final pass", FINAL_PASS_EXPLANATION)
+            if returncode != 0:
+                raise subprocess.CalledProcessError(returncode, av1an_cmd)
     except subprocess.CalledProcessError as e:
         console.print(f"[red]Final pass failed:[/red]\n{e}")
         raise SystemExit(1)
@@ -1099,8 +1423,9 @@ def _calculate_ssimu2_vship(cut_source_clip, cut_encoded_clip, skip: int, nframe
             val = f.props.get("float_ssimulacra2")
         score_list[n] = 0.0 if val is None else float(val)
 
-    with Progress(SpinnerColumn(), BarColumn(), FPSColumn(), console=console) as p:
-        task = p.add_task("Calculating SSIMULACRA2 (vs-hip)", total=cut_source_clip.num_frames * skip)
+    with metric_progress_display("Calculating SSIMULACRA2 (vs-hip)",
+                                 cut_source_clip.num_frames * skip,
+                                 SSIMU2_EXPLANATION) as (p, task):
         def update_p(n, t):
             p.update(task, advance=skip)
         clip_async_render(result, progress=update_p, callback=get_ssimprops)
@@ -1118,7 +1443,7 @@ def _try_ffvship_vs_hip_fallback(cut_source_clip, cut_encoded_clip, skip: int, n
         return False
     try:
         streams = int(cfg.get("streams", cfg.get("workercount", ssimu2_cpu_workers)))
-        console.print(f"[yellow]Calculating SSIMULACRA2 via vs-hip ({dll_name} | streams: {streams} | every {skip})...[/yellow]")
+        if verbose: console.print(f"[yellow]Calculating SSIMULACRA2 via vs-hip ({dll_name} | streams: {streams} | every {skip})...[/yellow]")
         _calculate_ssimu2_vship(cut_source_clip, cut_encoded_clip, skip, nframe, streams)
         return True
     except Exception as e:
@@ -1185,7 +1510,7 @@ def calculate_metric() -> None:
     # 1. ATTEMPT XPSNR (Default if ssimu2 is empty)
     # ----------------------------------------------------
     if ssimu2 == "":
-        console.print("[yellow]Calculating XPSNR (Default)...[/yellow]")
+        if verbose: console.print("[yellow]Calculating XPSNR (Default)...[/yellow]")
         try:
             # Check for vszip
             if not hasattr(core, 'vszip'):
@@ -1206,8 +1531,9 @@ def calculate_metric() -> None:
                     else:
                         score_list[i][n] = float(val)
 
-            with Progress(SpinnerColumn(), BarColumn(), FPSColumn(), console=console) as p:
-                task = p.add_task("Calculating XPSNR", total=cut_source_clip.num_frames*skip)
+            with metric_progress_display("Calculating XPSNR",
+                                         cut_source_clip.num_frames*skip,
+                                         XPSNR_EXPLANATION) as (p, task):
                 def update_p(n, t):
                      p.update(task, advance=skip)
                 
@@ -1267,7 +1593,7 @@ def calculate_metric() -> None:
         if not fallback_needed:
             try:
                 streams = int(cfg.get("streams", ssimu2_cpu_workers))
-                console.print(f"[yellow]Calculating SSIMULACRA2 via vs-hip ({dll_name} | streams: {streams} | every {skip})...[/yellow]")
+                if verbose: console.print(f"[yellow]Calculating SSIMULACRA2 via vs-hip ({dll_name} | streams: {streams} | every {skip})...[/yellow]")
                 _calculate_ssimu2_vship(cut_source_clip, cut_encoded_clip, skip, len(source_clip), streams)
                 metric_calculated = True
             except Exception as e:
@@ -1291,7 +1617,7 @@ def calculate_metric() -> None:
                 fallback_needed = True
 
         if (not metric_calculated) and (not fallback_needed):
-            console.print(f"[yellow]Calculating SSIMULACRA2 via FFVship ({variant} | GPU streams: {gpu_threads} | every {skip})...[/yellow]")
+            if verbose: console.print(f"[yellow]Calculating SSIMULACRA2 via FFVship ({variant} | GPU streams: {gpu_threads} | every {skip})...[/yellow]")
             ffvship_json_file = tmp_dir / f"{src_file.stem}_ffvship.json"
             if ffvship_json_file.exists():
                 try:
@@ -1314,8 +1640,9 @@ def calculate_metric() -> None:
                 console.print(f"[dim]FFVship command: {' '.join(cmd)}[/dim]")
 
             try:
-                with Progress(SpinnerColumn(), BarColumn(), TimeElapsedColumn(), console=console) as p:
-                    task = p.add_task("Calculating SSIMULACRA2 (FFVship)", total=None)
+                with metric_progress_display(f"Calculating SSIMULACRA2 (FFVship {variant.capitalize()})",
+                                             None, SSIMU2_EXPLANATION,
+                                             indeterminate=True) as (p, task):
                     proc = subprocess.run(
                         cmd,
                         cwd=tmp_dir,
@@ -1352,7 +1679,7 @@ def calculate_metric() -> None:
         return
 
     # FALLBACK CPU (VS-ZIP)
-    console.print(f"[yellow]Calculating SSIMULACRA2 (VS-ZIP | {ssimu2_cpu_workers} workers)...[/yellow]")
+    if verbose: console.print(f"[yellow]Calculating SSIMULACRA2 (VS-ZIP | {ssimu2_cpu_workers} workers)...[/yellow]")
     
     core.num_threads = ssimu2_cpu_workers
     
@@ -1381,8 +1708,9 @@ def calculate_metric() -> None:
             else:
                 score_list[n] = float(val)
 
-        with Progress(SpinnerColumn(), BarColumn(), FPSColumn(), console=console) as p:
-            task = p.add_task(f"Calculating SSIMULACRA2 (VS-ZIP)", total=cut_source_clip.num_frames*skip)
+        with metric_progress_display("Calculating SSIMULACRA2 (VS-ZIP)",
+                                     cut_source_clip.num_frames*skip,
+                                     SSIMU2_EXPLANATION) as (p, task):
             def update_p(n, t):
                  p.update(task, advance=skip)
             
@@ -1751,7 +2079,7 @@ def calculate_zones_json(ranges: list[float], hr: bool, nframe: int, override_zo
     with open(scenes_file, "w") as f:
         json.dump(output_json, f, indent=2)
     
-    console.print(f"[cyan]Generated Av1an scenes file: {obscure_user_path(str(scenes_file))}[/cyan]")
+    if verbose: console.print(f"[cyan]Generated Av1an scenes file: {obscure_user_path(str(scenes_file))}[/cyan]")
 
 
 # --- ZONES CHECK FOR DISPLAY ---
@@ -1777,7 +2105,7 @@ if zones_msg:
 console.print("[bold]Auto-Boost-Av1an start!\n")
 
 # Make direct Auto-Boost invocations behave like the generated .bat dispatchers.
-setup_svt_av1_fork(tools_dir, args.fork, avx512=args.avx512, verbose=True)
+setup_svt_av1_fork(tools_dir, args.fork, avx512=args.avx512, verbose=verbose)
 # -------------------------------
 
 if no_boosting:
@@ -1788,12 +2116,12 @@ match stage:
         if stage_resume < 2:
             fast_pass()
             with open(stage_file, "w") as file: file.write("2")
-            print('Stage 1 complete! Now calculating metric scores')
+            if verbose: print('Stage 1 complete! Now calculating metric scores')
         if stage_resume < 3:
             try: calculate_metric()
             except KeyboardInterrupt: raise SystemExit(1)
             with open(stage_file, "w") as file: file.write("3")
-            print('Stage 2 complete!')
+            if verbose: print('Stage 2 complete!')
         if stage_resume < 4:
             try:
                 ranges, hr, nframe, _, _, _, _ = get_file_info(src_file, "src")
@@ -1808,21 +2136,21 @@ match stage:
                     print(f"Zones file found and applied: {z_file.name}")
 
             with open(stage_file, "w") as file: file.write("4")
-            print('Stage 3 complete!')
+            if verbose: print('Stage 3 complete!')
         if stage_resume < 5:
             final_pass()
             shutil.move(tmp_final_output_file, final_output_file)
             with open(stage_file, "w") as file: file.write("5")
-            print('Stage 4 complete!')
+            if verbose: print('Stage 4 complete!')
     case 1:
         fast_pass()
         with open(stage_file, "w") as file: file.write("2")
-        print('Stage 1 complete! Now calculating metric scores')
+        if verbose: print('Stage 1 complete! Now calculating metric scores')
     case 2:
         try: calculate_metric()
         except KeyboardInterrupt: raise SystemExit(1)
         with open(stage_file, "w") as file: file.write("3")
-        print('Stage 2 complete!')
+        if verbose: print('Stage 2 complete!')
     case 3:
         try:
             ranges, hr, nframe, _, _, _, _ = get_file_info(src_file, "src")
@@ -1837,12 +2165,12 @@ match stage:
                 print(f"Zones file found and applied: {z_file.name}")
 
         with open(stage_file, "w") as file: file.write("4")
-        print('Stage 3 complete!')
+        if verbose: print('Stage 3 complete!')
     case 4:
         final_pass()
         shutil.move(tmp_final_output_file, final_output_file)
         with open(stage_file, "w") as file: file.write("5")
-        print('Stage 4 complete!')
+        if verbose: print('Stage 4 complete!')
     case _:
         console.print("[red]Stage argument invalid, exiting.")
         raise SystemExit(1)

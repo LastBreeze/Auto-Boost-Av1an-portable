@@ -7,6 +7,9 @@ import shutil
 import shlex
 import re
 import time
+import threading
+import collections
+import json
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -80,6 +83,392 @@ def scene_detection_env():
     env["PYTHONUNBUFFERED"] = "1"
     env["AUTOBOOST_SCENE_X264_PROGRESS"] = "1"
     return env
+
+# =========================================================================
+# Simple-mode (non --verbose) progress display
+#
+# When the generated .bat does not pass --verbose, the noisy phases of the
+# workflow are shown as Auto-Boost-Essential style progress bars with a
+# short beginner-friendly explanation underneath. The explanation for a
+# phase disappears as soon as that phase finishes.
+# =========================================================================
+
+SIMPLE_EXPLANATION_SCENE_DETECTION = (
+    "Using VapourSynth and x264 for scene detection to break the video into chunks for\n"
+    "visual metrics quality measuring and parallel encoding for increased encoding speed."
+)
+SIMPLE_EXPLANATION_MUXING = (
+    "Packaging the finished video together with the original audio, subtitles, chapters,\n"
+    "etc, into your final MKV file in the video-output folder."
+)
+
+# All simple-mode bars pad their description to this width so every progress
+# bar in the workflow starts at the same column and stays aligned.
+SIMPLE_DESC_WIDTH = 42
+
+
+def simple_description(text):
+    return "[green]" + text.ljust(SIMPLE_DESC_WIDTH)
+
+
+try:
+    from rich.console import Console, Group
+    from rich.live import Live
+    from rich.text import Text
+    from rich.progress import (
+        Progress,
+        ProgressColumn,
+        TextColumn,
+        BarColumn,
+        SpinnerColumn,
+        TimeElapsedColumn,
+        TimeRemainingColumn,
+    )
+
+    class SimpleFPSColumn(ProgressColumn):
+        """fps readout on the right side of the bar (default color), fed via
+        task.fields['fps']. Renders fixed-width so bars stay aligned."""
+
+        def render(self, task):
+            fps = task.fields.get("fps")
+            if fps is None:
+                return Text(" " * 12)
+            return Text(f"{fps:>8.2f} fps")
+
+    class PlainTimeElapsedColumn(TimeElapsedColumn):
+        """Elapsed time in the default color instead of rich's cyan."""
+
+        def render(self, task):
+            text = super().render(task)
+            text.style = ""
+            return text
+
+    class PlainTimeRemainingColumn(TimeRemainingColumn):
+        """Remaining time in the default color instead of rich's cyan."""
+
+        def render(self, task):
+            text = super().render(task)
+            text.style = ""
+            return text
+
+    class PhaseRenderable:
+        """A progress display plus an explanation line that can be hidden."""
+
+        def __init__(self, progress, explanation):
+            self.progress = progress
+            self.explanation = explanation
+            self.show_explanation = explanation is not None
+
+        def __rich__(self):
+            if self.show_explanation:
+                return Group(self.progress, Text(self.explanation, style="dim"))
+            return self.progress
+
+    RICH_AVAILABLE = True
+except ImportError:
+    # Without rich we cannot draw the simple interface; every phase falls
+    # back to the verbose behaviour instead of failing.
+    RICH_AVAILABLE = False
+
+ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
+SCENE_PROGRESS_RE = re.compile(
+    r"Frame\s+(\d+)\s*/\s*([\d.]+)%\s*/\s*(VapourSynth|x264) based scene detection"
+    r"(?:\s+\w+)?\s*/\s*([\d.]+)\s*fps"
+)
+MUX_PROGRESS_RE = re.compile(r"[Pp]rogress:\s*(\d+)\s*%")
+
+
+def essential_style_progress(console):
+    """Progress bar with the same appearance Auto-Boost-Essential uses.
+    Percentage, fps and time readouts use the default (white) color, and the
+    fps column is fixed-width so all bars in the workflow align."""
+    return Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        "{task.percentage:>3.0f}%",
+        SimpleFPSColumn(),
+        PlainTimeElapsedColumn(),
+        PlainTimeRemainingColumn(),
+        console=console,
+    )
+
+
+def stream_subprocess_lines(proc, on_line):
+    """Read a subprocess's merged output, splitting on \r and \n so live
+    carriage-return progress updates are seen as individual lines."""
+    buf = b""
+    stream = proc.stdout
+    while True:
+        chunk = stream.read1(4096) if hasattr(stream, "read1") else stream.read(1)
+        if not chunk:
+            break
+        buf += chunk
+        parts = re.split(b"[\r\n]", buf)
+        buf = parts.pop()
+        for raw in parts:
+            if not raw:
+                continue
+            line = ANSI_ESCAPE_RE.sub("", raw.decode("utf-8", "replace")).strip()
+            if line:
+                on_line(line)
+    if buf:
+        line = ANSI_ESCAPE_RE.sub("", buf.decode("utf-8", "replace")).strip()
+        if line:
+            on_line(line)
+
+
+def print_captured_tail(label, lines):
+    """Show the tail of a quiet subprocess's output after a failure."""
+    if not lines:
+        return
+    print(f"{RED}[Dispatch] {label} (last {len(lines)} output lines):{RESET}")
+    for line in lines:
+        print(f"  {line}")
+
+
+def run_scene_detection_simple(cmd, cwd, env):
+    """Run Progressive-Scene-Detection.py behind two Essential-style progress
+    bars (VapourSynth + x264) with a short explanation underneath.
+
+    Returns the subprocess return code."""
+    console = Console()
+    progress = essential_style_progress(console)
+    vs_task = progress.add_task(simple_description("VapourSynth scene detection"),
+                                total=100.0, fps=None)
+    x264_task = progress.add_task(simple_description("x264 scene detection"),
+                                  total=100.0, fps=None)
+    renderable = PhaseRenderable(progress, SIMPLE_EXPLANATION_SCENE_DETECTION)
+    other_lines = collections.deque(maxlen=40)
+
+    def on_line(line):
+        match = SCENE_PROGRESS_RE.search(line)
+        if match:
+            percent = min(100.0, float(match.group(2)))
+            fps = float(match.group(4))
+            task = vs_task if match.group(3) == "VapourSynth" else x264_task
+            progress.update(task, completed=percent, fps=fps)
+        else:
+            other_lines.append(line)
+
+    proc = subprocess.Popen(cmd, cwd=cwd, env=env,
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    try:
+        with Live(renderable, console=console, refresh_per_second=8) as live:
+            try:
+                stream_subprocess_lines(proc, on_line)
+                returncode = proc.wait()
+                if returncode == 0:
+                    progress.update(vs_task, completed=100.0)
+                    progress.update(x264_task, completed=100.0)
+            finally:
+                if proc.poll() is None:
+                    proc.terminate()
+                renderable.show_explanation = False
+                live.refresh()
+    except KeyboardInterrupt:
+        try:
+            proc.wait(timeout=5)
+        except Exception:
+            proc.kill()
+        raise
+    if returncode != 0:
+        print_captured_tail("Scene detection failed", list(other_lines))
+    return returncode
+
+
+def run_with_mux_progress(cmd, cwd, description):
+    """Run a muxing helper behind a single Essential-style progress bar,
+    driven by mkvmerge's 'Progress: N%' output.
+
+    Returns the subprocess return code."""
+    console = Console()
+    progress = essential_style_progress(console)
+    task = progress.add_task(simple_description(description), total=100.0, fps=None)
+    renderable = PhaseRenderable(progress, SIMPLE_EXPLANATION_MUXING)
+    other_lines = collections.deque(maxlen=40)
+
+    def on_line(line):
+        match = MUX_PROGRESS_RE.search(line)
+        if match:
+            progress.update(task, completed=min(100.0, float(match.group(1))))
+        else:
+            other_lines.append(line)
+
+    proc = subprocess.Popen(cmd, cwd=cwd,
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    try:
+        with Live(renderable, console=console, refresh_per_second=8) as live:
+            try:
+                stream_subprocess_lines(proc, on_line)
+                returncode = proc.wait()
+                if returncode == 0:
+                    progress.update(task, completed=100.0)
+            finally:
+                if proc.poll() is None:
+                    proc.terminate()
+                renderable.show_explanation = False
+                live.refresh()
+    except KeyboardInterrupt:
+        try:
+            proc.wait(timeout=5)
+        except Exception:
+            proc.kill()
+        raise
+    if returncode != 0:
+        print_captured_tail("Muxing output", list(other_lines))
+    return returncode
+
+
+def run_quiet(cmd, cwd, label):
+    """Run a helper silently; on failure print the tail of its output.
+
+    Returns the subprocess return code."""
+    proc = subprocess.run(cmd, cwd=cwd,
+                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    if proc.returncode != 0 and proc.stdout:
+        lines = [ANSI_ESCAPE_RE.sub("", raw).rstrip() for raw in
+                 proc.stdout.decode("utf-8", "replace").splitlines() if raw.strip()]
+        print_captured_tail(label, lines[-40:])
+    return proc.returncode
+
+
+SIMPLE_EXPLANATION_ENCODING = (
+    "Encoding your video in a single pass at your chosen quality level. Each chunk is\n"
+    "encoded in parallel across your worker count for maximum speed."
+)
+
+
+
+def find_av1an_done_json(search_dir, min_mtime):
+    """Find av1an's done.json in search_dir or one directory level below it,
+    ignoring stale files from earlier runs (mtime older than min_mtime)."""
+    candidates = []
+    direct = os.path.join(search_dir, "done.json")
+    if os.path.isfile(direct):
+        candidates.append(direct)
+    try:
+        names = os.listdir(search_dir)
+    except OSError:
+        names = []
+    for name in names:
+        candidate = os.path.join(search_dir, name, "done.json")
+        if os.path.isfile(candidate):
+            candidates.append(candidate)
+
+    def _mtime(path):
+        try:
+            return os.path.getmtime(path)
+        except OSError:
+            return 0.0
+
+    fresh = [path for path in candidates if _mtime(path) >= min_mtime]
+    if not fresh:
+        return None
+    return max(fresh, key=_mtime)
+
+
+def read_av1an_done_json(path):
+    """Return (total_frames or None, completed_frames) from av1an's done.json.
+    Handles both old (int) and new (dict) per-chunk formats, and returns None
+    if the file is mid-write or unreadable."""
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return None
+    if not isinstance(data, dict):
+        return None
+    total = data.get("frames")
+    if not isinstance(total, (int, float)) or total <= 0:
+        total = None
+    completed = 0
+    done = data.get("done", {})
+    if isinstance(done, dict):
+        for value in done.values():
+            if isinstance(value, dict):
+                try:
+                    completed += int(value.get("frames", 0))
+                except (TypeError, ValueError):
+                    pass
+            elif isinstance(value, (int, float)):
+                completed += int(value)
+    return total, completed
+
+
+def run_av1an_simple(cmd, cwd, description, explanation, temp_search_dir):
+    """Run av1an behind a single Essential-style progress bar with a short
+    explanation underneath. Progress advances as av1an chunks complete, read
+    from av1an's done.json inside its temporary folder, with a rolling fps
+    readout on the right side of the bar.
+
+    Returns the subprocess return code."""
+    console = Console()
+    progress = essential_style_progress(console)
+    task = progress.add_task(simple_description(description), total=None, fps=None)
+    renderable = PhaseRenderable(progress, explanation)
+    other_lines = collections.deque(maxlen=40)
+    stop_event = threading.Event()
+    started_wall_time = time.time()
+
+    def watch_done_json():
+        samples = collections.deque()
+        done_path = None
+        while not stop_event.wait(1.0):
+            if done_path is None or not os.path.isfile(done_path):
+                done_path = find_av1an_done_json(temp_search_dir, started_wall_time - 1.0)
+                if done_path is None:
+                    continue
+            info = read_av1an_done_json(done_path)
+            if info is None:
+                continue
+            total, completed = info
+            now = time.monotonic()
+            samples.append((now, completed))
+            while samples and now - samples[0][0] > 120.0:
+                samples.popleft()
+            fps = None
+            if len(samples) >= 2:
+                elapsed = samples[-1][0] - samples[0][0]
+                frames = samples[-1][1] - samples[0][1]
+                if elapsed > 0 and frames > 0:
+                    fps = frames / elapsed
+            progress.update(task, total=total, completed=completed, fps=fps)
+
+    proc = subprocess.Popen(cmd, cwd=cwd,
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    reader = threading.Thread(target=stream_subprocess_lines,
+                              args=(proc, other_lines.append), daemon=True)
+    watcher = threading.Thread(target=watch_done_json, daemon=True)
+    try:
+        with Live(renderable, console=console, refresh_per_second=8) as live:
+            reader.start()
+            watcher.start()
+            try:
+                returncode = proc.wait()
+                if returncode == 0:
+                    final_total = progress.tasks[0].total
+                    if final_total:
+                        progress.update(task, completed=final_total)
+                    else:
+                        progress.update(task, total=1, completed=1)
+            finally:
+                stop_event.set()
+                watcher.join(timeout=3)
+                reader.join(timeout=3)
+                renderable.show_explanation = False
+                live.refresh()
+    except KeyboardInterrupt:
+        stop_event.set()
+        try:
+            proc.wait(timeout=5)
+        except Exception:
+            proc.kill()
+        raise
+    if returncode != 0:
+        print_captured_tail("Av1an output", list(other_lines))
+    return returncode
+
 
 def parse_settings_lines(lines):
     """Parse settings.txt lines into a case-insensitive key/value dict."""
@@ -963,11 +1352,11 @@ def report_filter_status(do_downscale, target_res, kernel, do_denoise, denoise_s
         active_filters.append(f"deband: deband_setting={deband_setting or 'enabled'}")
 
     if not active_filters:
-        print(f"{BLUE}[Dispatch] Filters active: none{RESET}")
+        print(f"{BLUE}[Dispatch] Filters active:{RESET} none")
         return
 
     for filter_status in active_filters:
-        print(f"{BLUE}[Dispatch] Filter active: {filter_status}{RESET}")
+        print(f"{BLUE}[Dispatch] Filter active:{RESET} {filter_status}")
 
 
 def parse_crop_values_from_vpy(vpy_path):
@@ -1218,7 +1607,7 @@ final.set_output(0)
                 deband_line=deband_line,
             ))
         if tonemap:
-            print(f"{BLUE}[Dispatch] Filter active: tonemap HDR -> SDR (BT.709) via libplacebo{RESET}")
+            print(f"{BLUE}[Dispatch] Filter active:{RESET} tonemap HDR -> SDR (BT.709) via libplacebo")
         print(f"[Dispatch] Built VapourSynth script: {vpy_file}")
     else:
         existing_crop_values = parse_crop_values_from_vpy(vpy_file) or (0, 0, 0, 0)
@@ -1324,6 +1713,10 @@ def main():
     autocrop = False
     convert_yuv420p10 = False
     tonemap_enabled = False
+    # --verbose (verbose mode) shows everything the way it used to be shown.
+    # Without it (default mode), the noisy phases are drawn as simple progress
+    # bars with explanations. --no-verbose is the .bat's VERBOSE= placeholder.
+    verbose_mode = False
     
     i = 0
     while i < len(args):
@@ -1374,8 +1767,17 @@ def main():
         elif arg == "--resume":
             resume = True
             i += 1
+        elif arg == "--verbose":
+            verbose_mode = True
+            i += 1
+        elif arg == "--no-verbose":
+            i += 1
         else:
             i += 1
+
+    simple_mode = RICH_AVAILABLE and not verbose_mode
+    if not RICH_AVAILABLE and not verbose_mode:
+        print("[Dispatch] rich is unavailable; falling back to verbose output.")
 
     # Rewrite relative --fgs-table paths in the encoder params to absolute
     # paths anchored at the package root, so SvtAv1EncApp can open the table
@@ -1429,7 +1831,7 @@ def main():
         settings = load_script_settings(settings_path)
     ntfy_settings = settings
 
-    setup_svt_av1_fork(tools_dir, selected_fork, avx512=avx512, verbose=True)
+    setup_svt_av1_fork(tools_dir, selected_fork, avx512=avx512, verbose=verbose_mode)
             
     # --- Gather Input Files ---
     input_files = gather_input_files(video_input_dir, extensions)
@@ -1441,7 +1843,8 @@ def main():
 
     warn_and_pause_if_paths_too_long(input_files, video_output_dir, temp_dir)
         
-    print(f"[Dispatch] Found {len(input_files)} files to process.")
+    if not simple_mode:
+        print(f"[Dispatch] Found {len(input_files)} files to process.")
 
     # --- Main Processing Loop ---
     timing_reports = []
@@ -1483,7 +1886,13 @@ def main():
                     "-o", json_file 
                 ]
                 try:
-                    subprocess.check_call(cmd_scene, cwd=temp_dir, env=scene_detection_env())
+                    if simple_mode:
+                        scene_rc = run_scene_detection_simple(
+                            cmd_scene, cwd=temp_dir, env=scene_detection_env())
+                        if scene_rc != 0:
+                            raise subprocess.CalledProcessError(scene_rc, cmd_scene)
+                    else:
+                        subprocess.check_call(cmd_scene, cwd=temp_dir, env=scene_detection_env())
                 except subprocess.CalledProcessError:
                     print("[Dispatch] Scene detection failed. Proceeding anyway.")
 
@@ -1514,13 +1923,16 @@ def main():
                 print(f"{BLUE}[Dispatch] HDR source detected. This fork encodes it as-is (set tonemap=True in the .bat to tonemap to SDR).{RESET}")
             elif is_bt709:
                 current_color_flags = bt709_flags
-                if is_hdr_fork(selected_fork):
+                if simple_mode:
+                    pass
+                elif is_hdr_fork(selected_fork):
                     print("[Dispatch] MediaInfo confirmed full BT.709 source; copying BT.709 color settings for SVT-AV1-HDR fork.")
                 else:
                     print("[Dispatch] MediaInfo confirmed full BT.709 source.")
             elif is_bt601:
                 current_color_flags = bt601_flags
-                print("[Dispatch] MediaInfo confirmed full BT.601 source.")
+                if not simple_mode:
+                    print("[Dispatch] MediaInfo confirmed full BT.601 source.")
 
             # 3. Build VapourSynth input script from settings.txt
             vpy_abspath = build_vapoursynth_script(
@@ -1562,14 +1974,26 @@ def main():
             if resume:
                 cmd_av1an.append("--resume")
                 
-            print(f"[Dispatch] Starting Av1an Encoding...")
+            if not simple_mode:
+                print(f"[Dispatch] Starting Av1an Encoding...")
             print(f"svt-av1 fork: {svt_fork_display_name(selected_fork)}")
             av1an_started_at = time.monotonic()
             
             try:
                 with keep.running():
                     # Run in video_input_dir so temp folders created by av1an stay with source until done
-                    subprocess.check_call(cmd_av1an, cwd=video_input_dir)
+                    if simple_mode:
+                        enc_rc = run_av1an_simple(
+                            cmd_av1an,
+                            cwd=video_input_dir,
+                            description="Encoding",
+                            explanation=SIMPLE_EXPLANATION_ENCODING,
+                            temp_search_dir=video_input_dir,
+                        )
+                        if enc_rc != 0:
+                            raise subprocess.CalledProcessError(enc_rc, cmd_av1an)
+                    else:
+                        subprocess.check_call(cmd_av1an, cwd=video_input_dir)
             except subprocess.CalledProcessError:
                 print("[Dispatch] Encoding failed.")
                 send_ntfy_notification(
@@ -1591,7 +2015,8 @@ def main():
             av1_file_dst = os.path.join(temp_dir, f"{basename}-av1.mkv")
             av1_folder_dst = os.path.join(temp_dir, basename)
             
-            print("[Dispatch] Moving encoding artifacts to temp folder...")
+            if not simple_mode:
+                print("[Dispatch] Moving encoding artifacts to temp folder...")
             
             # Move the folder
             if os.path.exists(av1_folder_src):
@@ -1602,7 +2027,8 @@ def main():
                         print(f"[Dispatch] Warning: Failed to clean destination folder {av1_folder_dst}: {e}")
                 try:
                     shutil.move(av1_folder_src, av1_folder_dst)
-                    print(f"[Dispatch] Moved folder: {av1_folder_src} -> {av1_folder_dst}")
+                    if not simple_mode:
+                        print(f"[Dispatch] Moved folder: {av1_folder_src} -> {av1_folder_dst}")
                 except Exception as e:
                     print(f"[Dispatch] Error moving folder: {e}")
             else:
@@ -1617,23 +2043,39 @@ def main():
                         print(f"[Dispatch] Warning: Failed to clean destination file {av1_file_dst}: {e}")
                 try:
                     shutil.move(av1_file_src, av1_file_dst)
-                    print(f"[Dispatch] Moved file: {av1_file_src} -> {av1_file_dst}")
+                    if not simple_mode:
+                        print(f"[Dispatch] Moved file: {av1_file_src} -> {av1_file_dst}")
                 except Exception as e:
                     print(f"[Dispatch] Error moving encoded file: {e}")
             else:
                 print(f"[Dispatch] Warning: Expected encoded file not found at {av1_file_src}")
 
             # 4. Tagging (using av1an-tag.py)
-            print("[Dispatch] Applying Tags...")
+            if not simple_mode:
+                print("[Dispatch] Applying Tags...")
             try:
-                subprocess.check_call([sys.executable, tag_script], cwd=temp_dir)
+                if simple_mode:
+                    tag_rc = run_quiet([sys.executable, tag_script], cwd=temp_dir,
+                                       label="Tagging output")
+                    if tag_rc != 0:
+                        raise subprocess.CalledProcessError(tag_rc, tag_script)
+                else:
+                    subprocess.check_call([sys.executable, tag_script], cwd=temp_dir)
             except subprocess.CalledProcessError:
                 print("[Dispatch] Warning: Tagging reported an error.")
 
             # 5. Muxing (using av1an-mux.py)
-            print("[Dispatch] Muxing...")
+            if not simple_mode:
+                print("[Dispatch] Muxing...")
             try:
-                subprocess.check_call([sys.executable, mux_script], cwd=temp_dir)
+                if simple_mode:
+                    mux_rc = run_with_mux_progress(
+                        [sys.executable, mux_script], cwd=temp_dir,
+                        description="Muxing")
+                    if mux_rc != 0:
+                        raise subprocess.CalledProcessError(mux_rc, mux_script)
+                else:
+                    subprocess.check_call([sys.executable, mux_script], cwd=temp_dir)
             except subprocess.CalledProcessError:
                 print("[Dispatch] Muxing failed.")
                 continue
@@ -1643,7 +2085,8 @@ def main():
             
             output_moved = False
             if os.path.exists(temp_output_mkv):
-                print(f"[Dispatch] Moving final file to: {final_output_path}")
+                if not simple_mode:
+                    print(f"[Dispatch] Moving final file to: {final_output_path}")
                 try:
                     shutil.move(temp_output_mkv, final_output_path)
                     output_moved = True

@@ -104,7 +104,8 @@ def main():
         print("  2: Tonemap HDR to SDR")
         print("     HDR sources are converted to SDR (BT.709) via libplacebo")
         print("     inside the VapourSynth script. Uses GPU. SDR sources are")
-        print("     encoded normally.\n")
+        print("     encoded normally. GPU/iGPU 2016 or newer required.")
+        print("     Not currently compatible with Intel GPUs.\n")
         hdr_handling_choice = input("Select [1/2] (Press Enter for 1): ").strip()
         if hdr_handling_choice == "2":
             tonemap_value = "True"
@@ -309,10 +310,26 @@ def main():
         print("  2: Tonemap HDR to SDR")
         print("     HDR sources are converted to SDR (BT.709) via libplacebo")
         print("     inside the VapourSynth script. Uses GPU. SDR sources are")
-        print("     encoded normally.\n")
+        print("     encoded normally.")
+        print("     GPU/iGPU 2016 or newer required. Not compatible with Intel GPU\n")
         sdr_handling_choice = input("Select [1/2] (Press Enter for the default of 1): ").strip()
         if sdr_handling_choice == "2":
             tonemap_value = "True"
+
+    # --- Interface Mode (final question) ---
+    print("\n--------------------------------------------------------")
+    print("Interface Mode")
+    print("--------------------------------------------------------")
+    print("How much information do you want to see while encoding?\n")
+    print("  1: Default mode -- Simple interface with progress bars")
+    print("     Each phase of the workflow shows a clean progress bar")
+    print("     with a short explanation of what is happening.")
+    print("     Recommended for new users.\n")
+    print("  2: Verbose mode -- Show me everything")
+    print("     Adds --verbose to the generated .bat and displays the")
+    print("     full output of every tool during the workflow.\n")
+    interface_choice = input("Select [1/2] (Press Enter for the default of 1): ").strip()
+    verbose_value = "--verbose" if interface_choice == "2" else "--no-verbose"
 
     # --- Construct Script Content ---
     autocrop_suffix = "-autocrop" if use_autocrop else ""
@@ -340,7 +357,10 @@ def main():
     script += ":: Set AVX512=True only if your CPU supports AVX-512 and the fork has an AVX-512 build.\n"
     script += f'set "tonemap={tonemap_value}"\n'
     script += ":: tonemap=True converts HDR sources to SDR (BT.709) via libplacebo inside the VapourSynth script (uses GPU).\n"
-    script += ":: tonemap=False: the hdr fork auto-detects HDR sources and applies matching SVT-AV1-HDR color settings; other forks encode as-is.\n\n"
+    script += ":: tonemap=False: the hdr fork auto-detects HDR sources and applies matching SVT-AV1-HDR color settings; other forks encode as-is.\n"
+    script += f'set "VERBOSE={verbose_value}"\n'
+    script += ":: VERBOSE=--verbose shows the full output of every tool during the workflow (verbose mode).\n"
+    script += ":: VERBOSE=--no-verbose keeps the simple interface with progress bars (default mode).\n\n"
 
     if optimize_workers:
         script += 'set "optimize-workers=true"\n'
@@ -459,9 +479,9 @@ def main():
         script += film_grain_note
         
     if mode == "autoboost":
-        script += f"\"VapourSynth\\python.exe\" \"tools\\dispatch.py\" --fork %fork% --avx512 %AVX512% --denoise %DENOISE% --tonemap %tonemap% --crf %CRF%{autocrop_flag} --ssimu2 \"%SSIMU2_TOOL%\" --verbose --ssimu2-cpu-workers %SSIMU2_WORKERS% --resume --fast-speed 8 --final-speed %FINAL_SPEED% --workers %WORKER_COUNT% --fast-params \"%FAST_PARAMS%\" --final-params \"%FINAL_PARAMS%\"\n\n"
+        script += f"\"VapourSynth\\python.exe\" \"tools\\dispatch.py\" --fork %fork% --avx512 %AVX512% --denoise %DENOISE% --tonemap %tonemap% --crf %CRF%{autocrop_flag} --ssimu2 \"%SSIMU2_TOOL%\" %VERBOSE% --ssimu2-cpu-workers %SSIMU2_WORKERS% --resume --fast-speed 8 --final-speed %FINAL_SPEED% --workers %WORKER_COUNT% --fast-params \"%FAST_PARAMS%\" --final-params \"%FINAL_PARAMS%\"\n\n"
     else:
-        script += f"\"VapourSynth\\python.exe\" \"tools\\av1an-dispatch.py\" --resume --fork %fork% --avx512 %AVX512% --denoise %DENOISE% --tonemap %tonemap%{autocrop_flag} --crf %CRF% --workers %WORKER_COUNT% --final-speed %FINAL_SPEED% --final-params \"%av1an_settings%\"\n\n"
+        script += f"\"VapourSynth\\python.exe\" \"tools\\av1an-dispatch.py\" --resume %VERBOSE% --fork %fork% --avx512 %AVX512% --denoise %DENOISE% --tonemap %tonemap%{autocrop_flag} --crf %CRF% --workers %WORKER_COUNT% --final-speed %FINAL_SPEED% --final-params \"%av1an_settings%\"\n\n"
 
     script += "echo.\necho All tasks finished.\npause\n\n"
     step_num += 1

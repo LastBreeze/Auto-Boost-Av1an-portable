@@ -7,6 +7,7 @@ import re
 import shutil
 import threading
 import time
+import collections
 import urllib.parse
 import urllib.request
 import unicodedata
@@ -157,6 +158,255 @@ def scene_detection_env():
     env["PYTHONUNBUFFERED"] = "1"
     env["AUTOBOOST_SCENE_X264_PROGRESS"] = "1"
     return env
+
+# =========================================================================
+# Simple-mode (non --verbose) progress display
+#
+# When the generated .bat does not pass --verbose, the noisy phases of the
+# workflow are shown as Auto-Boost-Essential style progress bars with a
+# short beginner-friendly explanation underneath. The explanation for a
+# phase disappears as soon as that phase finishes.
+# =========================================================================
+
+SIMPLE_EXPLANATION_SCENE_DETECTION = (
+    "Using VapourSynth and x264 for scene detection to break the video into chunks for\n"
+    "visual metrics quality measuring and parallel encoding for increased encoding speed."
+)
+SIMPLE_EXPLANATION_MUXING = (
+    "Packaging the finished video together with the original audio, subtitles, chapters,\n"
+    "etc, into your final MKV file in the video-output folder."
+)
+
+# All simple-mode bars pad their description to this width so every progress
+# bar in the workflow starts at the same column and stays aligned.
+SIMPLE_DESC_WIDTH = 42
+
+
+def simple_description(text):
+    return "[green]" + text.ljust(SIMPLE_DESC_WIDTH)
+
+
+try:
+    from rich.console import Console, Group
+    from rich.live import Live
+    from rich.text import Text
+    from rich.progress import (
+        Progress,
+        ProgressColumn,
+        TextColumn,
+        BarColumn,
+        SpinnerColumn,
+        TimeElapsedColumn,
+        TimeRemainingColumn,
+    )
+
+    class SimpleFPSColumn(ProgressColumn):
+        """fps readout on the right side of the bar (default color), fed via
+        task.fields['fps']. Renders fixed-width so bars stay aligned."""
+
+        def render(self, task):
+            fps = task.fields.get("fps")
+            if fps is None:
+                return Text(" " * 12)
+            return Text(f"{fps:>8.2f} fps")
+
+    class PlainTimeElapsedColumn(TimeElapsedColumn):
+        """Elapsed time in the default color instead of rich's cyan."""
+
+        def render(self, task):
+            text = super().render(task)
+            text.style = ""
+            return text
+
+    class PlainTimeRemainingColumn(TimeRemainingColumn):
+        """Remaining time in the default color instead of rich's cyan."""
+
+        def render(self, task):
+            text = super().render(task)
+            text.style = ""
+            return text
+
+    class PhaseRenderable:
+        """A progress display plus an explanation line that can be hidden."""
+
+        def __init__(self, progress, explanation):
+            self.progress = progress
+            self.explanation = explanation
+            self.show_explanation = explanation is not None
+
+        def __rich__(self):
+            if self.show_explanation:
+                return Group(self.progress, Text(self.explanation, style="dim"))
+            return self.progress
+
+    RICH_AVAILABLE = True
+except ImportError:
+    # Without rich we cannot draw the simple interface; every phase falls
+    # back to the verbose behaviour instead of failing.
+    RICH_AVAILABLE = False
+
+ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
+SCENE_PROGRESS_RE = re.compile(
+    r"Frame\s+(\d+)\s*/\s*([\d.]+)%\s*/\s*(VapourSynth|x264) based scene detection"
+    r"(?:\s+\w+)?\s*/\s*([\d.]+)\s*fps"
+)
+MUX_PROGRESS_RE = re.compile(r"[Pp]rogress:\s*(\d+)\s*%")
+
+
+def essential_style_progress(console):
+    """Progress bar with the same appearance Auto-Boost-Essential uses.
+    Percentage, fps and time readouts use the default (white) color, and the
+    fps column is fixed-width so all bars in the workflow align."""
+    return Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        "{task.percentage:>3.0f}%",
+        SimpleFPSColumn(),
+        PlainTimeElapsedColumn(),
+        PlainTimeRemainingColumn(),
+        console=console,
+    )
+
+
+def stream_subprocess_lines(proc, on_line):
+    """Read a subprocess's merged output, splitting on \r and \n so live
+    carriage-return progress updates are seen as individual lines."""
+    buf = b""
+    stream = proc.stdout
+    while True:
+        chunk = stream.read1(4096) if hasattr(stream, "read1") else stream.read(1)
+        if not chunk:
+            break
+        buf += chunk
+        parts = re.split(b"[\r\n]", buf)
+        buf = parts.pop()
+        for raw in parts:
+            if not raw:
+                continue
+            line = ANSI_ESCAPE_RE.sub("", raw.decode("utf-8", "replace")).strip()
+            if line:
+                on_line(line)
+    if buf:
+        line = ANSI_ESCAPE_RE.sub("", buf.decode("utf-8", "replace")).strip()
+        if line:
+            on_line(line)
+
+
+def print_captured_tail(label, lines):
+    """Show the tail of a quiet subprocess's output after a failure."""
+    if not lines:
+        return
+    print(f"{RED}[Dispatch] {label} (last {len(lines)} output lines):{RESET}")
+    for line in lines:
+        print(f"  {line}")
+
+
+def run_scene_detection_simple(cmd, cwd, env):
+    """Run Progressive-Scene-Detection.py behind two Essential-style progress
+    bars (VapourSynth + x264) with a short explanation underneath.
+
+    Returns the subprocess return code."""
+    console = Console()
+    progress = essential_style_progress(console)
+    vs_task = progress.add_task(simple_description("VapourSynth scene detection"),
+                                total=100.0, fps=None)
+    x264_task = progress.add_task(simple_description("x264 scene detection"),
+                                  total=100.0, fps=None)
+    renderable = PhaseRenderable(progress, SIMPLE_EXPLANATION_SCENE_DETECTION)
+    other_lines = collections.deque(maxlen=40)
+
+    def on_line(line):
+        match = SCENE_PROGRESS_RE.search(line)
+        if match:
+            percent = min(100.0, float(match.group(2)))
+            fps = float(match.group(4))
+            task = vs_task if match.group(3) == "VapourSynth" else x264_task
+            progress.update(task, completed=percent, fps=fps)
+        else:
+            other_lines.append(line)
+
+    proc = subprocess.Popen(cmd, cwd=cwd, env=env,
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    try:
+        with Live(renderable, console=console, refresh_per_second=8) as live:
+            try:
+                stream_subprocess_lines(proc, on_line)
+                returncode = proc.wait()
+                if returncode == 0:
+                    progress.update(vs_task, completed=100.0)
+                    progress.update(x264_task, completed=100.0)
+            finally:
+                if proc.poll() is None:
+                    proc.terminate()
+                renderable.show_explanation = False
+                live.refresh()
+    except KeyboardInterrupt:
+        try:
+            proc.wait(timeout=5)
+        except Exception:
+            proc.kill()
+        raise
+    if returncode != 0:
+        print_captured_tail("Scene detection failed", list(other_lines))
+    return returncode
+
+
+def run_with_mux_progress(cmd, cwd, description):
+    """Run a muxing helper behind a single Essential-style progress bar,
+    driven by mkvmerge's 'Progress: N%' output.
+
+    Returns the subprocess return code."""
+    console = Console()
+    progress = essential_style_progress(console)
+    task = progress.add_task(simple_description(description), total=100.0, fps=None)
+    renderable = PhaseRenderable(progress, SIMPLE_EXPLANATION_MUXING)
+    other_lines = collections.deque(maxlen=40)
+
+    def on_line(line):
+        match = MUX_PROGRESS_RE.search(line)
+        if match:
+            progress.update(task, completed=min(100.0, float(match.group(1))))
+        else:
+            other_lines.append(line)
+
+    proc = subprocess.Popen(cmd, cwd=cwd,
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    try:
+        with Live(renderable, console=console, refresh_per_second=8) as live:
+            try:
+                stream_subprocess_lines(proc, on_line)
+                returncode = proc.wait()
+                if returncode == 0:
+                    progress.update(task, completed=100.0)
+            finally:
+                if proc.poll() is None:
+                    proc.terminate()
+                renderable.show_explanation = False
+                live.refresh()
+    except KeyboardInterrupt:
+        try:
+            proc.wait(timeout=5)
+        except Exception:
+            proc.kill()
+        raise
+    if returncode != 0:
+        print_captured_tail("Muxing output", list(other_lines))
+    return returncode
+
+
+def run_quiet(cmd, cwd, label):
+    """Run a helper silently; on failure print the tail of its output.
+
+    Returns the subprocess return code."""
+    proc = subprocess.run(cmd, cwd=cwd,
+                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    if proc.returncode != 0 and proc.stdout:
+        lines = [ANSI_ESCAPE_RE.sub("", raw).rstrip() for raw in
+                 proc.stdout.decode("utf-8", "replace").splitlines() if raw.strip()]
+        print_captured_tail(label, lines[-40:])
+    return proc.returncode
+
 
 def parse_settings_lines(lines):
     """Parse settings.txt lines into a case-insensitive key/value dict."""
@@ -1077,6 +1327,15 @@ def main():
 
     # --- Argument Parsing (settings + dispatcher-only options) ---
     args = sys.argv[1:]
+    # --verbose (verbose mode) shows everything the way it used to be shown and
+    # is also passed through to Auto-Boost-Av1an.py. Without it (default mode),
+    # the noisy phases are drawn as simple progress bars with explanations.
+    # --no-verbose is the .bat's VERBOSE= placeholder for default mode.
+    verbose_mode = "--verbose" in args
+    args = [arg for arg in args if arg != "--no-verbose"]
+    simple_mode = RICH_AVAILABLE and not verbose_mode
+    if not RICH_AVAILABLE and not verbose_mode:
+        print("[Dispatch] rich is unavailable; falling back to verbose output.")
     denoise_setting = None
     initial_args = []
     idx = 0
@@ -1107,7 +1366,8 @@ def main():
             shutil.copy2(settings_src, settings_dst)
             if denoise_setting is not None:
                 set_settings_value(settings_dst, "denoise", denoise_setting)
-            print(f"[Dispatch] Copied settings.txt to temp folder.")
+            if not simple_mode:
+                print(f"[Dispatch] Copied settings.txt to temp folder.")
         except Exception as e:
             print(f"[Dispatch] Warning: Failed to copy settings.txt: {e}")
     else:
@@ -1196,7 +1456,7 @@ def main():
             _override_flag_value("--ssimu2-cpu-workers", custom_ssimu2)
             print(f"\033[94m[Dispatch] Using optimized SSIMU2 worker/stream count from bat: {custom_ssimu2}\033[0m")
 
-    setup_svt_av1_fork(tools_dir, selected_fork, avx512=avx512, verbose=True)
+    setup_svt_av1_fork(tools_dir, selected_fork, avx512=avx512, verbose=verbose_mode)
 
     # --- Worker Safety Check ---
     strip_lp_3 = False
@@ -1220,7 +1480,8 @@ def main():
 
     warn_and_pause_if_paths_too_long(input_files, video_output_dir, temp_dir)
         
-    print(f"[Dispatch] Found {len(input_files)} files to process.")
+    if not simple_mode:
+        print(f"[Dispatch] Found {len(input_files)} files to process.")
 
     # --- Main Processing Loop ---
     timing_reports = []
@@ -1267,7 +1528,13 @@ def main():
                 ]
                 scene_started_at = time.monotonic()
                 try:
-                    subprocess.check_call(cmd_scene, cwd=temp_dir, env=scene_detection_env())
+                    if simple_mode:
+                        scene_rc = run_scene_detection_simple(
+                            cmd_scene, cwd=temp_dir, env=scene_detection_env())
+                        if scene_rc != 0:
+                            raise subprocess.CalledProcessError(scene_rc, cmd_scene)
+                    else:
+                        subprocess.check_call(cmd_scene, cwd=temp_dir, env=scene_detection_env())
                 except subprocess.CalledProcessError:
                     print("[Dispatch] Scene detection failed.")
                 finally:
@@ -1300,13 +1567,16 @@ def main():
                 print(f"{BLUE}[Dispatch] HDR source detected. This fork encodes it as-is (set tonemap=True in the .bat to tonemap to SDR).{RESET}")
             elif is_bt709:
                 current_color_flags = bt709_flags
-                if is_hdr_fork(selected_fork):
+                if simple_mode:
+                    pass
+                elif is_hdr_fork(selected_fork):
                     print("[Dispatch] MediaInfo confirmed full BT.709 source; copying BT.709 color settings for SVT-AV1-HDR fork.")
                 else:
                     print("[Dispatch] MediaInfo confirmed full BT.709 source.")
             elif is_bt601:
                 current_color_flags = bt601_flags
-                print("[Dispatch] MediaInfo confirmed full BT.601 source.")
+                if not simple_mode:
+                    print("[Dispatch] MediaInfo confirmed full BT.601 source.")
 
             # 3. Encoding
             final_cmd = [
@@ -1347,8 +1617,9 @@ def main():
                 else:
                     final_cmd.append(a)
             
-            print(f"[Dispatch] Processing {filename}...")
-            print("[Dispatch] Starting Encoding...")
+            if not simple_mode:
+                print(f"[Dispatch] Processing {filename}...")
+                print("[Dispatch] Starting Encoding...")
             print(f"svt-av1 fork: {svt_fork_display_name(selected_fork)}")
             stage_file = os.path.join(video_input_dir, basename, f"{basename}_stage.txt")
             stage_monitor = StageTimingMonitor(stage_file)
@@ -1388,7 +1659,8 @@ def main():
             av1_file_dst = os.path.join(temp_dir, f"{basename}-av1.mkv")
             av1_folder_dst = os.path.join(temp_dir, basename)
             
-            print("[Dispatch] Moving encoding artifacts to temp folder...")
+            if not simple_mode:
+                print("[Dispatch] Moving encoding artifacts to temp folder...")
             
             # Move the folder
             if os.path.exists(av1_folder_src):
@@ -1399,7 +1671,8 @@ def main():
                         print(f"[Dispatch] Warning: Failed to clean destination folder {av1_folder_dst}: {e}")
                 try:
                     shutil.move(av1_folder_src, av1_folder_dst)
-                    print(f"[Dispatch] Moved folder: {av1_folder_src} -> {av1_folder_dst}")
+                    if not simple_mode:
+                        print(f"[Dispatch] Moved folder: {av1_folder_src} -> {av1_folder_dst}")
                 except Exception as e:
                     print(f"[Dispatch] Error moving folder: {e}")
             else:
@@ -1414,24 +1687,40 @@ def main():
                         print(f"[Dispatch] Warning: Failed to clean destination file {av1_file_dst}: {e}")
                 try:
                     shutil.move(av1_file_src, av1_file_dst)
-                    print(f"[Dispatch] Moved file: {av1_file_src} -> {av1_file_dst}")
+                    if not simple_mode:
+                        print(f"[Dispatch] Moved file: {av1_file_src} -> {av1_file_dst}")
                 except Exception as e:
                     print(f"[Dispatch] Error moving encoded file: {e}")
             else:
                 print(f"[Dispatch] Warning: Expected encoded file not found at {av1_file_src}")
 
             # 5. Tagging
-            print("[Dispatch] Applying Tags...")
+            if not simple_mode:
+                print("[Dispatch] Applying Tags...")
             try:
-                subprocess.check_call([sys.executable, tag_script], cwd=temp_dir)
+                if simple_mode:
+                    tag_rc = run_quiet([sys.executable, tag_script], cwd=temp_dir,
+                                       label="Tagging output")
+                    if tag_rc != 0:
+                        raise subprocess.CalledProcessError(tag_rc, tag_script)
+                else:
+                    subprocess.check_call([sys.executable, tag_script], cwd=temp_dir)
             except subprocess.CalledProcessError:
                 print("[Dispatch] Warning: Tagging reported an error.")
 
             # 6. Muxing
-            print("[Dispatch] Muxing...")
+            if not simple_mode:
+                print("[Dispatch] Muxing...")
             mux_started_at = time.monotonic()
             try:
-                subprocess.check_call([sys.executable, mux_script], cwd=temp_dir)
+                if simple_mode:
+                    mux_rc = run_with_mux_progress(
+                        [sys.executable, mux_script], cwd=temp_dir,
+                        description="Muxing")
+                    if mux_rc != 0:
+                        raise subprocess.CalledProcessError(mux_rc, mux_script)
+                else:
+                    subprocess.check_call([sys.executable, mux_script], cwd=temp_dir)
             except subprocess.CalledProcessError:
                 print("[Dispatch] Muxing failed.")
                 continue
@@ -1443,7 +1732,8 @@ def main():
             
             output_moved = False
             if os.path.exists(temp_output_mkv):
-                print(f"[Dispatch] Moving final file to: {final_output_path}")
+                if not simple_mode:
+                    print(f"[Dispatch] Moving final file to: {final_output_path}")
                 try:
                     shutil.move(temp_output_mkv, final_output_path)
                     output_moved = True
