@@ -1,10 +1,33 @@
 Changelog
 
+v3.1
+---------------------------------
+• Added AfterZone: re-encode only the scenes you choose from an already finished encode using new settings,
+  frame ranges go in video-input\<name>.txt, or let it write them from the bitrate. Activate it from bat-builder
+
+v3.0
+---------------------------------
+• Simplified video encoding workflow output with progress bars. Original verbose mode still available
+  and added as bat-builder question.
+• Input video filenames are now auto-renamed to plain letters and numbers before encoding. This makes
+  every filename safe for python and other tools.
+
+v2.7
+---------------------------------
+• Updated VSHIP to 5.1.0
+• Fixed a rare crash where a crash stopping a test could kill the whole benchmark and leave
+  workercount-config.txt missing, which then broke encoding with a --workers error.
+• If the benchmark fails completely, workers=1 is now written automatically so encoding still
+  works. With 1 worker, --lp 3 is dropped so the encoder can still use your whole CPU.
+• workercount-config.txt is now auto-repaired if it was hand-edited and saved in the wrong text
+  format (for example by Notepad), fixing the "stream did not contain valid UTF-8" error.
+
 v2.6
 ---------------------------------
 • Improved the worker count bat-specific benchmark, helping it choose a more accurate number of CPU workers.
 • Added extras\create-discord-10mb-sample.bat for making a video-only MKV sample small enough to upload to Discord.
 • Scene detection now hides harmless audio warnings.
+• Encoding time summaries added to display text
 
 v2.5
 ---------------------------------

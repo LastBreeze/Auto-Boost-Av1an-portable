@@ -1968,7 +1968,8 @@ def main():
                 "-w", workers,
                 "-s", json_abspath,
                 "-o", av1_output,
-                "-v", encoder_params
+                "-v", encoder_params,
+                "--keep"
             ]
             
             if resume:

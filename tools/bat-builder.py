@@ -1,4 +1,5 @@
 import os
+import shutil
 
 BLUE = "\033[94m"
 RED = "\033[91m"
@@ -20,36 +21,110 @@ def enable_ansi_colors():
 def clear_screen():
     os.system('cls' if os.name == 'nt' else 'clear')
 
+def setup_afterzone():
+    """Copy tools\\AfterZone.bat into the main folder so it can be run from there.
+
+    Returns True if the tool was set up (caller should stop), False to go back
+    to the main menu.
+    """
+    tools_dir = os.path.dirname(os.path.abspath(__file__))
+    root_dir = os.path.dirname(tools_dir)
+    source = os.path.join(tools_dir, "AfterZone.bat")
+    dest = os.path.join(root_dir, "AfterZone.bat")
+
+    if not os.path.exists(source):
+        print(f"\n{RED}Could not find tools\\AfterZone.bat.")
+        print(f"Your install may be incomplete - try re-downloading the package.{RESET}")
+        os.system('pause')
+        return True
+
+    if os.path.exists(dest):
+        print("\nAfterZone.bat already exists in the main folder.")
+        print("Overwriting will discard any edits you made to it.\n")
+        overwrite = input("Replace it with a fresh copy? [1 Yes / 2 No] (Press Enter for No): ").strip()
+        if overwrite != "1":
+            print("\nLeft the existing AfterZone.bat alone. Nothing was changed.")
+            os.system('pause')
+            return True
+
+    shutil.copy2(source, dest)
+
+    print("\n-------------------------------------------------------------------------------")
+    print("AfterZone is ready.")
+    print("File: AfterZone.bat (main folder)")
+    print("-------------------------------------------------------------------------------")
+    print("Before running it:")
+    print("  1. Finish a normal encode and leave the temp folder in place")
+    print("     (do not run cleanup yet - AfterZone needs temp\\<name>\\.<hash>\\chunks.json).")
+    print("  2. Keep the original input in video-input\\<name>.mkv")
+    print("  3. Put a zones file next to it: video-input\\<name>.txt")
+    print("     See zones-example.txt in the main folder for the format.")
+    print("     AfterZone can also auto-generate one from the finished file's bitrate.")
+    print("")
+    print("Open AfterZone.bat in Notepad++ and copy the av1an_settings, FINAL_SPEED and")
+    print("CRF lines from the .bat you originally encoded with, so the MKV tag stays")
+    print("truthful. Result: video-output\\<name>-afterzone.mkv (your original output is")
+    print("left alone).")
+    print("-------------------------------------------------------------------------------")
+    os.system('pause')
+    return True
+
+def advanced_tools_menu():
+    """Advanced tools submenu. Returns True if handled, False to go back."""
+    while True:
+        clear_screen()
+        print("================================================")
+        print("               Advanced Tools                   ")
+        print("================================================\n")
+        print("  1. Setup AfterZone in the main folder\n")
+        print("  2. Go back\n")
+        print("")
+        print("  AfterZone allows you to reencode frame ranges with different")
+        print("  settings after encoding is already completed.\n")
+        choice = input("Select [1/2]: ").strip()
+
+        if choice == "1":
+            return setup_afterzone()
+        if choice == "2":
+            return False
+
 def main():
     enable_ansi_colors()
-    clear_screen()
-    print("================================================")
-    print("       Auto-Boost / Av1an Batch Builder         ")
-    print("================================================\n")
-    print("This tool will create a batch script to encode your videos")
-    print("Just answer the questions below and your script will be ready to run.")
-    print("HDR sources: the SVT-AV1-HDR fork can auto-detect HDR and apply matching color")
-    print("settings, or any fork can tonemap HDR content down to SDR (BT.709) via libplacebo.\n")
 
     # --- 1. Pass Type ---
-    print("--------------------------------------------------------")
-    print("STEP 1 OF 5: Choose an Encoding Method")
-    print("--------------------------------------------------------")
-    print("How should the encoder approach your video?\n")
-    print("  1: Auto-Boost")
-    print("     Two pass encoding with visual metrics. The first pass is")
-    print("     a fast-speed preview to measure quality. The second pass")
-    print("     uses those measurements to fine-tune the final encode")
-    print("     automatically. Can potentially produce better results.\n")
-    print("  2: Av1an Single Pass")
-    print("     Encodes the video once, straight through.")
-    print("     Good if you want faster turnaround.\n")
-    print("")
-    print("  NOTE: If your video has a lot of grain, pick Av1an Single Pass. Auto-Boost can")
-    print("  mistake the grain for fine detail and try to preserve it, which wastes bits")
-    print("  and makes your final file much larger than it needs to be.\n")
-    mode_choice = input("Select [1/2]: ").strip()
-    mode = "autoboost" if mode_choice == "1" else "av1an"
+    while True:
+        clear_screen()
+        print("================================================")
+        print("       Auto-Boost / Av1an Batch Builder")
+        print("================================================\n")
+        print("This tool will create a batch script to encode your videos.")
+        print("Just answer the questions below and your script will be ready to run.\n")
+        print("--------------------------------------------------------")
+        print("STEP 1 OF 5: Choose an Encoding Method")
+        print("--------------------------------------------------------")
+        print("How should the encoder approach your video?\n")
+        print("  1: Auto-Boost")
+        print("     Two pass encoding with visual metrics. The first pass is")
+        print("     a fast-speed preview to measure quality. The second pass")
+        print("     uses those measurements to fine-tune the final encode")
+        print("     automatically. Can potentially produce better results.\n")
+        print("  2: Av1an Single Pass")
+        print("     Encodes the video once, straight through.")
+        print("     Good if you want faster turnaround.")
+        print("     ")
+        print("  3: Setup advanced tools\n")
+        print("  NOTE: If your video has a lot of grain, pick Av1an Single Pass. Auto-Boost can")
+        print("  mistake the grain for fine detail and try to preserve it, which wastes bitrate")
+        print("  and makes your final file much larger than it needs to be.\n")
+        mode_choice = input("Select [1/2/3]: ").strip()
+
+        if mode_choice == "3":
+            if advanced_tools_menu():
+                return
+            continue
+
+        mode = "autoboost" if mode_choice == "1" else "av1an"
+        break
 
     # --- 2. Fork ---
     print("\n--------------------------------------------------------")
@@ -483,7 +558,7 @@ def main():
     else:
         script += f"\"VapourSynth\\python.exe\" \"tools\\av1an-dispatch.py\" --resume %VERBOSE% --fork %fork% --avx512 %AVX512% --denoise %DENOISE% --tonemap %tonemap%{autocrop_flag} --crf %CRF% --workers %WORKER_COUNT% --final-speed %FINAL_SPEED% --final-params \"%av1an_settings%\"\n\n"
 
-    script += "echo.\necho All tasks finished.\npause\n\n"
+    script += "echo.\necho All tasks finished.\necho Ctrl+C to keep temp files and exit.\necho Or, to cleaup temp files:\npause\n\n"
     step_num += 1
 
     # Cleanup
