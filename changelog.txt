@@ -1,5 +1,14 @@
 Changelog
 
+v3.11
+---------------------------------
+• audio-encoding (Opus/AC3/E-AC3) no longer applies zlib compression to subtitle tracks by default.
+  Not every player supports compressed tracks: Jellyfin shows such subtitles as gibberish. It is now a
+  setting, zlib-subtitles=False, at the bottom of each settings-encode-*-audio.txt. Set it to True to get
+  the space saving back, which is worthwhile for heavily typeset ASS signs. Files already produced with
+  compression can be repaired without re-encoding:
+      mkvmerge -o fixed.mkv --compression -1:none broken.mkv
+
 v3.1
 ---------------------------------
 • Added AfterZone: re-encode only the scenes you choose from an already finished encode using new settings,

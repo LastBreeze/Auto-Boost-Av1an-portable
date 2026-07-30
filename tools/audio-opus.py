@@ -58,9 +58,10 @@ def load_settings():
         "Above 5.1": "320",
         "5.1": "256",
         "2.1": "192",
-        "2.0": "128"
+        "2.0": "128",
+        "zlib-subtitles": "False"
     }
-    
+
     if not SETTINGS_FILE.exists():
         print(f"Warning: Settings file not found at {SETTINGS_FILE}. Using defaults.")
         return defaults
@@ -69,7 +70,7 @@ def load_settings():
         with open(SETTINGS_FILE, 'r') as f:
             for line in f:
                 line = line.strip()
-                if not line or "=" not in line:
+                if not line or line.startswith("#") or "=" not in line:
                     continue
                 key, val = line.split("=", 1)
                 defaults[key.strip()] = val.strip()
@@ -79,6 +80,15 @@ def load_settings():
     return defaults
 
 BITRATE_SETTINGS = load_settings()
+
+def setting_is_enabled(key):
+    """Reads a True/False style value from the settings file."""
+    return str(BITRATE_SETTINGS.get(key, "")).strip().lower() in ("true", "yes", "1", "on")
+
+# Matroska content compression for subtitle tracks. Off by default: it shrinks
+# heavily-typeset ASS tracks a lot, but not every player supports compressed
+# tracks (Jellyfin shows them as gibberish).
+SUBTITLE_COMPRESSION = "zlib" if setting_is_enabled("zlib-subtitles") else "none"
 
 def run_command(cmd, capture_output=False):
     """Run a subprocess command safely without bleeding stderr to console."""
@@ -555,7 +565,7 @@ def mux_final_files(copy_titles_for_encoded):
             for track in file_info.get("tracks", []):
                 tid = track.get("id")
                 if track.get("type") == "subtitles":
-                    subtitle_flags.extend(["--compression", f"{tid}:zlib"])
+                    subtitle_flags.extend(["--compression", f"{tid}:{SUBTITLE_COMPRESSION}"])
                 elif track.get("type") == "audio":
                     props = track.get("properties", {})
                     original_title = props.get("track_name") or props.get("name") or ""
