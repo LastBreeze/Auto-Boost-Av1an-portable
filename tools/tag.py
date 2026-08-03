@@ -40,6 +40,28 @@ def strip_untagged_options(params):
         i += 1
     return " ".join(cleaned)
 
+
+def normalize_fgs_table_path(params):
+    """Reduce any '--fgs-table <path>' value to its bare filename so MKV tags
+    stay portable and free of machine-specific absolute paths (the dispatch
+    scripts expand the filename to an absolute path at encode time)."""
+    if not params or "--fgs-table" not in params:
+        return params
+
+    pattern = re.compile(r'(--fgs-table[ \t]+)("([^"]*)"|\'([^\']*)\'|(\S+))')
+
+    def _repl(match):
+        raw = match.group(3) or match.group(4) or match.group(5) or ""
+        if not raw:
+            return match.group(0)
+        filename = re.split(r"[\\/]", raw)[-1]
+        if any(ch.isspace() for ch in filename):
+            filename = f'"{filename}"'
+        return match.group(1) + filename
+
+    return pattern.sub(_repl, params)
+
+
 def get_script_version():
     """Extracts the latest version number from Auto-Boost-Av1an.py."""
     script_path = os.path.join(TOOLS_DIR, "Auto-Boost-Av1an.py")
@@ -174,7 +196,7 @@ def parse_batch_line(line, vars_map):
     raw_args = parts[start_idx+1:]
     general_flags = []
     final_params = ""
-    quality = "medium"
+    crf = "medium"
     final_speed = None
 
     i = 0
@@ -209,17 +231,20 @@ def parse_batch_line(line, vars_map):
                     i += 1
             else:
                 i += 1
-            if flag == "--quality" and val: quality = val
+            if flag in ("--crf", "--quality"):
+                if val:
+                    crf = val
+                continue
             if flag == "--final-speed" and val: final_speed = val
             if val: general_flags.append(f"{flag} {val}")
             else: general_flags.append(flag)
         else:
             i += 1
 
-    return general_flags, final_params, quality, final_speed
+    return general_flags, final_params, crf, final_speed
 
-def get_crf_string(quality):
-    q = str(quality).lower().strip()
+def get_crf_string(crf):
+    q = str(crf).lower().strip()
     if q == "high": return "--crf 25(variable)"
     if q == "low": return "--crf 35(variable)"
     if q == "medium": return "--crf 30(variable)"
@@ -236,7 +261,7 @@ def apply_tag_to_file(filepath, encoding_settings):
       <TrackUID>1</TrackUID>
     </Targets>
     <Simple>
-      <Name>ENCODING_SETTINGS</Name>
+      <Name>Encoded_Library_Settings</Name>
       <String>{encoding_settings}</String>
     </Simple>
   </Tag>
@@ -310,7 +335,7 @@ def main():
         for key, val in vars_map.items():
             cmd_line = cmd_line.replace(key, val)
 
-    general_flags, final_params, quality, final_speed = parse_batch_line(cmd_line, vars_map)
+    general_flags, final_params, crf, final_speed = parse_batch_line(cmd_line, vars_map)
     script_version = get_script_version()
     svt_version = get_svt_av1_version()
     
@@ -320,13 +345,13 @@ def main():
     
     settings_content = []
     if final_speed: settings_content.append(f"--preset {final_speed}")
-    settings_content.append(get_crf_string(quality))
+    settings_content.append(get_crf_string(crf))
     
     if final_params:
         clean_params = final_params.strip()
         if len(clean_params) >= 2 and clean_params.startswith('"') and clean_params.endswith('"'):
             clean_params = clean_params[1:-1]
-        settings_content.append(strip_untagged_options(clean_params))
+        settings_content.append(normalize_fgs_table_path(strip_untagged_options(clean_params)))
 
     combined_settings_str = " ".join(settings_content)
     full_string = " ".join(info_parts) + f' settings: "{combined_settings_str}"'

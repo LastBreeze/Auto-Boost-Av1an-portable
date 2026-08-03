@@ -40,6 +40,28 @@ def strip_untagged_options(params):
         i += 1
     return " ".join(cleaned)
 
+
+def normalize_fgs_table_path(params):
+    """Reduce any '--fgs-table <path>' value to its bare filename so MKV tags
+    stay portable and free of machine-specific absolute paths (the dispatch
+    scripts expand the filename to an absolute path at encode time)."""
+    if not params or "--fgs-table" not in params:
+        return params
+
+    pattern = re.compile(r'(--fgs-table[ \t]+)("([^"]*)"|\'([^\']*)\'|(\S+))')
+
+    def _repl(match):
+        raw = match.group(3) or match.group(4) or match.group(5) or ""
+        if not raw:
+            return match.group(0)
+        filename = re.split(r"[\\/]", raw)[-1]
+        if any(ch.isspace() for ch in filename):
+            filename = f'"{filename}"'
+        return match.group(1) + filename
+
+    return pattern.sub(_repl, params)
+
+
 def get_script_version():
     """Extracts the latest version number from Auto-Boost-Av1an.py."""
     script_path = os.path.join(TOOLS_DIR, "Auto-Boost-Av1an.py")
@@ -124,6 +146,7 @@ def parse_av1an_batch(batch_name):
     settings = {
         "av1an_settings": "",
         "FINAL_SPEED": "4",
+        "CRF": "30",
         "QUALITY": "30",
         "PHOTON_NOISE": "0"
     }
@@ -167,6 +190,8 @@ def parse_av1an_batch(batch_name):
                 
                 if key and key in settings:
                     settings[key] = val
+                    if key == "CRF":
+                        settings["QUALITY"] = val
 
     except Exception:
         pass
@@ -184,7 +209,7 @@ def apply_tag_to_file(filepath, encoding_settings):
       <TrackUID>1</TrackUID>
     </Targets>
     <Simple>
-      <Name>ENCODING_SETTINGS</Name>
+      <Name>Encoded_Library_Settings</Name>
       <String>{encoding_settings}</String>
     </Simple>
   </Tag>
@@ -236,14 +261,14 @@ def main():
     # 4. Settings Block
     settings_content = []
     settings_content.append(f"--preset {config['FINAL_SPEED']}")
-    settings_content.append(get_crf_string(config['QUALITY']))
+    settings_content.append(get_crf_string(config.get('CRF') or config['QUALITY']))
     
     if config['av1an_settings']:
         clean_params = config['av1an_settings'].strip()
         # Safety check: strip external quotes if they somehow remain
         if len(clean_params) >= 2 and clean_params.startswith('"') and clean_params.endswith('"'):
             clean_params = clean_params[1:-1]
-        settings_content.append(strip_untagged_options(clean_params))
+        settings_content.append(normalize_fgs_table_path(strip_untagged_options(clean_params)))
 
     combined_settings_str = " ".join(settings_content)
     

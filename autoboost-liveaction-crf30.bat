@@ -3,7 +3,7 @@
 set "FAST_PARAMS=--scd 0 --distortion-bias-preset 1"
 set "FINAL_PARAMS=--scd 0 --distortion-bias-preset 1 --photon-noise 400"
 set "FINAL_SPEED=4"
-set "QUALITY=30"
+set "CRF=30"
 :: Set photon noise to 0 if using film-grain
 set "fork=essential"
 :: example forks: 5fish, essential, hdr, custom
@@ -92,10 +92,12 @@ echo Encoding inputs from: video-input
 echo Outputs will go to:   video-output
 echo.
 :: If you'd like to use --film-grain, then --photon-noise must be set to 0, do not remove the setting.
-"VapourSynth\python.exe" "tools\dispatch.py" --fork %fork% --avx512 %AVX512% --denoise %DENOISE% --quality %QUALITY% --autocrop --ssimu2 %SSIMU2_TOOL% --verbose --ssimu2-cpu-workers %SSIMU2_WORKERS% --resume --fast-speed 8 --final-speed %FINAL_SPEED% --workers %WORKER_COUNT% --fast-params "%FAST_PARAMS%" --final-params "%FINAL_PARAMS%"
+"VapourSynth\python.exe" "tools\dispatch.py" --fork %fork% --avx512 %AVX512% --denoise %DENOISE% --crf %CRF% --autocrop --ssimu2 %SSIMU2_TOOL% --ssimu2-cpu-workers %SSIMU2_WORKERS% --resume --fast-speed 8 --final-speed %FINAL_SPEED% --workers %WORKER_COUNT% --fast-params "%FAST_PARAMS%" --final-params "%FINAL_PARAMS%"
 
 echo.
 echo All tasks finished.
+echo Ctrl+C to keep temp files and exit.
+echo Or, to cleaup temp files:
 pause
 
 :: --- STEP 4: CLEANUP ---

@@ -81,6 +81,27 @@ handle things like --photon-noise.
 Output goes to video-output\\<name>-afterzone.mkv.  The original
 video-output\\<name>-output.mkv is never touched, so you can compare them.
 
+Interrupted runs
+----------------
+As soon as the json files are about to be rewritten, AfterZone drops a marker
+in temp\\afterzone-active-<name>.txt naming the file it is encoding, the av1an
+folder it is encoding into, the worker count and the chunk counts.  While that
+marker exists AfterZone modifies nothing: it skips zones, planning and every
+file operation, and simply re-runs av1an with --resume, which continues at the
+first chunk that has no done.json entry.  So the window can be closed in the
+middle of an encode, and running AfterZone.bat again picks it up where it
+stopped.  The marker is deleted once the result is muxed into video-output.
+
+Worker count
+------------
+Every .bat in this package writes a tools\\bat-used-<name>.bat.txt marker as it
+starts.  AfterZone reads the newest marker that is not its own and uses that
+.bat's custom-av1an-workers value when the one-time optimization benchmark has
+filled it in, so it encodes with the same worker count the original encode ran
+with.  The name of that .bat is remembered in tools\\afterzone-lastbat.txt,
+because AfterZone.bat clears tools\\bat*.txt before this script starts.  With
+no .bat to read, tools\\workercount-config.txt is used exactly as before.
+
 Run this via AfterZone.bat (it sets PATH and the encoder-settings tag).
 """
 
@@ -121,6 +142,12 @@ VIDEO_EXTS = (".mkv", ".mp4", ".m2ts")
 # bitrate (the median of the 1 second rolling average). The user can change it
 # interactively, so this is only where the search starts.
 BITRATE_ZONE_THRESHOLD = 1.25
+
+# Exit code AfterZone.bat reads to skip its own "press any key". Zone generation
+# ends on an interactive prompt of its own, and two pauses back to back reads as
+# if something went wrong.
+ALREADY_PAUSED_EXIT = 7
+_ended_on_prompt = False
 
 # A zone edge that lands inside a chunk splits that chunk in two, the same way
 # --zones would have split it during a fresh encode. Splitting at an arbitrary
@@ -218,6 +245,89 @@ def ask_percentage(prompt):
         return value
 
 
+def ask_kbps(prompt):
+    """Read a bitrate in kbps. Blank input means 'never mind'."""
+    while True:
+        try:
+            raw = input(prompt).strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            sys.exit(1)
+        if not raw:
+            return None
+        cleaned = raw.lower().replace(",", "")
+        for suffix in ("kbps", "kbit", "kb", "k"):
+            if cleaned.endswith(suffix):
+                cleaned = cleaned[:-len(suffix)]
+                break
+        try:
+            value = float(cleaned.strip())
+        except ValueError:
+            print(f"{YELLOW}Enter a bitrate in kbps (for example 8000), or press "
+                  f"Enter to go back.{RESET}")
+            continue
+        if value <= 0:
+            print(f"{YELLOW}The bitrate has to be above zero.{RESET}")
+            continue
+        return value
+
+
+def press_any_key(prompt="Press any key to exit . . . "):
+    """Hold the window open.
+
+    AfterZone tells the .bat to skip its own pause when it has already ended on
+    a prompt (see ALREADY_PAUSED_EXIT), so anything printed on the way out is
+    only readable if something here waits for the user.
+    """
+    print(prompt, end="", flush=True)
+    try:
+        if os.name == "nt":
+            import msvcrt
+            msvcrt.getch()
+        else:
+            input()
+    except (EOFError, KeyboardInterrupt, ImportError, OSError):
+        pass
+    print()
+
+
+def print_zones_ready(zones_path):
+    """Where the zones file is and what to do with it, on the way out."""
+    print()
+    print(f"{BOLD}The zones file is written and ready for your edits:{RESET}")
+    print(f"  {zones_path}")
+    print()
+    print("Open it in a text editor (Notepad++ is suggested), change the encoder")
+    print("parameters on the lines you want, and delete any line you do not want")
+    print("re-encoded. Then run AfterZone again to re-encode just those chunks.")
+    print()
+
+
+def megabytes(size):
+    """Size in MB the way Windows reports it, for the savings estimates."""
+    return f"{size / (1024.0 * 1024.0):,.0f}MB"
+
+
+def print_savings_estimate(region_bytes, file_size, label="these regions",
+                           reduction=0.5):
+    """'Halve these regions and the file gets this much smaller.'
+
+    The saving is measured from the encoded video bytes those regions actually
+    occupy, so it is what re-encoding them at `reduction` of their current
+    bitrate would hand back. file_size is the whole container, audio and all,
+    which is why the new size is the container minus the saving rather than a
+    figure derived from the video stream alone.
+    """
+    if region_bytes <= 0:
+        return
+    saved = region_bytes * reduction
+    print(f"If you reduce {label} to {int(round(reduction * 100))}% of their "
+          f"original bitrate it will save {megabytes(saved)}.")
+    if file_size > 0:
+        print(f"Total mkv current size: {megabytes(file_size)}   "
+              f"new size potential: {megabytes(max(0.0, file_size - saved))}")
+
+
 def human_bytes(size):
     step = float(size)
     for unit in ("B", "KiB", "MiB", "GiB", "TiB"):
@@ -249,6 +359,142 @@ def read_worker_count(tools_dir):
     except Exception:
         pass
     return 4
+
+
+def read_key_value_file(path):
+    """Parse a simple `key = value` text file. None when it cannot be read.
+
+    Lines that are blank, start with # or hold no '=' are ignored, so the files
+    written by this script can carry a plain-English header above their data.
+    """
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as handle:
+            text = handle.read()
+    except OSError:
+        return None
+    data = {}
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip().lower()
+        if key and " " not in key:
+            data[key] = value.strip()
+    return data
+
+
+# `set "custom-av1an-workers=8"`, including the reserved trailing spaces that
+# the .bat files keep after the closing quote.
+_BAT_SET_RE = re.compile(r'^set\s+"?([^=\s"]+)\s*=(.*?)"?\s*$', re.IGNORECASE)
+
+# The .bat that last ran an encode, remembered by name. AfterZone.bat runs
+# `del tools\bat*.txt` before this script starts, which takes the encode .bat's
+# own bat-used-*.txt marker with it, so this file deliberately does not start
+# with "bat" and therefore survives.
+LAST_BAT_RECORD = "afterzone-lastbat.txt"
+
+
+def read_bat_settings(bat_path):
+    """Every `set "key=value"` line of a .bat file, keyed by lowercased name."""
+    settings = {}
+    try:
+        with open(bat_path, "r", encoding="utf-8", errors="replace") as handle:
+            for raw in handle:
+                line = raw.strip()
+                if not line or line.startswith("::") or line.lower().startswith("rem "):
+                    continue
+                match = _BAT_SET_RE.match(line)
+                if match:
+                    settings[match.group(1).strip().lower()] = match.group(2).strip()
+    except OSError:
+        pass
+    return settings
+
+
+def remember_last_encode_bat(tools_dir, bat_name):
+    """Record which .bat ran the encode, for runs where the marker is gone."""
+    path = os.path.join(tools_dir, LAST_BAT_RECORD)
+    if (read_key_value_file(path) or {}).get("bat") == bat_name:
+        return
+    try:
+        with open(path, "w", encoding="utf-8", newline="\r\n") as handle:
+            handle.write("\n".join([
+                "# Written by AfterZone.py - the .bat that last ran an encode.",
+                "# AfterZone reads that .bat's custom-av1an-workers value so it",
+                "# encodes with the same worker count the encode itself used.",
+                "# It is kept here because AfterZone.bat runs `del tools\\bat*.txt`",
+                "# before AfterZone starts, which removes the .bat's own marker.",
+                "",
+                f"bat = {bat_name}",
+                "",
+            ]))
+    except OSError:
+        pass
+
+
+def find_last_encode_bat(tools_dir, root_dir):
+    """The .bat that ran the encode, plus a short note on how it was found.
+
+    Every .bat here drops a tools\\bat-used-<name>.bat.txt marker as it starts,
+    so the newest marker names the .bat that ran last. AfterZone.bat drops one
+    too (av1an-tag.py needs it to find the encoder-settings lines), so its own
+    marker is skipped. Returns (None, "") when nothing identifies a .bat.
+    """
+    markers = glob.glob(os.path.join(tools_dir, "bat-used-*.txt"))
+    markers.sort(key=lambda path: os.path.getmtime(path), reverse=True)
+    for marker in markers:
+        name = os.path.basename(marker)
+        bat_name = name[len("bat-used-"):-len(".txt")]
+        if not bat_name or bat_name.lower() == "afterzone.bat":
+            continue
+        bat_path = os.path.join(root_dir, bat_name)
+        if os.path.isfile(bat_path):
+            remember_last_encode_bat(tools_dir, bat_name)
+            return bat_path, f"named by tools\\{name}"
+
+    remembered = (read_key_value_file(os.path.join(tools_dir, LAST_BAT_RECORD))
+                  or {}).get("bat", "")
+    if remembered:
+        bat_path = os.path.join(root_dir, remembered)
+        if os.path.isfile(bat_path):
+            return bat_path, f"remembered in tools\\{LAST_BAT_RECORD}"
+
+    # No marker survived. Only an unambiguous folder can name the .bat now:
+    # with exactly one encode .bat present there is nothing to confuse it with.
+    candidates = [path for path in sorted(glob.glob(os.path.join(root_dir, "*.bat")))
+                  if os.path.basename(path).lower() not in ("afterzone.bat",
+                                                            "bat-builder.bat")]
+    if len(candidates) == 1:
+        return candidates[0], "the only encode .bat in the package folder"
+    return None, ""
+
+
+def resolve_worker_count(tools_dir, root_dir):
+    """The worker count to run av1an with, and where it came from.
+
+    Mirrors what the .bat files themselves do: read
+    tools\\workercount-config.txt, then let a custom-av1an-workers value written
+    by the one-time optimization benchmark override it. Following the same
+    order means AfterZone encodes with the worker count the original encode
+    was tuned for instead of the shared default.
+    """
+    workers = read_worker_count(tools_dir)
+    source = "tools\\workercount-config.txt"
+
+    bat_path, note = find_last_encode_bat(tools_dir, root_dir)
+    if bat_path:
+        settings = read_bat_settings(bat_path)
+        digits = re.search(r"\d+", settings.get("custom-av1an-workers") or "")
+        if digits:
+            workers = max(1, int(digits.group(0)))
+            source = (f"custom-av1an-workers in "
+                      f"{os.path.basename(bat_path)} ({note})")
+        else:
+            source = (f"tools\\workercount-config.txt "
+                      f"({os.path.basename(bat_path)}, {note}, has no "
+                      f"optimized worker count)")
+    return workers, source
 
 
 def svt_av1_version(tools_dir):
@@ -579,6 +825,53 @@ def find_encoded_output(video_output_dir, stem):
     return matches[0] if matches else None
 
 
+def frame_size_cache_path(temp_dir, stem):
+    """Where a probe result is kept between runs. Same naming rules as markers,
+    so a stem with characters Windows rejects still produces a usable name."""
+    return os.path.join(temp_dir,
+                        f"afterzone-framesizes-{marker_safe_name(stem)}.json")
+
+
+def load_frame_sizes(cache_path, encoded):
+    """Frame sizes from an earlier probe, if they still describe `encoded`.
+
+    Probing a feature length encode takes minutes, and the second run (the one
+    that reads the edited zones file) needs exactly the same numbers the first
+    run measured. Anything that does not match the file on disk byte for byte is
+    treated as a miss, so a re-encoded or replaced output is never scored
+    against stale measurements.
+    """
+    try:
+        stat = os.stat(encoded)
+        with open(cache_path, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    if (data.get("file") != os.path.basename(encoded)
+            or int(data.get("bytes") or -1) != stat.st_size
+            or int(data.get("mtime") or -1) != int(stat.st_mtime)):
+        return None
+    sizes = data.get("sizes")
+    if not isinstance(sizes, list) or not sizes:
+        return None
+    return sizes
+
+
+def save_frame_sizes(cache_path, encoded, sizes):
+    """Cache a probe result. Failure is silent: it only costs a re-probe."""
+    try:
+        stat = os.stat(encoded)
+        with open(cache_path, "w", encoding="utf-8") as handle:
+            json.dump({"file": os.path.basename(encoded),
+                       "bytes": stat.st_size,
+                       "mtime": int(stat.st_mtime),
+                       "sizes": sizes}, handle)
+    except (OSError, ValueError, TypeError):
+        pass
+
+
 def probe_frame_sizes(ffprobe, path):
     """Return per-frame compressed sizes in presentation order, via ffprobe packets."""
     cmd = [
@@ -687,6 +980,56 @@ def find_high_bitrate_runs(smoothed, threshold, min_len, merge_gap):
     return [run for run in merged if run[1] - run[0] >= min_len]
 
 
+def chunk_frame_window(chunk, count, frame_scale):
+    """The slice of the measured frame sizes that belongs to one chunk."""
+    low = int(round(chunk["start_frame"] / frame_scale))
+    high = int(round(chunk["end_frame"] / frame_scale))
+    low = max(0, min(count, low))
+    high = max(low + 1, min(count, high))
+    return low, high
+
+
+def chunks_encoded_bytes(picked, sizes, frame_scale):
+    """Encoded bytes and frame count occupied by a set of ranked chunks.
+
+    Overlapping chunks would double count, but av1an chunks never overlap, so
+    summing each window is exact.
+    """
+    total_bytes = 0.0
+    total_frames = 0
+    for _mean_size, chunk in picked:
+        low, high = chunk_frame_window(chunk, len(sizes), frame_scale)
+        total_bytes += sum(sizes[low:high])
+        total_frames += high - low
+    return total_bytes, total_frames
+
+
+def spans_encoded_bytes(spans, sizes, frame_scale):
+    """Encoded bytes and frame count covered by a list of source frame spans.
+
+    Spans are merged first: zone lines are user-editable and two of them may
+    overlap, which would otherwise count the shared frames twice and overstate
+    the saving.
+    """
+    ordered = sorted([int(start), int(end)] for start, end in spans if end > start)
+    merged = []
+    for span in ordered:
+        if merged and span[0] <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], span[1])
+        else:
+            merged.append(span)
+
+    count = len(sizes)
+    total_bytes = 0.0
+    total_frames = 0
+    for start, end in merged:
+        low = max(0, min(count, int(round(start / frame_scale))))
+        high = max(low, min(count, int(round(end / frame_scale))))
+        total_bytes += sum(sizes[low:high])
+        total_frames += high - low
+    return total_bytes, total_frames
+
+
 def rank_chunks_by_bitrate(chunks, sizes, frame_scale):
     """Every chunk with its mean bytes-per-frame, most expensive first.
 
@@ -696,10 +1039,7 @@ def rank_chunks_by_bitrate(chunks, sizes, frame_scale):
     count = len(sizes)
     ranked = []
     for chunk in chunks:
-        low = int(round(chunk["start_frame"] / frame_scale))
-        high = int(round(chunk["end_frame"] / frame_scale))
-        low = max(0, min(count, low))
-        high = max(low + 1, min(count, high))
+        low, high = chunk_frame_window(chunk, count, frame_scale)
         window = sizes[low:high]
         if not window:
             continue
@@ -708,10 +1048,15 @@ def rank_chunks_by_bitrate(chunks, sizes, frame_scale):
     return ranked
 
 
-def top_scene_spans(ranked, count):
-    """Frame spans for the N most expensive chunks, adjacent ones merged."""
+def merge_chunk_spans(entries):
+    """Frame spans for a set of ranked chunks, adjacent ones merged.
+
+    Merging matters because expensive scenes cluster: twelve consecutive chunks
+    written as twelve zone lines would put a keyframe at every boundary, where
+    one line over the whole run does not.
+    """
     picked = sorted([chunk["start_frame"], chunk["end_frame"]]
-                    for _mean, chunk in ranked[:count])
+                    for _mean, chunk in entries)
     merged = []
     for span in picked:
         if merged and span[0] <= merged[-1][1]:
@@ -721,13 +1066,24 @@ def top_scene_spans(ranked, count):
     return merged
 
 
-def print_scene_map(ranked, reference, fps, to_kbps, limit=12):
+def top_scene_spans(ranked, count):
+    """Frame spans for the N most expensive chunks, adjacent ones merged."""
+    return merge_chunk_spans(ranked[:count])
+
+
+def print_scene_map(ranked, reference, fps, to_kbps, sizes, frame_scale,
+                    file_size, limit=12):
     """List the most expensive scenes with the frame range each one occupies.
 
     This is the table you need to hand-write a zones.txt. Ranges that line up
     with these boundaries re-encode exactly one scene each; ranges that do not
     split the chunks they land in, which costs the rest of those chunks a
     re-encode at their original parameters.
+
+    The savings line under the table answers the question the table always
+    raises next: the top scenes are expensive, but is zoning them worth the
+    re-encode at all? A file where the worst twelve scenes are 40 MB of a 1.4 GB
+    encode is not worth zoning, and that is only obvious once it is stated.
     """
     if not ranked:
         return
@@ -741,6 +1097,15 @@ def print_scene_map(ranked, reference, fps, to_kbps, limit=12):
               f"{mean_size * to_kbps:>8,.0f} kbps  {mean_size / reference:>6.1f}x")
     if len(ranked) > limit:
         print(f"       ... and {len(ranked) - limit} more scene(s), lower bitrate.")
+    print()
+    # Measured over every scene, not the abridged dozen above: the table is cut
+    # short to keep it readable, and an estimate that silently covered only the
+    # visible rows would understate the file by an order of magnitude.
+    region_bytes, region_frames = chunks_encoded_bytes(ranked, sizes, frame_scale)
+    print(f"The table is abridged. This estimate covers all {len(ranked):,} "
+          f"scene(s)")
+    print(f"({region_frames:,} frames), not just the {len(shown)} shown above.")
+    print_savings_estimate(region_bytes, file_size)
     print()
     print("Ranges that match the frame numbers above re-encode exactly those scenes.")
     print("Any other range is fine too: the chunks it starts or ends inside are split")
@@ -884,8 +1249,143 @@ def write_bitrate_png(path, smoothed, fps, median_size, threshold, spans, frame_
         return None
 
 
+def write_zones_file(zones_path, spans, chunks, job, encoded, fps, reference,
+                     peak, to_kbps, source_note, chunk_aligned=False):
+    """Write zone lines covering `spans`, replacing whatever was there.
+
+    Each line repeats the parameters the range was already encoded with, so the
+    file is a starting point to edit rather than something to run as-is.
+    `chunk_aligned` only changes the header comment: spans picked per scene sit
+    on chunk boundaries and never split anything, which is worth saying because
+    the splitting note otherwise reads as a warning that does not apply.
+    """
+    if chunk_aligned:
+        range_note = [
+            "# Ranges are whole av1an chunks (scenes), so nothing gets split:",
+            "# each range re-encodes exactly the scenes it covers. end_frame is",
+            "# exclusive.",
+        ]
+    else:
+        range_note = [
+            "# Ranges are the exact frames the bitrate stayed high. end_frame is",
+            "# exclusive. A range that starts or ends inside an av1an chunk splits that",
+            "# chunk, so only these frames get the parameters below -- but the rest of a",
+            "# split chunk is re-encoded too (with its original parameters), because the",
+            "# encoded chunk cannot be cut in half.",
+        ]
+    lines = [
+        f"# AfterZone auto-generated zones for {os.path.basename(job.source)}",
+        f"# Measured from: {os.path.basename(encoded)}",
+        f"# Typical bitrate {reference * to_kbps:,.0f} kbps "
+        f"(median of the 1 second average); peak {peak * to_kbps:,.0f} kbps.",
+        f"# Ranges below were selected by: {source_note}.",
+        "#",
+        *range_note,
+        "#",
+        "# EDIT THE PARAMETERS BELOW BEFORE RUNNING AfterZone AGAIN.",
+        "# Each line currently repeats the settings the range was already encoded",
+        "# with, so running as-is would re-encode it to the same thing. Change the",
+        "# values you want different, e.g. raise --crf to spend fewer bits here or",
+        "# lower it to spend more. You only need to list the flags you are changing;",
+        "# anything you leave out keeps its original value.",
+        "#",
+        "# Delete any line you do not want re-encoded.",
+        "",
+    ]
+    for start, end in spans:
+        base = []
+        for chunk in chunks:
+            if chunk["start_frame"] <= start < chunk["end_frame"]:
+                base = [str(token) for token in chunk.get("video_params") or []]
+                break
+        lines.append(f"# frames {start}-{end}  ({frames_to_timecode(start, fps)} - "
+                     f"{frames_to_timecode(end, fps)})")
+        lines.append(f"{start} {end} svt-av1 {' '.join(base)}".rstrip())
+    lines.append("")
+
+    with open(zones_path, "w", encoding="utf-8", newline="\r\n") as handle:
+        handle.write("\n".join(lines))
+
+
+def custom_threshold_prompt(ranked, sizes, frame_scale, file_size, to_kbps,
+                            reference, fps, zones_path, apply_threshold):
+    """Try bitrate thresholds, see what each would save, and optionally apply one.
+
+    Nothing is re-encoded here. A zones file has already been written by the
+    time this runs, so the threshold the user tries is measured and shown first
+    and only replaces that file if they say so: the point is to answer 'what
+    would this cost me' before committing, not to keep regenerating the file.
+
+    `apply_threshold(picked, kbps)` rewrites the zones file (and the plot) for
+    the scenes at or above `kbps`. It lives with the caller because it needs the
+    encode's chunk list and smoothed curve, neither of which this prompt has.
+    """
+    global _ended_on_prompt
+    _ended_on_prompt = True
+    while True:
+        print("Press enter to exit. Or press 1 to set a custom bitrate threshold "
+              "for zones")
+        try:
+            answer = input("> ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return
+        if not answer:
+            return
+        if answer != "1":
+            print(f"{YELLOW}Press Enter to exit, or 1 to set a custom bitrate "
+                  f"threshold.{RESET}")
+            print()
+            continue
+
+        # Stay in here while the user tries thresholds, so 'try a different one'
+        # does not make them walk back through the outer prompt every time.
+        while True:
+            print()
+            kbps = ask_kbps("Bitrate threshold in kbps (for example 8000): ")
+            print()
+            if kbps is None:
+                break
+
+            cutoff = (kbps / to_kbps) if to_kbps else 0.0
+            picked = [entry for entry in ranked if entry[0] >= cutoff]
+            if not picked:
+                highest = ranked[0][0] * to_kbps if ranked else 0.0
+                print(f"{YELLOW}No scene averages {kbps:,.0f} kbps or more. The "
+                      f"most expensive one is {highest:,.0f} kbps.{RESET}")
+                continue
+
+            region_bytes, region_frames = chunks_encoded_bytes(picked, sizes,
+                                                               frame_scale)
+            typical = reference * to_kbps
+            print(f"{len(picked)} scene(s) average {kbps:,.0f} kbps or more"
+                  + (f" ({kbps / typical:.1f}x typical)" if typical > 0 else "")
+                  + f", {region_frames:,} frames "
+                    f"({frames_to_timecode(region_frames * frame_scale, fps)}).")
+            print_savings_estimate(region_bytes, file_size)
+            print()
+            print(f"  {BOLD}1{RESET} - Apply this threshold "
+                  f"(rewrite the zones file with these {len(picked)} scene(s))")
+            print(f"  {BOLD}2{RESET} - Keep the zones AfterZone already wrote")
+            print(f"  {BOLD}3{RESET} - Select a new threshold")
+            print()
+            choice = ask("Enter 1, 2 or 3: ", {"1", "2", "3"})
+            print()
+            if choice == "3":
+                continue
+            if choice == "2":
+                print("Keeping the zones AfterZone wrote. Nothing was changed.")
+            else:
+                apply_threshold(picked, kbps)
+            # Both paths leave a zones file behind and then end the run, and the
+            # .bat will not pause after this one, so say where it is and wait.
+            print_zones_ready(zones_path)
+            press_any_key()
+            return
+
+
 def generate_zones_file(job, chunks, total_frames, fps, zones_path,
-                        video_output_dir, ffprobe):
+                        video_output_dir, ffprobe, temp_dir):
     """Analyse the finished encode and write a zones.txt the user can edit."""
     encoded = find_encoded_output(video_output_dir, job.stem)
     if not encoded:
@@ -918,6 +1418,9 @@ def generate_zones_file(job, chunks, total_frames, fps, zones_path,
 
     sizes = probe_frame_sizes(ffprobe, encoded)
     print(f"Read {len(sizes):,} video frames.")
+    # Kept so the run that reads the edited zones file can price it instantly
+    # instead of probing the same encode a second time.
+    save_frame_sizes(frame_size_cache_path(temp_dir, job.stem), encoded, sizes)
 
     # The encode should have the same frame count as the chunk list, but stay
     # correct if it does not (VFR sources, stray packets).
@@ -973,8 +1476,13 @@ def generate_zones_file(job, chunks, total_frames, fps, zones_path,
                                       min_len, merge_gap)
         return scale_runs_to_frames(runs, total_frames, frame_scale)
 
+    try:
+        file_size = os.path.getsize(encoded)
+    except OSError:
+        file_size = 0          # savings still print, just without a total
+
     ranked = rank_chunks_by_bitrate(chunks, sizes, frame_scale)
-    print_scene_map(ranked, reference, fps, to_kbps)
+    print_scene_map(ranked, reference, fps, to_kbps, sizes, frame_scale, file_size)
 
     def offer_top_scenes(count=3):
         """Fallback that always produces something usable to start from."""
@@ -1111,48 +1619,16 @@ def generate_zones_file(job, chunks, total_frames, fps, zones_path,
                             frame_scale, factor) or png
 
     covered = sum(end - start for start, end in spans)
-    lines = [
-        f"# AfterZone auto-generated zones for {os.path.basename(job.source)}",
-        f"# Measured from: {os.path.basename(encoded)}",
-        f"# Typical bitrate {reference * to_kbps:,.0f} kbps "
-        f"(median of the 1 second average); peak {peak * to_kbps:,.0f} kbps.",
-        f"# Ranges below were selected by: {source_note}.",
-        "#",
-        "# Ranges are the exact frames the bitrate stayed high. end_frame is",
-        "# exclusive. A range that starts or ends inside an av1an chunk splits that",
-        "# chunk, so only these frames get the parameters below -- but the rest of a",
-        "# split chunk is re-encoded too (with its original parameters), because the",
-        "# encoded chunk cannot be cut in half.",
-        "#",
-        "# EDIT THE PARAMETERS BELOW BEFORE RUNNING AfterZone AGAIN.",
-        "# Each line currently repeats the settings the range was already encoded",
-        "# with, so running as-is would re-encode it to the same thing. Change the",
-        "# values you want different, e.g. raise --crf to spend fewer bits here or",
-        "# lower it to spend more. You only need to list the flags you are changing;",
-        "# anything you leave out keeps its original value.",
-        "#",
-        "# Delete any line you do not want re-encoded.",
-        "",
-    ]
-    for start, end in spans:
-        base = []
-        for chunk in chunks:
-            if chunk["start_frame"] <= start < chunk["end_frame"]:
-                base = [str(token) for token in chunk.get("video_params") or []]
-                break
-        lines.append(f"# frames {start}-{end}  ({frames_to_timecode(start, fps)} - "
-                     f"{frames_to_timecode(end, fps)})")
-        lines.append(f"{start} {end} svt-av1 {' '.join(base)}".rstrip())
-    lines.append("")
-
-    with open(zones_path, "w", encoding="utf-8", newline="\r\n") as handle:
-        handle.write("\n".join(lines))
+    write_zones_file(zones_path, spans, chunks, job, encoded, fps, reference,
+                     peak, to_kbps, source_note)
 
     hr()
     print(f"{GREEN}Wrote {zones_path}{RESET}")
     print(f"  {len(spans)} zone(s) from {source_note}, covering {covered:,} of "
           f"{total_frames:,} frames "
           f"({covered * 100.0 / max(1, total_frames):.1f}% of the video).")
+    zone_bytes, _zone_frames = spans_encoded_bytes(spans, sizes, frame_scale)
+    print_savings_estimate(zone_bytes, file_size, label="these zones")
     if png:
         print(f"{GREEN}Bitrate plot saved to:{RESET} {png}")
         print("  The selected zones are shaded on it, so you can check they line up")
@@ -1172,6 +1648,34 @@ def generate_zones_file(job, chunks, total_frames, fps, zones_path,
         print("     delete the lines you do not want re-encoded.")
         print("  3. Run AfterZone again to re-encode just those chunks.")
     print()
+    print()
+
+    def apply_threshold(picked, kbps):
+        """Replace the zones file with the scenes at or above `kbps`."""
+        new_spans = merge_chunk_spans(picked)
+        new_covered = sum(end - start for start, end in new_spans)
+        note = f"scenes averaging {kbps:,.0f} kbps or more"
+        write_zones_file(zones_path, new_spans, chunks, job, encoded, fps,
+                         reference, peak, to_kbps, note, chunk_aligned=True)
+        # Zone edges here are chunk boundaries, so the shaded plot lines up with
+        # the scene table rather than with the smoothed curve's crossings.
+        new_png = write_bitrate_png(png_path, smoothed, fps, reference,
+                                    kbps / to_kbps if to_kbps else None,
+                                    new_spans, frame_scale,
+                                    kbps / (reference * to_kbps) if to_kbps else None)
+        hr()
+        print(f"{GREEN}Rewrote {zones_path}{RESET}")
+        print(f"  {len(new_spans)} zone(s) from {note}, covering {new_covered:,} "
+              f"of {total_frames:,} frames "
+              f"({new_covered * 100.0 / max(1, total_frames):.1f}% of the video).")
+        new_bytes, _new_frames = spans_encoded_bytes(new_spans, sizes, frame_scale)
+        print_savings_estimate(new_bytes, file_size, label="these zones")
+        if new_png:
+            print(f"{GREEN}Bitrate plot updated:{RESET} {new_png}")
+        hr()
+
+    custom_threshold_prompt(ranked, sizes, frame_scale, file_size, to_kbps,
+                            reference, fps, zones_path, apply_threshold)
     return zones_path
 
 
@@ -1527,6 +2031,59 @@ def print_plan(job, plan, chunks, done_map, fps, total_frames):
     hr()
 
 
+def print_zone_savings(zones, total_frames, fps, video_output_dir, stem, ffprobe,
+                       cache_path):
+    """Price the zones read from an edited zones.txt, before anything is touched.
+
+    This is the second-run counterpart to the estimate printed when the file was
+    generated: the zone lines may have been edited or deleted since, so the
+    numbers are recomputed from whatever is in the file now.
+
+    Never fatal. A missing encode, a failed probe or an unreadable cache only
+    costs the estimate -- the re-encode itself does not depend on any of it.
+    """
+    encoded = find_encoded_output(video_output_dir, stem)
+    if not encoded:
+        return
+    try:
+        file_size = os.path.getsize(encoded)
+    except OSError:
+        return
+
+    sizes = load_frame_sizes(cache_path, encoded)
+    if sizes is None:
+        print()
+        print(f"Measuring {os.path.basename(encoded)} to estimate the size change.")
+        print("This only reads the file, and the result is cached for next time.")
+        try:
+            sizes = probe_frame_sizes(ffprobe, encoded)
+        except (SystemExit, OSError, ValueError):
+            print(f"{YELLOW}[AfterZone] Could not measure the encode; skipping the "
+                  f"size estimate.{RESET}")
+            return
+        save_frame_sizes(cache_path, encoded, sizes)
+    if not sizes:
+        return
+
+    frame_scale = 1.0
+    if len(sizes) != total_frames:
+        frame_scale = total_frames / float(len(sizes))
+
+    zone_bytes, zone_frames = spans_encoded_bytes(
+        [(zone.start, zone.end) for zone in zones], sizes, frame_scale)
+    if zone_bytes <= 0:
+        return
+
+    print()
+    print(f"{BOLD}Size estimate{RESET}")
+    print(f"The {len(zones)} zone(s) cover {zone_frames:,} frames "
+          f"({frames_to_timecode(zone_frames * frame_scale, fps)}) and hold "
+          f"{megabytes(zone_bytes)} of the current encode.")
+    print_savings_estimate(zone_bytes, file_size, label="these zones")
+    print("How much you actually save depends on the parameters on those lines;")
+    print("50% is shown as a reference point, not a prediction.")
+
+
 # ---------------------------------------------------------------------------
 # applying the plan
 # ---------------------------------------------------------------------------
@@ -1824,8 +2381,20 @@ def run_av1an(job, av1an_exe, temp_dir, video_input_dir, workers, video_params):
                 subprocess.check_call(cmd, cwd=job.work_dir)
         else:
             subprocess.check_call(cmd, cwd=job.work_dir)
+    except KeyboardInterrupt:
+        # The marker in temp\ is deliberately left in place: it is what makes
+        # the next run skip planning and resume this encode instead.
+        print()
+        print(f"{YELLOW}[AfterZone] Interrupted. Finished chunks are kept, so run "
+              f"AfterZone again to{RESET}")
+        print(f"{YELLOW}            carry on from the chunk it stopped at. Nothing "
+              f"needs to be redone.{RESET}")
+        sys.exit(1)
     except subprocess.CalledProcessError as exc:
         die(f"av1an failed with exit code {exc.returncode}.\n"
+            f"            Finished chunks are kept, so running AfterZone again "
+            f"resumes this\n"
+            f"            encode instead of starting over.\n"
             f"            Your original chunks are in "
             f"{os.path.join(job.hash_dir, 'afterzone-backup')}")
     elapsed = time.monotonic() - started
@@ -1835,7 +2404,9 @@ def run_av1an(job, av1an_exe, temp_dir, video_input_dir, workers, video_params):
 
 
 def read_encoding_settings_tag(mkv_path, tools_dir):
-    """Return the ENCODING_SETTINGS tag of an existing mkv, or None."""
+    """Return the Encoded_Library_Settings tag of an existing mkv, or None.
+    Files tagged before the rename still carry ENCODING_SETTINGS, so accept
+    either name."""
     mkvextract = os.path.join(tools_dir, "MKVToolNix", "mkvextract.exe")
     if not mkv_path or not os.path.exists(mkv_path) or not os.path.exists(mkvextract):
         return None
@@ -1859,7 +2430,7 @@ def read_encoding_settings_tag(mkv_path, tools_dir):
         return None
     for simple in root.iter("Simple"):
         name = (simple.findtext("Name") or "").strip().upper()
-        if name == "ENCODING_SETTINGS":
+        if name in ("ENCODED_LIBRARY_SETTINGS", "ENCODING_SETTINGS"):
             value = (simple.findtext("String") or "").strip()
             if value:
                 return value
@@ -1867,7 +2438,8 @@ def read_encoding_settings_tag(mkv_path, tools_dir):
 
 
 def apply_encoding_settings_tag(mkv_path, settings, tools_dir):
-    """Write settings into the video track's ENCODING_SETTINGS tag. True on success."""
+    """Write settings into the video track's Encoded_Library_Settings tag.
+    True on success."""
     mkvpropedit = os.path.join(tools_dir, "MKVToolNix", "mkvpropedit.exe")
     if not os.path.exists(mkvpropedit):
         return False
@@ -1875,7 +2447,7 @@ def apply_encoding_settings_tag(mkv_path, settings, tools_dir):
     xml = (
         '<?xml version="1.0"?>\n'
         "<Tags>\n  <Tag>\n    <Targets>\n      <TrackUID>1</TrackUID>\n"
-        "    </Targets>\n    <Simple>\n      <Name>ENCODING_SETTINGS</Name>\n"
+        "    </Targets>\n    <Simple>\n      <Name>Encoded_Library_Settings</Name>\n"
         f"      <String>{xml_escape(settings)}</String>\n"
         "    </Simple>\n  </Tag>\n</Tags>\n"
     )
@@ -1902,7 +2474,7 @@ def tag_and_mux(job, av1_path, tools_dir, temp_dir, video_output_dir):
     final = os.path.join(video_output_dir, f"{job.stem}-afterzone.mkv")
 
     # The encoder settings of this encode are the ones from the original run, so
-    # inherit the ENCODING_SETTINGS tag from the finished output instead of
+    # inherit the Encoded_Library_Settings tag from the finished output instead of
     # rebuilding it from whatever .bat happens to be marked as active now.
     reference = find_encoded_output(video_output_dir, job.stem)
     inherited = None
@@ -1959,6 +2531,273 @@ def tag_and_mux(job, av1_path, tools_dir, temp_dir, video_output_dir):
 
 
 # ---------------------------------------------------------------------------
+# the in-progress marker in temp\
+# ---------------------------------------------------------------------------
+
+# Written the moment AfterZone is about to touch chunks.json / done.json, and
+# removed only once the encode is muxed into video-output. Everything AfterZone
+# does to the av1an folder is a one-way edit -- chunks are renumbered, done.json
+# entries are dropped, .ivf files are moved aside -- so doing it twice to the
+# same folder would apply the zones on top of chunks that already have them and
+# renumber a chunk list that has already been renumbered. While the marker is
+# there, AfterZone therefore changes nothing at all and only runs av1an, which
+# resumes on its own from done.json.
+
+MARKER_PREFIX = "afterzone-active-"
+MARKER_SUFFIX = ".txt"
+MARKER_STAGE_APPLYING = "applying"     # json files are being rewritten
+MARKER_STAGE_ENCODING = "encoding"     # rewritten; av1an is running
+
+MARKER_FIELDS = ("stage", "input_file", "stem", "input_path", "zones_file",
+                 "output_file", "work_dir", "hash_dir", "av1an_temp",
+                 "av1an_output", "workers", "worker_source", "video_params",
+                 "chunks_total", "chunks_to_encode", "frames_total",
+                 "started", "resumed", "resumes", "pid")
+
+MARKER_HEADER = [
+    "# AfterZone is part way through an encode.",
+    "#",
+    "# This file exists only while AfterZone has already rewritten av1an's",
+    "# chunks.json / done.json and handed the job over to av1an. Start",
+    "# AfterZone again while it is here and it will modify nothing: it skips",
+    "# the zones file and the whole plan, and just runs av1an with --resume so",
+    "# the encode continues at the first chunk that is not finished yet.",
+    "#",
+    "# It is deleted automatically once the result is muxed into video-output.",
+    "# Delete it by hand only if you want AfterZone to plan this job from",
+    "# scratch again - your zones would then be applied a second time, on top",
+    "# of chunks that already have them.",
+    "",
+]
+
+
+def marker_safe_name(stem):
+    """A filename-safe version of the input stem, for the marker's own name."""
+    cleaned = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", stem).strip(" .")
+    return cleaned or "encode"
+
+
+def marker_path_for(temp_dir, stem):
+    return os.path.join(temp_dir,
+                        f"{MARKER_PREFIX}{marker_safe_name(stem)}{MARKER_SUFFIX}")
+
+
+def write_marker(path, data):
+    """Write the marker atomically, so a kill mid-write cannot truncate it."""
+    lines = list(MARKER_HEADER)
+    for key in MARKER_FIELDS:
+        if key in data:
+            lines.append(f"{key} = {data[key]}")
+    for key in sorted(set(data) - set(MARKER_FIELDS)):
+        lines.append(f"{key} = {data[key]}")
+    lines.append("")
+    temporary = path + ".tmp"
+    with open(temporary, "w", encoding="utf-8", newline="\r\n") as handle:
+        handle.write("\n".join(lines))
+    os.replace(temporary, path)
+
+
+def update_marker(path, **changes):
+    """Change some fields of an existing marker, keeping the rest."""
+    data = read_key_value_file(path) or {}
+    data.update({key: str(value) for key, value in changes.items()})
+    write_marker(path, data)
+
+
+def remove_marker(path):
+    try:
+        os.remove(path)
+    except OSError:
+        return False
+    return True
+
+
+def all_markers(temp_dir):
+    """Every readable marker in temp\\, as (path, fields)."""
+    found = []
+    pattern = os.path.join(temp_dir, f"{MARKER_PREFIX}*{MARKER_SUFFIX}")
+    for path in sorted(glob.glob(pattern)):
+        data = read_key_value_file(path)
+        if data and data.get("stem"):
+            found.append((path, data))
+    return found
+
+
+def find_marker(temp_dir, stem):
+    """The marker belonging to `stem`, or (None, None).
+
+    Matched on the stem recorded inside the file rather than on the file name,
+    so a name that had to be sanitized still finds its own marker.
+    """
+    for path, data in all_markers(temp_dir):
+        if data.get("stem", "").lower() == stem.lower():
+            return path, data
+    return None, None
+
+
+def build_marker_data(job, plan, zones_path, workers, worker_source,
+                      video_params, total_frames, stage):
+    return {
+        "stage": stage,
+        "input_file": os.path.basename(job.source),
+        "stem": job.stem,
+        "input_path": os.path.abspath(job.source),
+        "zones_file": os.path.abspath(zones_path),
+        "output_file": f"{job.stem}-afterzone.mkv",
+        "work_dir": os.path.abspath(job.work_dir),
+        "hash_dir": os.path.abspath(job.hash_dir),
+        "av1an_temp": os.path.basename(job.hash_dir),
+        "av1an_output": f"{job.stem}-av1.mkv",
+        "workers": str(workers),
+        "worker_source": worker_source,
+        "video_params": " ".join(video_params),
+        "chunks_total": str(len(plan.entries)),
+        "chunks_to_encode": str(len(plan.reencodes)),
+        "frames_total": str(total_frames),
+        "started": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "pid": str(os.getpid()),
+    }
+
+
+def describe_remaining(job):
+    """'12 of 480 chunks still to encode', or None if the json is unreadable."""
+    try:
+        with open(job.chunks_path, "r", encoding="utf-8") as handle:
+            chunks = json.load(handle)
+        with open(job.done_path, "r", encoding="utf-8") as handle:
+            done = json.load(handle)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(chunks, list):
+        return None
+    done_map = done.get("done") or {}
+    pending = sum(1 for chunk in chunks
+                  if f"{chunk.get('index', -1):05d}" not in done_map)
+    return f"{pending} of {len(chunks)} chunk(s) still to encode"
+
+
+def resume_encode(job, marker_path, marker, av1an_exe, tools_dir, temp_dir,
+                  video_input_dir, video_output_dir, fallback_workers):
+    """Continue an encode a previous run started, without changing any file.
+
+    No zones are read and no plan is built: chunks.json and done.json already
+    describe exactly what is left to do, which is what av1an --resume acts on.
+    """
+    hr()
+    print(f"{BOLD}Resuming the encode already in progress{RESET}")
+    hr()
+    print("A previous AfterZone run was interrupted while encoding this file.")
+    print(f"Marker: {marker_path}")
+    print()
+    print(f"  file started:  {marker.get('started', 'unknown')}")
+    if marker.get("resumed"):
+        print(f"  last resumed:  {marker.get('resumed')} "
+              f"(resume #{marker.get('resumes', '?')})")
+    print(f"  zones file:    {marker.get('zones_file', 'unknown')}")
+    print(f"  av1an folder:  {marker.get('hash_dir', 'unknown')}")
+    print(f"  planned:       {marker.get('chunks_to_encode', '?')} of "
+          f"{marker.get('chunks_total', '?')} chunk(s) to re-encode")
+    print()
+
+    # The marker names the folder that run was encoding into, which is the one
+    # to continue even if discovery would have preferred a different one.
+    hash_dir = marker.get("hash_dir") or ""
+    if hash_dir and os.path.isdir(hash_dir) and \
+            os.path.abspath(hash_dir) != os.path.abspath(job.hash_dir):
+        print(f"{YELLOW}[AfterZone] Using the av1an folder named in the marker "
+              f"instead of {job.hash_dir}{RESET}")
+        job.hash_dir = hash_dir
+        job.chunks_path = os.path.join(hash_dir, "chunks.json")
+        job.done_path = os.path.join(hash_dir, "done.json")
+        work_dir = marker.get("work_dir") or ""
+        job.work_dir = work_dir if os.path.isdir(work_dir) \
+            else os.path.dirname(hash_dir)
+
+    if not os.path.exists(job.chunks_path) or not os.path.exists(job.done_path):
+        print(f"{RED}[AfterZone] The av1an folder in the marker no longer has "
+              f"chunks.json / done.json:{RESET}")
+        print(f"            {job.hash_dir}")
+        print("            Nothing can be resumed. Delete the marker if that "
+              "encode is gone:")
+        print(f"            {marker_path}")
+        return None
+
+    remaining = describe_remaining(job)
+    if remaining:
+        print(f"Right now: {remaining}.")
+
+    if marker.get("stage") == MARKER_STAGE_APPLYING:
+        print()
+        print(f"{YELLOW}[AfterZone] The previous run stopped while it was still "
+              f"rewriting av1an's json{RESET}")
+        print(f"{YELLOW}            files, so the chunk list may be half "
+              f"renumbered.{RESET}")
+        print(f"{YELLOW}            The originals are in "
+              f"{os.path.join(job.hash_dir, 'afterzone-backup')} together with "
+              f"the{RESET}")
+        print(f"{YELLOW}            rename-map json describing what encode\\ was "
+              f"meant to look like.{RESET}")
+        print()
+        print("Continuing runs av1an on the folder exactly as it stands now. "
+              "That is safe")
+        print("in the sense that AfterZone still edits nothing, but the result "
+              "is only")
+        print("correct if the rewrite had finished.")
+        print()
+        if ask("Run av1an on the folder as it stands? [y/n]: ",
+               {"y", "n"}) != "y":
+            print("Nothing was changed. The marker is still there, so this "
+                  "encode can be")
+            print("resumed later.")
+            return None
+        print()
+
+    digits = re.search(r"\d+", marker.get("workers") or "")
+    workers = max(1, int(digits.group(0))) if digits else fallback_workers
+    video_params = (marker.get("video_params") or "").split()
+
+    print()
+    print(f"{GREEN}[AfterZone] Nothing on disk is being changed. av1an is being "
+          f"restarted with{RESET}")
+    print(f"{GREEN}            --resume, so it continues at the first chunk "
+          f"that is not done.{RESET}")
+    print(f"[AfterZone] Workers: {workers} (as recorded when this encode "
+          f"started)")
+
+    update_marker(marker_path,
+                  stage=MARKER_STAGE_ENCODING,
+                  resumed=time.strftime("%Y-%m-%d %H:%M:%S"),
+                  resumes=int(re.sub(r"\D", "", marker.get("resumes") or "0")
+                              or 0) + 1,
+                  pid=os.getpid())
+
+    av1_path = run_av1an(job, av1an_exe, temp_dir, video_input_dir, workers,
+                         video_params)
+    final = tag_and_mux(job, av1_path, tools_dir, temp_dir, video_output_dir)
+    remove_marker(marker_path)
+    return final
+
+
+def report_stale_markers(temp_dir, jobs):
+    """Warn about markers whose input video is no longer in video-input."""
+    stems = {job.stem.lower() for job in jobs}
+    stale = [(path, data) for path, data in all_markers(temp_dir)
+             if data.get("stem", "").lower() not in stems]
+    if not stale:
+        return
+    print(f"{YELLOW}[AfterZone] {len(stale)} interrupted encode(s) are recorded "
+          f"in temp\\, but their input{RESET}")
+    print(f"{YELLOW}            file is not in video-input any more:{RESET}")
+    for path, data in stale:
+        print(f"  {data.get('input_file', '?')}  ->  {os.path.basename(path)}")
+    print("            Put the input file back under the name it had to "
+          "resume it, or")
+    print("            delete the marker if that encode is not wanted any "
+          "more.")
+    print()
+
+
+# ---------------------------------------------------------------------------
 # main
 # ---------------------------------------------------------------------------
 
@@ -1988,6 +2827,10 @@ def print_intro(fork):
     print()
     print("Output is written to video-output as <name>-afterzone.mkv. Your original")
     print("<name>-output.mkv is left alone so you can compare the two.")
+    print()
+    print("Closing this window during an encode is safe. AfterZone leaves a marker in")
+    print("temp\\ while av1an is running, and the next run finds it, changes nothing,")
+    print("and just restarts av1an so it resumes where it left off.")
     hr()
     print()
 
@@ -2027,6 +2870,7 @@ def main():
     print_intro(svt_av1_version(tools_dir))
 
     jobs, sources, orphans = discover_jobs(video_input_dir, temp_dir)
+    report_stale_markers(temp_dir, jobs)
     if not jobs:
         print(f"{RED}[AfterZone] No finished av1an encode found to work with.{RESET}")
         print()
@@ -2069,13 +2913,35 @@ def main():
             print(f"  {os.path.basename(job.source)}")
         print()
 
-    workers = read_worker_count(tools_dir)
+    workers, worker_source = resolve_worker_count(tools_dir, root_dir)
+    print(f"Encode workers: {workers}  (from {worker_source})")
+    print()
     processed = []
 
     for job in jobs:
         hr()
         print(f"{BOLD}{os.path.basename(job.source)}{RESET}")
         hr()
+
+        # An unfinished encode from a previous run takes priority over
+        # everything else: the json files were already rewritten for it, so the
+        # only correct thing to do is hand it back to av1an untouched.
+        marker_path, marker = find_marker(temp_dir, job.stem)
+        if marker:
+            final = resume_encode(job, marker_path, marker, av1an_exe, tools_dir,
+                                  temp_dir, video_input_dir, video_output_dir,
+                                  workers)
+            if final:
+                processed.append(final)
+                hr()
+                print(f"{GREEN}Done: {final}{RESET}")
+                print(f"Original encode is untouched at "
+                      f"{os.path.join(video_output_dir, job.stem + '-output.mkv')}")
+                print(f"Replaced chunks are kept in "
+                      f"{os.path.join(job.hash_dir, 'afterzone-backup')}")
+                print("Delete that folder once you are happy with the result.")
+                hr()
+            continue
 
         try:
             with open(job.chunks_path, "r", encoding="utf-8") as handle:
@@ -2125,7 +2991,7 @@ def main():
                       "and run AfterZone again.")
                 continue
             generate_zones_file(job, chunks, total_frames, fps, zones_path,
-                                video_output_dir, ffprobe_exe)
+                                video_output_dir, ffprobe_exe, temp_dir)
             continue
 
         print(f"Zones file: {zones_path}")
@@ -2152,15 +3018,38 @@ def main():
             continue
 
         print_plan(job, plan, chunks, done_map, fps, total_frames)
+        print_zone_savings(zones, total_frames, fps, video_output_dir, job.stem,
+                           ffprobe_exe, frame_size_cache_path(temp_dir, job.stem))
+        print()
         if ask("Proceed and re-encode these chunks? [y/n]: ", {"y", "n"}) != "y":
             print("Nothing was changed. Exiting.")
             continue
         print()
 
+        video_params = baseline_video_params(plan)
+
+        # Written before the first edit, not after it: from here on the av1an
+        # folder is part way through being converted, and the marker is what
+        # stops a second run planning it all over again.
+        marker_path = marker_path_for(temp_dir, job.stem)
+        write_marker(marker_path,
+                     build_marker_data(job, plan, zones_path, workers,
+                                       worker_source, video_params, total_frames,
+                                       MARKER_STAGE_APPLYING))
+        print(f"[AfterZone] Wrote {os.path.join('temp', os.path.basename(marker_path))}")
+        print("            While that file exists AfterZone changes nothing: close "
+              "this window")
+        print("            during the encode and the next run just restarts av1an, "
+              "which")
+        print("            resumes at the first chunk that is not finished.")
+        print()
+
         apply_plan(job, plan, done_data)
+        update_marker(marker_path, stage=MARKER_STAGE_ENCODING)
         av1_path = run_av1an(job, av1an_exe, temp_dir, video_input_dir, workers,
-                             baseline_video_params(plan))
+                             video_params)
         final = tag_and_mux(job, av1_path, tools_dir, temp_dir, video_output_dir)
+        remove_marker(marker_path)
         processed.append(final)
 
         hr()
@@ -2177,6 +3066,10 @@ def main():
         print(f"{GREEN}{BOLD}AfterZone finished.{RESET}")
         for path in processed:
             print(f"  {path}")
+    elif _ended_on_prompt:
+        # Nothing was re-encoded and the user has already pressed Enter to leave
+        # the threshold prompt; tell the .bat not to ask again.
+        sys.exit(ALREADY_PAUSED_EXIT)
 
 
 if __name__ == "__main__":

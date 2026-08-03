@@ -1,54 +1,44 @@
 @echo off
-echo Place your mkv file in this folder and run this. It will create a 90 second
-echo sample mkv you can use for testing different encode settings
-pause
 setlocal
 
-:: --- Configuration ---
-:: Set relative path to mkvmerge from this script's location
-set "MKVMERGE=%~dp0..\tools\MKVToolNix\mkvmerge.exe"
-
-:: --- Check if mkvmerge exists ---
-if not exist "%MKVMERGE%" (
-    echo [ERROR] Could not find mkvmerge at:
-    echo "%MKVMERGE%"
-    echo Please verify the folder structure.
-    pause
-    exit /b
-)
-
-:: --- Find the first MKV file in the current directory ---
-set "INPUT_FILE="
-for %%f in ("%~dp0*.mkv") do (
-    set "INPUT_FILE=%%f"
-    goto :FoundFile
-)
-
-:FoundFile
-if "%INPUT_FILE%"=="" (
-    echo [ERROR] No .mkv files found in this folder.
-    pause
-    exit /b
-)
-
-:: --- Set Output Filename ---
-:: Creates "sample_[original_name].mkv"
-for %%F in ("%INPUT_FILE%") do set "OUTPUT_FILE=%~dp0sample_%%~nxF"
-
-echo Processing: "%INPUT_FILE%"
-echo Using: "%MKVMERGE%"
+echo Place your mkv file in this folder and run this. It will create a short
+echo sample mkv (video only) you can use for testing different encode settings.
 echo.
 
-:: --- Run mkvmerge ---
-:: --no-audio: drops audio tracks
-:: --split parts:00:00:00-00:01:30: keeps the first 90 seconds
-"%MKVMERGE%" -o "%OUTPUT_FILE%" --no-audio --split parts:00:03:00-00:04:30 "%INPUT_FILE%"
+:: --- CONFIGURATION ---
 
-echo.
-if %ERRORLEVEL% EQU 0 (
-    echo [SUCCESS] Sample created: "%OUTPUT_FILE%"
-) else (
-    echo [FAILURE] Something went wrong.
+:: 1. Define the path to the portable Python executable
+:: We go up one level (..) from extras\ to find the VapourSynth folder
+set "PYTHON_EXE=%~dp0..\VapourSynth\python.exe"
+
+:: 2. Define the path to the Python script
+:: We go up one level (..) from extras\ to find the tools folder
+set "SCRIPT_PATH=%~dp0..\tools\create-sample.py"
+
+:: --- CHECKS ---
+
+:: Check if the portable Python exists
+if not exist "%PYTHON_EXE%" (
+    echo [ERROR] Could not find portable Python.
+    echo Expected location: "%PYTHON_EXE%"
+    pause
+    exit /b 1
 )
 
+:: Check if the Python script exists
+if not exist "%SCRIPT_PATH%" (
+    echo [ERROR] Could not find Python script.
+    echo Expected location: "%SCRIPT_PATH%"
+    pause
+    exit /b 1
+)
+
+:: --- EXECUTION ---
+
+:: Run from this folder so the script finds the mkv files sitting next to it
+pushd "%~dp0"
+"%PYTHON_EXE%" "%SCRIPT_PATH%"
+popd
+
+echo.
 pause

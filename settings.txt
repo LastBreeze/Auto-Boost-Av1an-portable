@@ -4,13 +4,10 @@
 # ntfy support is optional
 ntfy=d:\ntfy.txt
 
-# Automatic crop detection is enabled by batch files that pass --autocrop.
-# Manual crop values are used whenever crop=manual.
-# Mode options: auto, manual, off
+[crop]
 crop=auto
 
-# Manual Crop Values
-# Only used if crop=manual
+# Manual Crop Values. Only used if crop=manual
 # Subtracts pixels from the specific side
 top=0
 bottom=0
@@ -21,6 +18,34 @@ right=300
 # Downscaling will be performed after crop.
 # Options available: True, False
 downscale=False
+# Target Resolution (WidthxHeight) e.g.
+# 1920x1080
+# Or provide target width (recommended) and height is calculated for you.
+# Example: Source: 3840x1600, target: 1920, video will be 1900x800
+target_resolution=1920
+# Kernel Type (Choose from "Available Kernels")
+kernel_type=Spline36
+
+[denoise]
+denoise=True
+# Options available: True, False.
+# Anime setting example:
+denoise_setting=src = DFTTest().denoise(src, {0.00:0.30, 0.40:0.30, 0.60:0.60, 0.80:1.50, 1.00:2.00}, planes=[0, 1, 2])
+# Live action example (commented out):
+# denoise_setting=src = DFTTest(sigma=0.2).denoise(src)
+
+[deband]
+# Options available: True, False
+deband=False
+deband_setting=src = core.placebo.Deband(src, threshold=1.5, planes=1)
+
+# info
+# [crop]
+# Automatic crop detection is enabled by batch files that pass --autocrop.
+# Manual crop values are used whenever crop=manual.
+# Mode options: auto, manual, off
+#
+# [downscaling]
 # Available Kernels:
 #   hermite: Hermite-weighted averaging
 #   bilinear: Bilinear (triangle) averaging
@@ -35,25 +60,6 @@ downscale=False
 #   * Anime: Hermite
 #   * Live Action: Spline36
 #
-# Target Resolution (WidthxHeight) e.g.
-# 1920x1080
-# Or provide target width (recommended) and height is calculated for you.
-# Example: Source: 3840x1600, target: 1920, video will be 1900x800
-target_resolution=1920
-# Kernel Type (Choose from options above)
-kernel_type=Spline36
-
-[denoise]
-# Options available: True, False.
+# [denoise]
 # .bat files can overwrite this setting. This is useful for 5fish where a light denoise
 # is ideal due to the 5fish high level of detail retention
-denoise=True
-# Anime setting example:
-denoise_setting=src = DFTTest().denoise(src, {0.00:0.30, 0.40:0.30, 0.60:0.60, 0.80:1.50, 1.00:2.00}, planes=[0, 1, 2])
-# Live action example (commented out):
-# denoise_setting=src = DFTTest(sigma=0.2).denoise(src)
-
-[deband]
-# Options available: True, False
-deband=False
-deband_setting=src = core.placebo.Deband(src, threshold=1.5, planes=1)

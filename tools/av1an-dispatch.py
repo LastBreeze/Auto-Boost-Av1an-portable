@@ -3,59 +3,20 @@ import subprocess
 import os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import glob
+import json
 import shutil
 import shlex
 import re
 import time
-import threading
-import collections
-import json
 import urllib.parse
 import urllib.request
 from pathlib import Path
-import unicodedata
 from wakepy import keep
 from svt_fork_setup import setup_svt_av1_fork
 
 BLUE = "\033[94m"
 RED = "\033[91m"
 RESET = "\033[0m"
-
-DISPLAY_USERNAME = "av1enjoyer"
-_WINDOWS_USER_PATH_RE = re.compile(
-    r"([\\/]+users[\\/]+)[A-Za-z0-9._-]+",
-    re.IGNORECASE,
-)
-
-
-def anonymize_user_paths(text):
-    """Hide the real Windows profile name in user-facing console output."""
-    if not isinstance(text, str):
-        return text
-    return _WINDOWS_USER_PATH_RE.sub(
-        lambda match: f"{match.group(1)}{DISPLAY_USERNAME}",
-        text,
-    )
-
-
-class AnonymizedTextStream:
-    """Proxy a text stream while anonymizing C:\\Users\\<name> paths."""
-
-    def __init__(self, stream):
-        self._stream = stream
-
-    def write(self, text):
-        return self._stream.write(anonymize_user_paths(text))
-
-    def writelines(self, lines):
-        return self._stream.writelines(anonymize_user_paths(line) for line in lines)
-
-    def __getattr__(self, name):
-        return getattr(self._stream, name)
-
-
-sys.stdout = AnonymizedTextStream(sys.stdout)
-sys.stderr = AnonymizedTextStream(sys.stderr)
 
 
 def format_elapsed_hhmmss(seconds):
@@ -83,392 +44,6 @@ def scene_detection_env():
     env["PYTHONUNBUFFERED"] = "1"
     env["AUTOBOOST_SCENE_X264_PROGRESS"] = "1"
     return env
-
-# =========================================================================
-# Simple-mode (non --verbose) progress display
-#
-# When the generated .bat does not pass --verbose, the noisy phases of the
-# workflow are shown as Auto-Boost-Essential style progress bars with a
-# short beginner-friendly explanation underneath. The explanation for a
-# phase disappears as soon as that phase finishes.
-# =========================================================================
-
-SIMPLE_EXPLANATION_SCENE_DETECTION = (
-    "Using VapourSynth and x264 for scene detection to break the video into chunks for\n"
-    "visual metrics quality measuring and parallel encoding for increased encoding speed."
-)
-SIMPLE_EXPLANATION_MUXING = (
-    "Packaging the finished video together with the original audio, subtitles, chapters,\n"
-    "etc, into your final MKV file in the video-output folder."
-)
-
-# All simple-mode bars pad their description to this width so every progress
-# bar in the workflow starts at the same column and stays aligned.
-SIMPLE_DESC_WIDTH = 42
-
-
-def simple_description(text):
-    return "[green]" + text.ljust(SIMPLE_DESC_WIDTH)
-
-
-try:
-    from rich.console import Console, Group
-    from rich.live import Live
-    from rich.text import Text
-    from rich.progress import (
-        Progress,
-        ProgressColumn,
-        TextColumn,
-        BarColumn,
-        SpinnerColumn,
-        TimeElapsedColumn,
-        TimeRemainingColumn,
-    )
-
-    class SimpleFPSColumn(ProgressColumn):
-        """fps readout on the right side of the bar (default color), fed via
-        task.fields['fps']. Renders fixed-width so bars stay aligned."""
-
-        def render(self, task):
-            fps = task.fields.get("fps")
-            if fps is None:
-                return Text(" " * 12)
-            return Text(f"{fps:>8.2f} fps")
-
-    class PlainTimeElapsedColumn(TimeElapsedColumn):
-        """Elapsed time in the default color instead of rich's cyan."""
-
-        def render(self, task):
-            text = super().render(task)
-            text.style = ""
-            return text
-
-    class PlainTimeRemainingColumn(TimeRemainingColumn):
-        """Remaining time in the default color instead of rich's cyan."""
-
-        def render(self, task):
-            text = super().render(task)
-            text.style = ""
-            return text
-
-    class PhaseRenderable:
-        """A progress display plus an explanation line that can be hidden."""
-
-        def __init__(self, progress, explanation):
-            self.progress = progress
-            self.explanation = explanation
-            self.show_explanation = explanation is not None
-
-        def __rich__(self):
-            if self.show_explanation:
-                return Group(self.progress, Text(self.explanation, style="dim"))
-            return self.progress
-
-    RICH_AVAILABLE = True
-except ImportError:
-    # Without rich we cannot draw the simple interface; every phase falls
-    # back to the verbose behaviour instead of failing.
-    RICH_AVAILABLE = False
-
-ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
-SCENE_PROGRESS_RE = re.compile(
-    r"Frame\s+(\d+)\s*/\s*([\d.]+)%\s*/\s*(VapourSynth|x264) based scene detection"
-    r"(?:\s+\w+)?\s*/\s*([\d.]+)\s*fps"
-)
-MUX_PROGRESS_RE = re.compile(r"[Pp]rogress:\s*(\d+)\s*%")
-
-
-def essential_style_progress(console):
-    """Progress bar with the same appearance Auto-Boost-Essential uses.
-    Percentage, fps and time readouts use the default (white) color, and the
-    fps column is fixed-width so all bars in the workflow align."""
-    return Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        BarColumn(),
-        "{task.percentage:>3.0f}%",
-        SimpleFPSColumn(),
-        PlainTimeElapsedColumn(),
-        PlainTimeRemainingColumn(),
-        console=console,
-    )
-
-
-def stream_subprocess_lines(proc, on_line):
-    """Read a subprocess's merged output, splitting on \r and \n so live
-    carriage-return progress updates are seen as individual lines."""
-    buf = b""
-    stream = proc.stdout
-    while True:
-        chunk = stream.read1(4096) if hasattr(stream, "read1") else stream.read(1)
-        if not chunk:
-            break
-        buf += chunk
-        parts = re.split(b"[\r\n]", buf)
-        buf = parts.pop()
-        for raw in parts:
-            if not raw:
-                continue
-            line = ANSI_ESCAPE_RE.sub("", raw.decode("utf-8", "replace")).strip()
-            if line:
-                on_line(line)
-    if buf:
-        line = ANSI_ESCAPE_RE.sub("", buf.decode("utf-8", "replace")).strip()
-        if line:
-            on_line(line)
-
-
-def print_captured_tail(label, lines):
-    """Show the tail of a quiet subprocess's output after a failure."""
-    if not lines:
-        return
-    print(f"{RED}[Dispatch] {label} (last {len(lines)} output lines):{RESET}")
-    for line in lines:
-        print(f"  {line}")
-
-
-def run_scene_detection_simple(cmd, cwd, env):
-    """Run Progressive-Scene-Detection.py behind two Essential-style progress
-    bars (VapourSynth + x264) with a short explanation underneath.
-
-    Returns the subprocess return code."""
-    console = Console()
-    progress = essential_style_progress(console)
-    vs_task = progress.add_task(simple_description("VapourSynth scene detection"),
-                                total=100.0, fps=None)
-    x264_task = progress.add_task(simple_description("x264 scene detection"),
-                                  total=100.0, fps=None)
-    renderable = PhaseRenderable(progress, SIMPLE_EXPLANATION_SCENE_DETECTION)
-    other_lines = collections.deque(maxlen=40)
-
-    def on_line(line):
-        match = SCENE_PROGRESS_RE.search(line)
-        if match:
-            percent = min(100.0, float(match.group(2)))
-            fps = float(match.group(4))
-            task = vs_task if match.group(3) == "VapourSynth" else x264_task
-            progress.update(task, completed=percent, fps=fps)
-        else:
-            other_lines.append(line)
-
-    proc = subprocess.Popen(cmd, cwd=cwd, env=env,
-                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-    try:
-        with Live(renderable, console=console, refresh_per_second=8) as live:
-            try:
-                stream_subprocess_lines(proc, on_line)
-                returncode = proc.wait()
-                if returncode == 0:
-                    progress.update(vs_task, completed=100.0)
-                    progress.update(x264_task, completed=100.0)
-            finally:
-                if proc.poll() is None:
-                    proc.terminate()
-                renderable.show_explanation = False
-                live.refresh()
-    except KeyboardInterrupt:
-        try:
-            proc.wait(timeout=5)
-        except Exception:
-            proc.kill()
-        raise
-    if returncode != 0:
-        print_captured_tail("Scene detection failed", list(other_lines))
-    return returncode
-
-
-def run_with_mux_progress(cmd, cwd, description):
-    """Run a muxing helper behind a single Essential-style progress bar,
-    driven by mkvmerge's 'Progress: N%' output.
-
-    Returns the subprocess return code."""
-    console = Console()
-    progress = essential_style_progress(console)
-    task = progress.add_task(simple_description(description), total=100.0, fps=None)
-    renderable = PhaseRenderable(progress, SIMPLE_EXPLANATION_MUXING)
-    other_lines = collections.deque(maxlen=40)
-
-    def on_line(line):
-        match = MUX_PROGRESS_RE.search(line)
-        if match:
-            progress.update(task, completed=min(100.0, float(match.group(1))))
-        else:
-            other_lines.append(line)
-
-    proc = subprocess.Popen(cmd, cwd=cwd,
-                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-    try:
-        with Live(renderable, console=console, refresh_per_second=8) as live:
-            try:
-                stream_subprocess_lines(proc, on_line)
-                returncode = proc.wait()
-                if returncode == 0:
-                    progress.update(task, completed=100.0)
-            finally:
-                if proc.poll() is None:
-                    proc.terminate()
-                renderable.show_explanation = False
-                live.refresh()
-    except KeyboardInterrupt:
-        try:
-            proc.wait(timeout=5)
-        except Exception:
-            proc.kill()
-        raise
-    if returncode != 0:
-        print_captured_tail("Muxing output", list(other_lines))
-    return returncode
-
-
-def run_quiet(cmd, cwd, label):
-    """Run a helper silently; on failure print the tail of its output.
-
-    Returns the subprocess return code."""
-    proc = subprocess.run(cmd, cwd=cwd,
-                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-    if proc.returncode != 0 and proc.stdout:
-        lines = [ANSI_ESCAPE_RE.sub("", raw).rstrip() for raw in
-                 proc.stdout.decode("utf-8", "replace").splitlines() if raw.strip()]
-        print_captured_tail(label, lines[-40:])
-    return proc.returncode
-
-
-SIMPLE_EXPLANATION_ENCODING = (
-    "Encoding your video in a single pass at your chosen quality level. Each chunk is\n"
-    "encoded in parallel across your worker count for maximum speed."
-)
-
-
-
-def find_av1an_done_json(search_dir, min_mtime):
-    """Find av1an's done.json in search_dir or one directory level below it,
-    ignoring stale files from earlier runs (mtime older than min_mtime)."""
-    candidates = []
-    direct = os.path.join(search_dir, "done.json")
-    if os.path.isfile(direct):
-        candidates.append(direct)
-    try:
-        names = os.listdir(search_dir)
-    except OSError:
-        names = []
-    for name in names:
-        candidate = os.path.join(search_dir, name, "done.json")
-        if os.path.isfile(candidate):
-            candidates.append(candidate)
-
-    def _mtime(path):
-        try:
-            return os.path.getmtime(path)
-        except OSError:
-            return 0.0
-
-    fresh = [path for path in candidates if _mtime(path) >= min_mtime]
-    if not fresh:
-        return None
-    return max(fresh, key=_mtime)
-
-
-def read_av1an_done_json(path):
-    """Return (total_frames or None, completed_frames) from av1an's done.json.
-    Handles both old (int) and new (dict) per-chunk formats, and returns None
-    if the file is mid-write or unreadable."""
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except Exception:
-        return None
-    if not isinstance(data, dict):
-        return None
-    total = data.get("frames")
-    if not isinstance(total, (int, float)) or total <= 0:
-        total = None
-    completed = 0
-    done = data.get("done", {})
-    if isinstance(done, dict):
-        for value in done.values():
-            if isinstance(value, dict):
-                try:
-                    completed += int(value.get("frames", 0))
-                except (TypeError, ValueError):
-                    pass
-            elif isinstance(value, (int, float)):
-                completed += int(value)
-    return total, completed
-
-
-def run_av1an_simple(cmd, cwd, description, explanation, temp_search_dir):
-    """Run av1an behind a single Essential-style progress bar with a short
-    explanation underneath. Progress advances as av1an chunks complete, read
-    from av1an's done.json inside its temporary folder, with a rolling fps
-    readout on the right side of the bar.
-
-    Returns the subprocess return code."""
-    console = Console()
-    progress = essential_style_progress(console)
-    task = progress.add_task(simple_description(description), total=None, fps=None)
-    renderable = PhaseRenderable(progress, explanation)
-    other_lines = collections.deque(maxlen=40)
-    stop_event = threading.Event()
-    started_wall_time = time.time()
-
-    def watch_done_json():
-        samples = collections.deque()
-        done_path = None
-        while not stop_event.wait(1.0):
-            if done_path is None or not os.path.isfile(done_path):
-                done_path = find_av1an_done_json(temp_search_dir, started_wall_time - 1.0)
-                if done_path is None:
-                    continue
-            info = read_av1an_done_json(done_path)
-            if info is None:
-                continue
-            total, completed = info
-            now = time.monotonic()
-            samples.append((now, completed))
-            while samples and now - samples[0][0] > 120.0:
-                samples.popleft()
-            fps = None
-            if len(samples) >= 2:
-                elapsed = samples[-1][0] - samples[0][0]
-                frames = samples[-1][1] - samples[0][1]
-                if elapsed > 0 and frames > 0:
-                    fps = frames / elapsed
-            progress.update(task, total=total, completed=completed, fps=fps)
-
-    proc = subprocess.Popen(cmd, cwd=cwd,
-                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-    reader = threading.Thread(target=stream_subprocess_lines,
-                              args=(proc, other_lines.append), daemon=True)
-    watcher = threading.Thread(target=watch_done_json, daemon=True)
-    try:
-        with Live(renderable, console=console, refresh_per_second=8) as live:
-            reader.start()
-            watcher.start()
-            try:
-                returncode = proc.wait()
-                if returncode == 0:
-                    final_total = progress.tasks[0].total
-                    if final_total:
-                        progress.update(task, completed=final_total)
-                    else:
-                        progress.update(task, total=1, completed=1)
-            finally:
-                stop_event.set()
-                watcher.join(timeout=3)
-                reader.join(timeout=3)
-                renderable.show_explanation = False
-                live.refresh()
-    except KeyboardInterrupt:
-        stop_event.set()
-        try:
-            proc.wait(timeout=5)
-        except Exception:
-            proc.kill()
-        raise
-    if returncode != 0:
-        print_captured_tail("Av1an output", list(other_lines))
-    return returncode
-
 
 def parse_settings_lines(lines):
     """Parse settings.txt lines into a case-insensitive key/value dict."""
@@ -522,72 +97,6 @@ def find_active_bat_file(tools_dir, root_dir):
         if os.path.isfile(bat_path):
             return bat_path
     return None
-
-
-def read_and_repair_workercount_config(tools_dir):
-    """Read tools\\workercount-config.txt tolerantly and repair it in place.
-
-    Users hand-edit this file, and Notepad likes to re-save it as UTF-16 or
-    UTF-8-with-BOM. Strict UTF-8 readers downstream (the Rust tools) then
-    fail with "stream did not contain valid UTF-8", and the .bat reads
-    garbage for the worker value. This reader accepts any common Windows
-    encoding, extracts the worker count, and - if the file was malformed -
-    rewrites it as plain ASCII 'workers=N'. Returns the worker count int,
-    or None if the file does not exist."""
-    path = os.path.join(tools_dir, "workercount-config.txt")
-    try:
-        with open(path, "rb") as f:
-            blob = f.read()
-    except OSError:
-        return None
-    text = None
-    for enc in ("utf-8-sig", "utf-16", "utf-16-le", "utf-16-be"):
-        try:
-            text = blob.decode(enc)
-            break
-        except (UnicodeDecodeError, UnicodeError):
-            continue
-    if text is None:
-        text = blob.decode("latin-1", errors="replace")
-    text = text.replace("\ufeff", "").replace("\x00", "")
-    m = re.search(r"workers\s*=\s*(\d+)", text, re.IGNORECASE)
-    if not m:
-        # Tolerate a file that is just a bare number
-        m = re.search(r"^\s*(\d+)\s*$", text, re.MULTILINE)
-    if m:
-        workers = max(1, int(m.group(1)))
-        broken = False
-    else:
-        workers = 1  # unreadable/garbage: safe default
-        broken = True
-    # Rewrite only if the on-disk bytes are not already the clean canonical
-    # form (either newline style counts as clean).
-    canonical = {f"workers={workers}\n".encode("ascii"),
-                 f"workers={workers}\r\n".encode("ascii")}
-    if blob not in canonical:
-        try:
-            with open(path, "w", encoding="ascii") as f:
-                f.write(f"workers={workers}\n")
-            reason = ("no readable worker count found - reset to the safe default"
-                      if broken else "re-saved as plain text (was UTF-16/BOM/malformed)")
-            print(f"\033[93m[Dispatch] Repaired workercount-config.txt -> "
-                  f"workers={workers} ({reason})\033[0m")
-        except OSError:
-            pass
-    return workers
-
-
-def sanitize_worker_value(raw, fallback):
-    """Return a clean positive-integer worker string from a possibly mangled
-    value (BOM/null/UTF-16 junk leaking out of a hand-edited config file via
-    the .bat). Returns `fallback` when no digits can be recovered."""
-    if raw is None:
-        return fallback
-    cleaned = str(raw).replace("\ufeff", "").replace("\x00", "").strip()
-    m = re.search(r"\d+", cleaned)
-    if not m:
-        return fallback
-    return str(max(1, int(m.group(0))))
 
 
 def read_bat_optimize_settings(tools_dir, root_dir):
@@ -1058,6 +567,7 @@ def warn_and_pause_if_paths_too_long(input_files, video_output_dir, temp_dir):
             os.path.join(temp_dir, f"{basename}.vpy"),
             os.path.join(temp_dir, f"{basename}.ffindex"),
             os.path.join(temp_dir, f"{basename}_scenedetect.json"),
+            os.path.join(temp_dir, f"{basename}_scenedetect.zoned.json"),
             os.path.join(temp_dir, f"{basename}-output.mkv"),
             os.path.join(video_input_dir, f"{basename}-av1.mkv"),
             backend_artifact_dir,
@@ -1080,197 +590,28 @@ def warn_and_pause_if_paths_too_long(input_files, video_output_dir, temp_dir):
         pause_for_long_paths(unique_long_paths)
 
 
-# --- Python-safe source filename normalization ---
-# Every source video is renamed before anything else runs so that its filename
-# contains ONLY "." , a-z, A-Z and 0-9. Characters outside that set are folded
-# to their closest plain-ASCII equivalent first (o-with-macron -> o, sharp s ->
-# ss, ae-ligature -> ae, Cyrillic and Greek letters transliterated) and are
-# dropped when no equivalent exists (CJK, emoji, punctuation, brackets, spaces).
-# Doing this up front means ffmpeg, ffms2/VapourSynth, x264, av1an,
-# SvtAv1EncApp, MediaInfo and mkvmerge only ever see a plain ASCII path.
-FILENAME_ALLOWED_CHARS = frozenset(
-    "abcdefghijklmnopqrstuvwxyz"
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-    "0123456789"
-    "."
-)
-
-# What replaces spaces and every other kind of whitespace. "" deletes them,
-# which is the strictest and safest choice because no downstream command line
-# then needs quoting. Set this to "." instead if you would rather keep the word
-# boundaries readable in the renamed files.
-FILENAME_SPACE_REPLACEMENT = ""
-
-# Used when sanitizing leaves nothing behind (for example a fully CJK name).
-FILENAME_FALLBACK_STEM = "video"
-
-# Case-sensitive folds that must not go through the lowercase table below.
-_FILENAME_ASCII_FOLD_EXACT = {
-    "\u1e9e": "SS",   # capital sharp s
-    "\u0130": "I",    # capital I with dot above
-    "\u0131": "i",    # dotless i
-    "\u00b5": "u",    # micro sign (not the Greek letter mu)
-}
-
-# Lowercase-keyed folds for characters that Unicode decomposition alone cannot
-# reduce to ASCII. Capital letters reuse these entries and get re-capitalized.
-_FILENAME_ASCII_FOLD = {
-    # Latin
-    "\u00df": "ss", "\u00e6": "ae", "\u0153": "oe", "\u00f8": "o",
-    "\u0111": "d", "\u00f0": "d", "\u00fe": "th", "\u0142": "l",
-    "\u0127": "h", "\u014b": "ng", "\u0167": "t", "\u0138": "k",
-    "\u2116": "No",
-    # Cyrillic
-    "\u0430": "a", "\u0431": "b", "\u0432": "v", "\u0433": "g", "\u0434": "d",
-    "\u0435": "e", "\u0451": "e", "\u0436": "zh", "\u0437": "z", "\u0438": "i",
-    "\u0439": "y", "\u043a": "k", "\u043b": "l", "\u043c": "m", "\u043d": "n",
-    "\u043e": "o", "\u043f": "p", "\u0440": "r", "\u0441": "s", "\u0442": "t",
-    "\u0443": "u", "\u0444": "f", "\u0445": "kh", "\u0446": "ts", "\u0447": "ch",
-    "\u0448": "sh", "\u0449": "shch", "\u044a": "", "\u044b": "y", "\u044c": "",
-    "\u044d": "e", "\u044e": "yu", "\u044f": "ya",
-    "\u0454": "ye", "\u0456": "i", "\u0457": "yi", "\u0491": "g", "\u045e": "u",
-    # Greek
-    "\u03b1": "a", "\u03b2": "v", "\u03b3": "g", "\u03b4": "d", "\u03b5": "e",
-    "\u03b6": "z", "\u03b7": "i", "\u03b8": "th", "\u03b9": "i", "\u03ba": "k",
-    "\u03bb": "l", "\u03bc": "m", "\u03bd": "n", "\u03be": "x", "\u03bf": "o",
-    "\u03c0": "p", "\u03c1": "r", "\u03c2": "s", "\u03c3": "s", "\u03c4": "t",
-    "\u03c5": "y", "\u03c6": "f", "\u03c7": "ch", "\u03c8": "ps", "\u03c9": "o",
-}
-
-_FILENAME_LATIN_LETTER_RE = re.compile(r"^LATIN (SMALL|CAPITAL) LETTER ([A-Z])\b")
-
-
-def fold_char_to_ascii(ch):
-    """Return the closest plain-ASCII spelling of one character, or "" if none."""
-    if ch in _FILENAME_ASCII_FOLD_EXACT:
-        return _FILENAME_ASCII_FOLD_EXACT[ch]
-
-    lowered = ch.lower()
-    if lowered in _FILENAME_ASCII_FOLD:
-        folded = _FILENAME_ASCII_FOLD[lowered]
-        if folded and ch != lowered:
-            # Preserve the original capitalization: sharp-sh -> "Sh", not "SH".
-            folded = folded[0].upper() + folded[1:]
-        return folded
-
-    # Strip diacritics: o-with-macron decomposes to "o" + a combining macron.
-    kept = "".join(
-        c for c in unicodedata.normalize("NFKD", ch)
-        if c in FILENAME_ALLOWED_CHARS and not unicodedata.combining(c)
-    )
-    if kept:
-        return kept
-
-    # Accented Cyrillic/Greek letters decompose to a base letter that is still
-    # non-ASCII, so fold that base letter through the tables above.
-    base = unicodedata.normalize("NFKD", ch)[:1]
-    if base and base != ch:
-        return fold_char_to_ascii(base)
-
-    # Last resort: read the base letter out of the Unicode character name,
-    # e.g. "LATIN SMALL LETTER O WITH STROKE" -> "o".
-    try:
-        name = unicodedata.name(ch)
-    except ValueError:
-        return ""
-    match = _FILENAME_LATIN_LETTER_RE.match(name)
-    if not match:
-        return ""
-    return match.group(2).lower() if match.group(1) == "SMALL" else match.group(2)
-
-
-def sanitize_filename_stem(stem):
-    """Reduce a filename stem to "." , a-z, A-Z and 0-9 only."""
-    pieces = []
-    for ch in stem:
-        if ch in FILENAME_ALLOWED_CHARS:
-            pieces.append(ch)
-        elif ch.isspace():
-            pieces.append(FILENAME_SPACE_REPLACEMENT)
-        else:
-            pieces.append(fold_char_to_ascii(ch))
-    safe = "".join(pieces)
-    # A leading dot hides the file, Windows silently drops a trailing dot, and
-    # runs of dots confuse extension parsing - normalize all three.
-    safe = re.sub(r"\.{2,}", ".", safe).strip(".")
-    return safe or FILENAME_FALLBACK_STEM
-
-
-def sanitize_filename_extension(ext):
-    """Return a lowercase extension built only from a-z and 0-9."""
-    body = "".join(c for c in ext.lower() if c in FILENAME_ALLOWED_CHARS and c != ".")
-    return f".{body}" if body else ""
-
-
-def safe_input_filename(filename):
-    """Full Python-safe filename for a source video."""
-    stem, ext = os.path.splitext(filename)
-    safe_ext = sanitize_filename_extension(ext) or ext.lower()
-    return f"{sanitize_filename_stem(stem)}{safe_ext}"
-
-
-def _blocked_by_other_file(dst_path, src_path):
-    """True when dst_path already exists as a *different* file than src_path.
-
-    A case-only rename ("Movie.MKV" -> "Movie.mkv") makes os.path.exists()
-    report True on Windows even though it is the same file, and renaming a file
-    onto itself is exactly what we want in that case.
-    """
-    if not os.path.exists(dst_path):
-        return False
-    try:
-        return not os.path.samefile(dst_path, src_path)
-    except OSError:
-        return True
-
-
 def sanitize_input_filenames(video_input_dir, extensions):
-    """Rename every source video so its name holds only "." , a-z, A-Z and 0-9.
-
-    This is the first step that touches the input files - it runs before scene
-    detection, encoding, tagging and muxing - so no downstream tool ever has to
-    cope with a non-ASCII path. "Dead End no Boken.mkv" (with a macron on the o)
-    becomes "DeadEndnoBoken.mkv".
-    """
+    """Replace parentheses in supported video filenames with safe inner spaces before processing."""
     supported_exts = {pattern[1:].lower() for pattern in extensions if pattern.startswith("*")}
     renamed = 0
-    try:
-        entries = sorted(os.listdir(video_input_dir))
-    except OSError as e:
-        print(f"{RED}[Dispatch] ERROR: could not list {video_input_dir}: {e}{RESET}")
-        return 0
-
-    for filename in entries:
+    for filename in sorted(os.listdir(video_input_dir)):
         src_path = os.path.join(video_input_dir, filename)
         if not os.path.isfile(src_path):
             continue
-        ext = os.path.splitext(filename)[1]
-        if ext.lower() not in supported_exts:
+        stem, ext = os.path.splitext(filename)
+        if ext.lower() not in supported_exts or ("(" not in stem and ")" not in stem):
             continue
 
-        safe_name = safe_input_filename(filename)
-        if safe_name == filename:
-            continue
-
-        safe_stem, safe_ext = os.path.splitext(safe_name)
-        dst_path = os.path.join(video_input_dir, safe_name)
+        safe_stem = " ".join(stem.replace("(", " ").replace(")", " ").split()) or "video"
+        dst_path = os.path.join(video_input_dir, f"{safe_stem}{ext}")
         suffix = 1
-        while _blocked_by_other_file(dst_path, src_path):
-            dst_path = os.path.join(video_input_dir, f"{safe_stem}{suffix}{safe_ext}")
+        while os.path.exists(dst_path):
+            dst_path = os.path.join(video_input_dir, f"{safe_stem}_{suffix}{ext}")
             suffix += 1
 
-        try:
-            os.rename(src_path, dst_path)
-        except OSError as e:
-            print(f"{RED}[Dispatch] ERROR: could not rename {filename} -> "
-                  f"{os.path.basename(dst_path)}: {e}{RESET}")
-            print(f"{RED}[Dispatch]        Close anything using that file, or rename it by hand "
-                  f"so it only contains '.', a-z and 0-9, then run this again.{RESET}")
-            continue
-
+        os.rename(src_path, dst_path)
         renamed += 1
-        print(f"{BLUE}[Dispatch] Renamed source file to a fully safe name: {filename} -> "
-              f"{os.path.basename(dst_path)}{RESET}")
+        print(f"[Dispatch] Renamed input file for Python-safe filename: {filename} -> {os.path.basename(dst_path)}")
 
     return renamed
 
@@ -1352,11 +693,11 @@ def report_filter_status(do_downscale, target_res, kernel, do_denoise, denoise_s
         active_filters.append(f"deband: deband_setting={deband_setting or 'enabled'}")
 
     if not active_filters:
-        print(f"{BLUE}[Dispatch] Filters active:{RESET} none")
+        print(f"{BLUE}[Dispatch] Filters active: none{RESET}")
         return
 
     for filter_status in active_filters:
-        print(f"{BLUE}[Dispatch] Filter active:{RESET} {filter_status}")
+        print(f"{BLUE}[Dispatch] Filter active: {filter_status}{RESET}")
 
 
 def parse_crop_values_from_vpy(vpy_path):
@@ -1607,7 +948,7 @@ final.set_output(0)
                 deband_line=deband_line,
             ))
         if tonemap:
-            print(f"{BLUE}[Dispatch] Filter active:{RESET} tonemap HDR -> SDR (BT.709) via libplacebo")
+            print(f"{BLUE}[Dispatch] Filter active: tonemap HDR -> SDR (BT.709) via libplacebo{RESET}")
         print(f"[Dispatch] Built VapourSynth script: {vpy_file}")
     else:
         existing_crop_values = parse_crop_values_from_vpy(vpy_file) or (0, 0, 0, 0)
@@ -1659,15 +1000,447 @@ def resolve_fgs_table_path(param_str, root_dir, tools_dir=None):
     return pattern.sub(_repl, param_str)
 
 
+# --- ZONES SUPPORT ---
+# A zones.txt overrides encoder settings for individual frame ranges. The file
+# is discovered exactly the way Auto-Boost-Av1an.py discovers it: an sXXeXX tag
+# in the input filename maps to <sxxexx>-zones.txt sitting next to the video.
+#
+# av1an's own --zones flag is not usable here. av1an only parses a zones file
+# on the code path where it runs scene detection itself; when it is handed a
+# finished scenes JSON with -s it loads that file and never looks at --zones
+# (av1an-core/src/context.rs, split_routine). We always pass -s, so the zone
+# overrides are baked into a copy of the scenes JSON instead.
+
+# Flags av1an consumes itself when parsing a zone line. They are not encoder
+# parameters, so they are pulled out of video_params and mapped to the matching
+# zone_overrides fields.
+AV1AN_ZONE_FLAGS = (
+    "--photon-noise",
+    "--photon-noise-width",
+    "--photon-noise-height",
+    "--chroma-noise",
+    "--extra-split",
+    "-x",
+    "--min-scene-len",
+    "--passes",
+)
+
+ZONE_LEADING_FRAMES_RE = re.compile(r"^(\s*)(\d+)(\s+)(-?\d+)")
+
+# Shorter than this and a chunk is not worth encoding on its own.
+MIN_USEFUL_SCENE_FRAMES = 5
+
+
+def find_zones_file(video_path):
+    """Return the sXXeXX-zones.txt that belongs to this input, or None.
+
+    Example: 'Awesome Show - S01E02 1080p.mkv' -> 's01e02-zones.txt'
+    """
+    match = re.search(r"([sS]\d{2}[eE]\d{2})", Path(video_path).stem)
+    if not match:
+        return None
+    zones_path = os.path.join(
+        os.path.dirname(os.path.abspath(video_path)),
+        f"{match.group(1).lower()}-zones.txt",
+    )
+    return zones_path if os.path.isfile(zones_path) else None
+
+
+def split_param_string(param_str):
+    """Split an encoder parameter string into argv-style tokens."""
+    if not param_str:
+        return []
+    try:
+        return shlex.split(param_str)
+    except ValueError:
+        return param_str.split()
+
+
+def parse_param_tokens(tokens):
+    """['--crf', '26', '--tune=2'] -> {'--crf': '26', '--tune': '2'} (order kept)."""
+    params = {}
+    i = 0
+    while i < len(tokens):
+        token = tokens[i]
+        if not token.startswith("-"):
+            i += 1
+            continue
+        if "=" in token:
+            key, value = token.split("=", 1)
+            params[key] = value
+            i += 1
+        elif i + 1 < len(tokens) and not tokens[i + 1].startswith("--"):
+            params[token] = tokens[i + 1]
+            i += 2
+        else:
+            params[token] = None
+            i += 1
+    return params
+
+
+def param_dict_to_tokens(params):
+    tokens = []
+    for key, value in params.items():
+        tokens.append(key)
+        if value is not None:
+            tokens.append(value)
+    return tokens
+
+
+def merge_zone_params(base_tokens, zone_tokens, reset):
+    """Merge a zone's parameters over the base encoder parameters.
+
+    Returns (video_params, av1an_flags). With 'reset' on the zone line the base
+    parameters are dropped instead of inherited, matching av1an's own handling.
+    """
+    if reset:
+        merged = {}
+    else:
+        merged = {
+            key: value
+            for key, value in parse_param_tokens(base_tokens).items()
+            if key not in AV1AN_ZONE_FLAGS
+        }
+    av1an_flags = {}
+    for key, value in parse_param_tokens(zone_tokens).items():
+        if key in AV1AN_ZONE_FLAGS:
+            av1an_flags[key] = value
+        else:
+            merged[key] = value
+    return param_dict_to_tokens(merged), av1an_flags
+
+
+def build_zone_overrides(base_tokens, zone, base_photon_noise):
+    """Build the zone_overrides object av1an expects inside a scenes JSON."""
+    video_params, av1an_flags = merge_zone_params(base_tokens, zone["params"], zone["reset"])
+
+    def int_flag(*names, default=None):
+        for name in names:
+            value = av1an_flags.get(name)
+            if value is None:
+                continue
+            try:
+                return int(value)
+            except ValueError:
+                print(f"{RED}[Dispatch] Warning: zone line {zone['lineno']} has a non-numeric {name}; ignoring it.{RESET}")
+        return default
+
+    photon_noise = int_flag("--photon-noise")
+    if photon_noise is None and not zone["reset"]:
+        photon_noise = base_photon_noise
+    chroma_noise = parse_bool_setting(av1an_flags.get("--chroma-noise"), default=False)
+
+    return {
+        "encoder": "svt_av1",
+        "passes": int_flag("--passes", default=1),
+        "video_params": video_params,
+        "photon_noise": photon_noise if photon_noise else None,
+        "photon_noise_height": int_flag("--photon-noise-height"),
+        "photon_noise_width": int_flag("--photon-noise-width"),
+        "chroma_noise": chroma_noise,
+        # av1an's own defaults; the scenes are already split, so these only
+        # travel with the override object.
+        "extra_splits_len": int_flag("-x", "--extra-split", default=240),
+        "min_scene_len": int_flag("--min-scene-len", default=24),
+        "target_quality": None,
+    }
+
+
+def load_zones_file(zones_path, total_frames, scene_cuts=()):
+    """Read a zones.txt, repair ranges av1an cannot use, and save the repairs.
+
+    av1an's end_frame is exclusive, so two ranges that are meant to run
+    back-to-back have to share a frame number:
+
+        right:  90 100 svt-av1 --crf 20
+                100 200 svt-av1 --crf 25
+        wrong:  90 100 svt-av1 --crf 20
+                101 200 svt-av1 --crf 25
+
+    The 'wrong' form leaves frame 100 in neither zone, so av1an encodes it as a
+    one-frame chunk with the base settings. A genuine overlap is worse: av1an
+    bails with "Zones file contains overlapping zones". Both are fixed here and
+    written back to the file (the original is kept as <name>.bak), so AfterZone
+    and any later run see the corrected ranges too.
+
+    scene_cuts is the set of frames scene detection already splits on. When a
+    one-frame gap can be closed on one of those frames, it is closed there, so
+    the junction lands on a real cut instead of slicing a one-frame chunk off
+    the scene next to it.
+    """
+    with open(zones_path, "r", encoding="utf-8", errors="replace") as f:
+        raw_lines = f.read().splitlines()
+
+    zones = []
+    for index, raw_line in enumerate(raw_lines):
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        lineno = index + 1
+        parts = line.split(maxsplit=3)
+        if len(parts) < 3:
+            print(f"{RED}[Dispatch] Warning: skipping zone line {lineno} (needs 'start end encoder [params]').{RESET}")
+            continue
+        try:
+            start = int(parts[0])
+            end_raw = int(parts[1])
+        except ValueError:
+            print(f"{RED}[Dispatch] Warning: skipping zone line {lineno} (frame numbers are not integers).{RESET}")
+            continue
+
+        tokens = split_param_string(parts[3]) if len(parts) > 3 else []
+        reset = bool(tokens) and tokens[0] == "reset"
+        if reset:
+            tokens = tokens[1:]
+
+        if start >= total_frames:
+            print(f"{RED}[Dispatch] Warning: skipping zone line {lineno} (starts at {start}, past the last frame {total_frames}).{RESET}")
+            continue
+        end = total_frames if end_raw == -1 else end_raw
+        if end > total_frames:
+            print(f"{RED}[Dispatch] Warning: zone line {lineno} ends at {end}, past the last frame; clamping to {total_frames}.{RESET}")
+            end = total_frames
+        if start >= end:
+            print(f"{RED}[Dispatch] Warning: skipping zone line {lineno} (start {start} is not before end {end}).{RESET}")
+            continue
+
+        zones.append({
+            "start": start,
+            "end": end,
+            "params": tokens,
+            "reset": reset,
+            "lineno": lineno,
+            "raw_index": index,
+            "orig_start": start,
+            "orig_end_raw": end_raw,
+            "orig_end": end,
+        })
+
+    zones.sort(key=lambda zone: zone["start"])
+
+    for current, following in zip(zones, zones[1:]):
+        if current["end"] == following["start"] - 1:
+            # end_frame is exclusive: back-to-back ranges share a frame number.
+            # Prefer the side that is already a scene cut, otherwise pull the
+            # later zone's start back onto the earlier zone's end.
+            if following["start"] in scene_cuts and current["end"] not in scene_cuts:
+                print(f"{BLUE}[Dispatch] Zone line {current['lineno']}: end {current['end']} -> {following['start']} "
+                      f"(closing the one-frame gap before zone line {following['lineno']} on a scene cut; "
+                      f"end_frame is exclusive).{RESET}")
+                current["end"] = following["start"]
+            else:
+                print(f"{BLUE}[Dispatch] Zone line {following['lineno']}: start {following['start']} -> {current['end']} "
+                      f"(closing the one-frame gap after zone line {current['lineno']}; end_frame is exclusive).{RESET}")
+                following["start"] = current["end"]
+        elif current["end"] > following["start"]:
+            print(f"{RED}[Dispatch] Warning: zone line {current['lineno']} overlaps zone line {following['lineno']}; "
+                  f"trimming its end {current['end']} -> {following['start']}.{RESET}")
+            current["end"] = following["start"]
+
+    zones = [zone for zone in zones if zone["start"] < zone["end"]]
+
+    changed = [
+        zone for zone in zones
+        if zone["start"] != zone["orig_start"] or zone["end"] != zone["orig_end"]
+    ]
+    if changed:
+        backup_path = zones_path + ".bak"
+        try:
+            shutil.copyfile(zones_path, backup_path)
+        except Exception as e:
+            print(f"{RED}[Dispatch] Warning: Could not back up {os.path.basename(zones_path)} ({e}); leaving it unedited.{RESET}")
+        else:
+            for zone in changed:
+                keep_minus_one = zone["orig_end_raw"] == -1 and zone["end"] == zone["orig_end"]
+                end_text = "-1" if keep_minus_one else str(zone["end"])
+                raw_lines[zone["raw_index"]] = ZONE_LEADING_FRAMES_RE.sub(
+                    lambda m, zone=zone, end_text=end_text: f"{m.group(1)}{zone['start']}{m.group(3)}{end_text}",
+                    raw_lines[zone["raw_index"]],
+                    count=1,
+                )
+            with open(zones_path, "w", encoding="utf-8", newline="\r\n") as f:
+                f.write("\n".join(raw_lines) + "\n")
+            print(f"{BLUE}[Dispatch] Rewrote {len(changed)} zone line(s) in {os.path.basename(zones_path)} "
+                  f"(original saved as {os.path.basename(backup_path)}).{RESET}")
+
+    return zones
+
+
+def apply_zones_to_scene_list(scenes, zones, base_tokens, base_photon_noise):
+    """Cut each zone out of the scene list and give the cut-out part its overrides."""
+    for zone in zones:
+        overrides = build_zone_overrides(base_tokens, zone, base_photon_noise)
+        new_scenes = []
+        for scene in scenes:
+            scene_start = scene["start_frame"]
+            scene_end = scene["end_frame"]
+            if scene_start >= zone["end"] or zone["start"] >= scene_end:
+                new_scenes.append(scene)
+                continue
+            if scene_start < zone["start"]:
+                new_scenes.append({**scene, "end_frame": zone["start"]})
+            new_scenes.append({
+                **scene,
+                "start_frame": max(scene_start, zone["start"]),
+                "end_frame": min(scene_end, zone["end"]),
+                "zone_overrides": overrides,
+            })
+            if scene_end > zone["end"]:
+                new_scenes.append({**scene, "start_frame": zone["end"]})
+        scenes = new_scenes
+    scenes.sort(key=lambda scene: scene["start_frame"])
+    return scenes
+
+
+def merge_sliver_scenes(scenes):
+    """Absorb chunks too short to encode on their own into the neighbouring chunk
+    that already carries the same settings.
+
+    A zone edge landing a frame or two before a scene cut slices a sliver off
+    the scene next to it: zone 4053-4641 against a cut at 4643 leaves a 2-frame
+    chunk at 4641-4643. That sliver is the leftover of the following scene and
+    still has that scene's settings, so the chunk boundary can simply be moved
+    up against the zone edge. Nothing about how a frame is encoded changes;
+    only the chunk it belongs to.
+
+    Merging is refused when the two chunks disagree on settings, so a sliver
+    between two different zones is reported instead of being silently
+    re-encoded with the wrong parameters.
+
+    Returns (scenes, fixes).
+    """
+    merged = []
+    fixes = []
+    for scene in scenes:
+        previous = merged[-1] if merged else None
+        if previous is not None and previous["zone_overrides"] == scene["zone_overrides"]:
+            previous_frames = previous["end_frame"] - previous["start_frame"]
+            scene_frames = scene["end_frame"] - scene["start_frame"]
+            if min(previous_frames, scene_frames) < MIN_USEFUL_SCENE_FRAMES:
+                sliver = previous if previous_frames < scene_frames else scene
+                fixes.append({
+                    "start": sliver["start_frame"],
+                    "end": sliver["end_frame"],
+                    "frames": min(previous_frames, scene_frames),
+                    "new_start": previous["start_frame"],
+                    "new_end": scene["end_frame"],
+                })
+                previous["end_frame"] = scene["end_frame"]
+                continue
+        merged.append(dict(scene))
+    return merged, fixes
+
+
+def zoned_scenes_path(scenes_json_path):
+    root, ext = os.path.splitext(scenes_json_path)
+    return f"{root}.zoned{ext}"
+
+
+def remove_stale_zoned_scenes(scenes_json_path):
+    stale_path = zoned_scenes_path(scenes_json_path)
+    if os.path.exists(stale_path):
+        try:
+            os.remove(stale_path)
+            print(f"[Dispatch] Removed stale zoned scenes file: {os.path.basename(stale_path)}")
+        except Exception as e:
+            print(f"[Dispatch] Warning: Could not remove stale zoned scenes file: {e}")
+
+
+def apply_zones_file(input_path, scenes_json_path, encoder_params, photon_noise):
+    """Bake a matching zones.txt into a copy of the scenes JSON.
+
+    Returns the scenes file av1an should be given: the zoned copy when zones
+    were applied, otherwise the untouched scene detection JSON.
+    """
+    zones_path = find_zones_file(input_path)
+    if not zones_path:
+        remove_stale_zoned_scenes(scenes_json_path)
+        return scenes_json_path
+
+    print(f"{BLUE}[Dispatch] Zones file found: {os.path.basename(zones_path)}{RESET}")
+    if not os.path.exists(scenes_json_path):
+        print(f"{RED}[Dispatch] Warning: Scenes file missing, so zones cannot be applied: {scenes_json_path}{RESET}")
+        return scenes_json_path
+
+    with open(scenes_json_path, "r", encoding="utf-8") as f:
+        scenes_data = json.load(f)
+
+    total_frames = scenes_data.get("frames")
+    if not isinstance(total_frames, int) or total_frames <= 0:
+        print(f"{RED}[Dispatch] Warning: Scenes file has no usable frame count; skipping zones.{RESET}")
+        return scenes_json_path
+
+    scene_cuts = {
+        scene["start_frame"]
+        for key in ("split_scenes", "scenes")
+        for scene in scenes_data.get(key) or []
+    }
+    scene_cuts.add(total_frames)
+
+    zones = load_zones_file(zones_path, total_frames, scene_cuts)
+    if not zones:
+        print(f"{RED}[Dispatch] Warning: No usable zone lines in {os.path.basename(zones_path)}; encoding without zones.{RESET}")
+        remove_stale_zoned_scenes(scenes_json_path)
+        return scenes_json_path
+
+    base_tokens = split_param_string(encoder_params)
+    try:
+        base_photon_noise = int(str(photon_noise).strip())
+    except (TypeError, ValueError):
+        base_photon_noise = 0
+
+    zones_filename = os.path.basename(zones_path)
+    print(f"{BLUE}[Dispatch] Applying zones file: {zones_filename} "
+          f"({len(zones)} zone(s), end frame is exclusive){RESET}")
+    for zone in zones:
+        summary = " ".join(zone["params"]) or "(no parameter changes)"
+        reset_note = " reset" if zone["reset"] else ""
+        print(f"{BLUE}[Dispatch]   frames {zone['start']}-{zone['end']}{reset_note}: {summary}{RESET}")
+
+    # av1an encodes from split_scenes; scenes is kept in step so the file stays coherent.
+    sliver_fixes = []
+    for key in ("scenes", "split_scenes"):
+        if isinstance(scenes_data.get(key), list):
+            zoned = apply_zones_to_scene_list(
+                scenes_data[key], zones, base_tokens, base_photon_noise
+            )
+            scenes_data[key], fixes = merge_sliver_scenes(zoned)
+            if key == "split_scenes":
+                sliver_fixes = fixes
+
+    for fix in sliver_fixes:
+        print(f"{BLUE}[Dispatch] Zone edge left a {fix['frames']}-frame chunk at frames "
+              f"{fix['start']}-{fix['end']}; moved the chunk boundary up against the zone, "
+              f"so that chunk now runs {fix['new_start']}-{fix['new_end']} with its existing settings.{RESET}")
+
+    # Anything still too short disagrees with both neighbours on settings, so it
+    # cannot be absorbed without changing how those frames are encoded.
+    for scene in scenes_data.get("split_scenes") or []:
+        length = scene["end_frame"] - scene["start_frame"]
+        if length >= MIN_USEFUL_SCENE_FRAMES:
+            continue
+        where = f"frames {scene['start_frame']}-{scene['end_frame']}"
+        if scene["zone_overrides"]:
+            print(f"{RED}[Dispatch] Warning: the zone at {where} is only {length} frame(s) long and is encoded as its own "
+                  f"chunk. Widen that range in the zones file if that was not intended.{RESET}")
+        else:
+            print(f"{RED}[Dispatch] Warning: a {length}-frame chunk remains at {where}, between two zones that use "
+                  f"different settings, so it cannot be absorbed. Close that gap in the zones file to remove it.{RESET}")
+
+    output_path = zoned_scenes_path(scenes_json_path)
+    with open(output_path, "w", encoding="utf-8") as f:
+        json.dump(scenes_data, f, indent=2)
+
+    print(f"[Dispatch] Wrote zoned scenes file: {output_path}")
+    print(f"{BLUE}[Dispatch] Zones from {zones_filename} are applied to this encode.{RESET}")
+    return output_path
+
+
 def main():
     # --- Configuration ---
     script_path = os.path.abspath(__file__)
     tools_dir = os.path.dirname(script_path)
     root_dir = os.path.dirname(tools_dir)
-
-    # Read (and if hand-edited/mis-encoded, repair) the shared worker-count
-    # config up front, so every later consumer sees a clean file and value.
-    cfg_workers = read_and_repair_workercount_config(tools_dir)
     
     video_input_dir = os.path.join(root_dir, "video-input")
     video_output_dir = os.path.join(root_dir, "video-output")
@@ -1691,12 +1464,6 @@ def main():
         os.makedirs(video_output_dir)
     if not os.path.exists(temp_dir):
         os.makedirs(temp_dir)
-
-    # --- Rename Source Files To Python-Safe Names (must be the first step) ---
-    # Do this before argument parsing, scene detection or anything else touches
-    # the files, so every later stage only ever sees ".", a-z, A-Z and 0-9.
-    extensions = ("*.mkv", "*.mp4", "*.m2ts")
-    sanitize_input_filenames(video_input_dir, extensions)
         
     # --- Argument Parsing ---
     args = sys.argv[1:]
@@ -1713,10 +1480,6 @@ def main():
     autocrop = False
     convert_yuv420p10 = False
     tonemap_enabled = False
-    # --verbose (verbose mode) shows everything the way it used to be shown.
-    # Without it (default mode), the noisy phases are drawn as simple progress
-    # bars with explanations. --no-verbose is the .bat's VERBOSE= placeholder.
-    verbose_mode = False
     
     i = 0
     while i < len(args):
@@ -1767,17 +1530,8 @@ def main():
         elif arg == "--resume":
             resume = True
             i += 1
-        elif arg == "--verbose":
-            verbose_mode = True
-            i += 1
-        elif arg == "--no-verbose":
-            i += 1
         else:
             i += 1
-
-    simple_mode = RICH_AVAILABLE and not verbose_mode
-    if not RICH_AVAILABLE and not verbose_mode:
-        print("[Dispatch] rich is unavailable; falling back to verbose output.")
 
     # Rewrite relative --fgs-table paths in the encoder params to absolute
     # paths anchored at the package root, so SvtAv1EncApp can open the table
@@ -1794,31 +1548,6 @@ def main():
             workers = custom_enc
             print(f"{BLUE}[Dispatch] Using optimized av1an worker count from bat: {workers}{RESET}")
 
-    # --- Worker Safety Check ---
-    # The workers value can arrive mangled if a hand-edited (UTF-16/BOM)
-    # config file was read by the .bat - recover the number or substitute
-    # the repaired config value so av1an's -w always gets a clean integer.
-    raw_workers = workers
-    workers = sanitize_worker_value(
-        raw_workers, str(cfg_workers) if cfg_workers else "1")
-    if workers != str(raw_workers).strip():
-        print(f"\033[93m[Dispatch] --workers value {raw_workers!r} was "
-              f"invalid - using {workers} instead\033[0m")
-    # If tools\workercount-config.txt says workers=1 (e.g. the benchmark
-    # failed and wrote the safe fallback), do NOT pass --lp 3 to the encoder:
-    # with a single av1an worker, --lp 3 would cap SVT-AV1's threading and
-    # leave most of the CPU idle. Same rule when the effective worker count
-    # being passed to av1an is 1.
-    try:
-        _effective_workers = int(workers)
-    except (TypeError, ValueError):
-        _effective_workers = None
-    if (cfg_workers == 1 or _effective_workers == 1) \
-            and "--lp 3" in final_params:
-        final_params = " ".join(final_params.replace("--lp 3", "").split())
-        print("\033[93m[Dispatch] 1 worker detected, setting --lp mode to "
-              "default auto parallelism\033[0m")
-
     settings_path = os.path.join(root_dir, "settings.txt")
     settings = None
     if denoise_setting is not None:
@@ -1831,9 +1560,11 @@ def main():
         settings = load_script_settings(settings_path)
     ntfy_settings = settings
 
-    setup_svt_av1_fork(tools_dir, selected_fork, avx512=avx512, verbose=verbose_mode)
+    setup_svt_av1_fork(tools_dir, selected_fork, avx512=avx512, verbose=True)
             
     # --- Gather Input Files ---
+    extensions = ("*.mkv", "*.mp4", "*.m2ts")
+    sanitize_input_filenames(video_input_dir, extensions)
     input_files = gather_input_files(video_input_dir, extensions)
     known_input_files = set(input_files)
     
@@ -1843,8 +1574,7 @@ def main():
 
     warn_and_pause_if_paths_too_long(input_files, video_output_dir, temp_dir)
         
-    if not simple_mode:
-        print(f"[Dispatch] Found {len(input_files)} files to process.")
+    print(f"[Dispatch] Found {len(input_files)} files to process.")
 
     # --- Main Processing Loop ---
     timing_reports = []
@@ -1886,13 +1616,7 @@ def main():
                     "-o", json_file 
                 ]
                 try:
-                    if simple_mode:
-                        scene_rc = run_scene_detection_simple(
-                            cmd_scene, cwd=temp_dir, env=scene_detection_env())
-                        if scene_rc != 0:
-                            raise subprocess.CalledProcessError(scene_rc, cmd_scene)
-                    else:
-                        subprocess.check_call(cmd_scene, cwd=temp_dir, env=scene_detection_env())
+                    subprocess.check_call(cmd_scene, cwd=temp_dir, env=scene_detection_env())
                 except subprocess.CalledProcessError:
                     print("[Dispatch] Scene detection failed. Proceeding anyway.")
 
@@ -1923,16 +1647,13 @@ def main():
                 print(f"{BLUE}[Dispatch] HDR source detected. This fork encodes it as-is (set tonemap=True in the .bat to tonemap to SDR).{RESET}")
             elif is_bt709:
                 current_color_flags = bt709_flags
-                if simple_mode:
-                    pass
-                elif is_hdr_fork(selected_fork):
+                if is_hdr_fork(selected_fork):
                     print("[Dispatch] MediaInfo confirmed full BT.709 source; copying BT.709 color settings for SVT-AV1-HDR fork.")
                 else:
                     print("[Dispatch] MediaInfo confirmed full BT.709 source.")
             elif is_bt601:
                 current_color_flags = bt601_flags
-                if not simple_mode:
-                    print("[Dispatch] MediaInfo confirmed full BT.601 source.")
+                print("[Dispatch] MediaInfo confirmed full BT.601 source.")
 
             # 3. Build VapourSynth input script from settings.txt
             vpy_abspath = build_vapoursynth_script(
@@ -1957,8 +1678,20 @@ def main():
             # Clean up double spaces if any
             encoder_params = " ".join(encoder_params.split())
 
+            # 3b. Zones: bake any matching <sxxexx>-zones.txt into a copy of the
+            # scenes JSON. Zones inherit encoder_params, so this has to run after
+            # the color flags are folded in above.
+            scenes_for_av1an = json_abspath
+            try:
+                scenes_for_av1an = apply_zones_file(
+                    input_abspath_origin, json_abspath, encoder_params, photon_noise
+                )
+            except Exception as e:
+                print(f"{RED}[Dispatch] Warning: Could not apply zones file ({e}); encoding without zones.{RESET}")
+                scenes_for_av1an = json_abspath
+
             # We run Av1an in video_input_dir, so artifacts appear there (and we can resume if needed).
-            # We pass json_abspath because the json is in temp.
+            # We pass an absolute scenes path because the json lives in temp.
             cmd_av1an = [
                 av1an_exe,
                 "-i", vpy_abspath,
@@ -1966,35 +1699,22 @@ def main():
                 "--no-defaults",
                 "--photon-noise", photon_noise,
                 "-w", workers,
-                "-s", json_abspath,
+                "-s", scenes_for_av1an,
                 "-o", av1_output,
-                "-v", encoder_params,
-                "--keep"
+                "-v", encoder_params
             ]
             
             if resume:
                 cmd_av1an.append("--resume")
                 
-            if not simple_mode:
-                print(f"[Dispatch] Starting Av1an Encoding...")
+            print(f"[Dispatch] Starting Av1an Encoding...")
             print(f"svt-av1 fork: {svt_fork_display_name(selected_fork)}")
             av1an_started_at = time.monotonic()
             
             try:
                 with keep.running():
                     # Run in video_input_dir so temp folders created by av1an stay with source until done
-                    if simple_mode:
-                        enc_rc = run_av1an_simple(
-                            cmd_av1an,
-                            cwd=video_input_dir,
-                            description="Encoding",
-                            explanation=SIMPLE_EXPLANATION_ENCODING,
-                            temp_search_dir=video_input_dir,
-                        )
-                        if enc_rc != 0:
-                            raise subprocess.CalledProcessError(enc_rc, cmd_av1an)
-                    else:
-                        subprocess.check_call(cmd_av1an, cwd=video_input_dir)
+                    subprocess.check_call(cmd_av1an, cwd=video_input_dir)
             except subprocess.CalledProcessError:
                 print("[Dispatch] Encoding failed.")
                 send_ntfy_notification(
@@ -2016,8 +1736,7 @@ def main():
             av1_file_dst = os.path.join(temp_dir, f"{basename}-av1.mkv")
             av1_folder_dst = os.path.join(temp_dir, basename)
             
-            if not simple_mode:
-                print("[Dispatch] Moving encoding artifacts to temp folder...")
+            print("[Dispatch] Moving encoding artifacts to temp folder...")
             
             # Move the folder
             if os.path.exists(av1_folder_src):
@@ -2028,8 +1747,7 @@ def main():
                         print(f"[Dispatch] Warning: Failed to clean destination folder {av1_folder_dst}: {e}")
                 try:
                     shutil.move(av1_folder_src, av1_folder_dst)
-                    if not simple_mode:
-                        print(f"[Dispatch] Moved folder: {av1_folder_src} -> {av1_folder_dst}")
+                    print(f"[Dispatch] Moved folder: {av1_folder_src} -> {av1_folder_dst}")
                 except Exception as e:
                     print(f"[Dispatch] Error moving folder: {e}")
             else:
@@ -2044,39 +1762,23 @@ def main():
                         print(f"[Dispatch] Warning: Failed to clean destination file {av1_file_dst}: {e}")
                 try:
                     shutil.move(av1_file_src, av1_file_dst)
-                    if not simple_mode:
-                        print(f"[Dispatch] Moved file: {av1_file_src} -> {av1_file_dst}")
+                    print(f"[Dispatch] Moved file: {av1_file_src} -> {av1_file_dst}")
                 except Exception as e:
                     print(f"[Dispatch] Error moving encoded file: {e}")
             else:
                 print(f"[Dispatch] Warning: Expected encoded file not found at {av1_file_src}")
 
             # 4. Tagging (using av1an-tag.py)
-            if not simple_mode:
-                print("[Dispatch] Applying Tags...")
+            print("[Dispatch] Applying Tags...")
             try:
-                if simple_mode:
-                    tag_rc = run_quiet([sys.executable, tag_script], cwd=temp_dir,
-                                       label="Tagging output")
-                    if tag_rc != 0:
-                        raise subprocess.CalledProcessError(tag_rc, tag_script)
-                else:
-                    subprocess.check_call([sys.executable, tag_script], cwd=temp_dir)
+                subprocess.check_call([sys.executable, tag_script], cwd=temp_dir)
             except subprocess.CalledProcessError:
                 print("[Dispatch] Warning: Tagging reported an error.")
 
             # 5. Muxing (using av1an-mux.py)
-            if not simple_mode:
-                print("[Dispatch] Muxing...")
+            print("[Dispatch] Muxing...")
             try:
-                if simple_mode:
-                    mux_rc = run_with_mux_progress(
-                        [sys.executable, mux_script], cwd=temp_dir,
-                        description="Muxing")
-                    if mux_rc != 0:
-                        raise subprocess.CalledProcessError(mux_rc, mux_script)
-                else:
-                    subprocess.check_call([sys.executable, mux_script], cwd=temp_dir)
+                subprocess.check_call([sys.executable, mux_script], cwd=temp_dir)
             except subprocess.CalledProcessError:
                 print("[Dispatch] Muxing failed.")
                 continue
@@ -2086,8 +1788,7 @@ def main():
             
             output_moved = False
             if os.path.exists(temp_output_mkv):
-                if not simple_mode:
-                    print(f"[Dispatch] Moving final file to: {final_output_path}")
+                print(f"[Dispatch] Moving final file to: {final_output_path}")
                 try:
                     shutil.move(temp_output_mkv, final_output_path)
                     output_moved = True

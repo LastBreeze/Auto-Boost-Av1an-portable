@@ -326,8 +326,8 @@ def main():
     film_grain_note = ""
 
     if fork == "5fish":
-        fast_params = f"--lineart-psy-bias 3 --texture-psy-bias 3 --hbd-mds 0{luminance_param}"
-        final_params = f"--lineart-psy-bias 3 --texture-psy-bias 3 --hbd-mds 1{luminance_param} --lp 3 --photon-noise 200"
+        fast_params = f"--scd 0 --lineart-psy-bias 3 --texture-psy-bias 3 --hbd-mds 0{luminance_param}"
+        final_params = f"--scd 0 --lineart-psy-bias 3 --texture-psy-bias 3 --hbd-mds 1{luminance_param} --lp 3 --photon-noise 200"
         has_rename = False
     elif fork == "essential":
         fast_params = f"--scd 0 --enable-dlf 3{dist_preset}{luminance_param}"

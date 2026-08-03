@@ -540,19 +540,37 @@ def cleanup_temp_folders():
 
 
 def kill_process_tree(pid):
-    """Kills a process and all of its children."""
+    """Kills a process and all of its children.
+
+    Fully race-proof: the target can die on its own at ANY point between
+    these calls (e.g. av1an exiting right as the RAM guard fires), and
+    psutil raises NoSuchProcess from surprising places (children() looks up
+    the parent again internally). A kill helper must never be able to crash
+    the benchmark - every step is individually guarded."""
     try:
         parent = psutil.Process(pid)
-    except psutil.NoSuchProcess:
+    except (psutil.NoSuchProcess, psutil.AccessDenied):
         return
-    for child in parent.children(recursive=True):
+    except Exception:
+        return
+    try:
+        children = parent.children(recursive=True)
+    except (psutil.NoSuchProcess, psutil.AccessDenied):
+        children = []
+    except Exception:
+        children = []
+    for child in children:
         try:
             child.kill()
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             pass
+        except Exception:
+            pass
     try:
         parent.kill()
     except (psutil.NoSuchProcess, psutil.AccessDenied):
+        pass
+    except Exception:
         pass
 
 
@@ -1465,9 +1483,10 @@ def run_benchmark(input_path, encoder_params):
     if ram_limited:
         print(f"   - RAM-limited counts (unsafe on this system): {sorted(set(ram_limited))}")
     if best is None:
-        best = max(1, cpu_threads // (lp + 1))
-        print(f"   - WARNING: No candidate produced throughput. "
-              f"Falling back to {best} workers (threads/(lp+1)).")
+        best = 1
+        print("   - WARNING: No candidate produced throughput (all benchmarks "
+              "failed). Falling back to 1 worker (safe default; --lp 3 is "
+              "dropped by the dispatcher at 1 worker).")
     else:
         print(f"   - Calculated Optimal Workers: {best}")
     print("------------------------------------------------")
@@ -1524,8 +1543,30 @@ def run_normal_mode():
               f"benchmark. Falling back to {fallback} workers (threads/4).")
         workers = fallback
     else:
-        workers = run_benchmark(SAMPLE_FILE, ENCODER_PARAMS)
-        cleanup_temp_folders()
+        # SAFETY NET: if the benchmark dies for ANY reason, the config file
+        # must still be written - a missing workercount-config.txt cascades
+        # into the dispatcher calling Auto-Boost-Av1an.py with a bare
+        # "--workers" (no value) and the whole encode failing. When the
+        # benchmark fails, 1 worker is the guaranteed-safe answer (and the
+        # dispatchers drop --lp 3 for workers=1 so SVT-AV1 still uses the
+        # whole CPU via its default auto parallelism).
+        try:
+            workers = run_benchmark(SAMPLE_FILE, ENCODER_PARAMS)
+        except Exception as e:
+            workers = 1
+            print(f"\n   ! Benchmark aborted unexpectedly ({type(e).__name__}: {e}).",
+                  file=sys.stderr)
+            print("   Falling back to 1 worker (safe default) so the config "
+                  "still gets written.", file=sys.stderr)
+            try:
+                kill_svt_stragglers()
+            except Exception:
+                pass
+        finally:
+            try:
+                cleanup_temp_folders()
+            except Exception:
+                pass
 
     if write_config(workers):
         print("\nOne-time test complete. Auto worker count set.")
@@ -1625,7 +1666,22 @@ def run_optimize_mode(bat_arg=None):
               f"Benchmarking the raw sample instead.")
         input_path = source_path
 
-    workers = run_benchmark(input_path, encoder_params)
+    # SAFETY NET: any unexpected benchmark failure must still yield a worker
+    # count - otherwise the .bat continues with an empty value and the
+    # dispatcher's "--workers" call fails the whole encode. 1 worker is the
+    # guaranteed-safe fallback (dispatchers drop --lp 3 for workers=1).
+    try:
+        workers = run_benchmark(input_path, encoder_params)
+    except Exception as e:
+        workers = 1
+        print(f"\n   ! Benchmark aborted unexpectedly ({type(e).__name__}: {e}).",
+              file=sys.stderr)
+        print("   Falling back to 1 worker (safe default) so the config "
+              "still gets written.", file=sys.stderr)
+        try:
+            kill_svt_stragglers()
+        except Exception:
+            pass
 
     if set_bat_value(bat_path, "custom-av1an-workers", workers):
         print(f"[Optimize] Wrote custom-av1an-workers={workers} into {os.path.basename(bat_path)}")

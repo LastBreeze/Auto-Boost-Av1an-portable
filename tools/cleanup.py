@@ -142,5 +142,14 @@ def cleanup_workspace():
             except OSError as e:
                 print(f"Error deleting {os.path.basename(file_path)}: {e}")
 
+    # 8. Delete sample.mkv*.bsindex left next to this script (tools\)
+    sample_bsindex_files = glob.glob(os.path.join(script_dir, 'sample.mkv*.bsindex'))
+    for file_path in sample_bsindex_files:
+        try:
+            os.remove(file_path)
+            print(f"Deleted file from tools: {os.path.basename(file_path)}")
+        except OSError as e:
+            print(f"Error deleting {os.path.basename(file_path)}: {e}")
+
 if __name__ == "__main__":
     cleanup_workspace()

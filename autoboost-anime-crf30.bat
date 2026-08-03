@@ -3,7 +3,7 @@
 set "FAST_PARAMS=--lineart-psy-bias 3 --texture-psy-bias 3 --hbd-mds 0"
 set "FINAL_PARAMS=--lineart-psy-bias 3 --texture-psy-bias 3 --hbd-mds 1 --lp 3 --photon-noise 200"
 set "FINAL_SPEED=4"
-set "QUALITY=30"
+set "CRF=30"
 :: Set photon noise to 0 if using film-grain
 set "fork=5fish"
 :: example forks: 5fish, essential, hdr, custom
@@ -89,10 +89,12 @@ echo Encoding inputs from: video-input
 echo Outputs will go to:   video-output
 echo.
 
-"VapourSynth\python.exe" "tools\dispatch.py" --fork %fork% --avx512 %AVX512% --denoise %DENOISE% --quality %QUALITY% --ssimu2 %SSIMU2_TOOL% --verbose --ssimu2-cpu-workers %SSIMU2_WORKERS% --resume --fast-speed 8 --final-speed %FINAL_SPEED% --workers %WORKER_COUNT% --fast-params "%FAST_PARAMS%" --final-params "%FINAL_PARAMS%"
+"VapourSynth\python.exe" "tools\dispatch.py" --fork %fork% --avx512 %AVX512% --denoise %DENOISE% --crf %CRF% --ssimu2 %SSIMU2_TOOL% --ssimu2-cpu-workers %SSIMU2_WORKERS% --resume --fast-speed 8 --final-speed %FINAL_SPEED% --workers %WORKER_COUNT% --fast-params "%FAST_PARAMS%" --final-params "%FINAL_PARAMS%"
 
 echo.
 echo All tasks finished.
+echo Ctrl+C to keep temp files and exit.
+echo Or, to cleaup temp files:
 pause
 
 :: --- STEP 3: CLEANUP ---

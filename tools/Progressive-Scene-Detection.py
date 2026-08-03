@@ -64,6 +64,7 @@
 #   output, including progress bars, passes through unchanged.
 
 import argparse
+from collections import deque
 from collections.abc import Callable
 import copy
 from datetime import datetime
@@ -98,6 +99,43 @@ class NumpyEncoder(json.JSONEncoder):
             return object.tolist()
         else:
             return super(NumpyEncoder, self).default(object)
+
+class RollingFPS:
+    # Rolling-window fps counter for progress displays. `update(count)`
+    # records the cumulative frame count at the current time, and
+    # `current()` returns the rate calculated over only the samples
+    # recorded within the last `window` seconds, so the display reflects
+    # recent speed instead of the average since the very start. Once
+    # `freeze()` is called, the last rolling rate is locked in place and
+    # returned forever after, so a process that has finished keeps
+    # displaying the speed it was running at when it completed.
+    def __init__(self, window=10.0):
+        self.window = window
+        self.samples = deque()
+        self.frozen = None
+
+    def update(self, count):
+        if self.frozen is not None:
+            return
+        now = time.time()
+        self.samples.append((now, count))
+        while len(self.samples) > 2 and now - self.samples[0][0] > self.window:
+            self.samples.popleft()
+
+    def current(self):
+        if self.frozen is not None:
+            return self.frozen
+        if len(self.samples) < 2:
+            return 0.0
+        span = self.samples[-1][0] - self.samples[0][0]
+        if span <= 0.0:
+            return 0.0
+        return (self.samples[-1][1] - self.samples[0][1]) / span
+
+    def freeze(self):
+        if self.frozen is None:
+            self.frozen = self.current()
+        return self.frozen
 
 # ---------------------------------------------------------------------
 # Suppress harmless audio-related WARN messages from av1an.
@@ -1941,20 +1979,23 @@ if not resume or not scene_detection_scenes_file.exists():
             return counted
         scene_detection_x264_progress_time = 0.0
         scene_detection_x264_progress_frames = 0
-        scene_detection_x264_start = time.time() - 0.000001
+        scene_detection_x264_fps = RollingFPS()
+        scene_detection_x264_fps.update(0)
         def scene_detection_x264_progress():
             global scene_detection_x264_progress_time, scene_detection_x264_progress_frames
-            if time.time() - scene_detection_x264_progress_time >= 1:
+            if scene_detection_x264_fps.frozen is None and time.time() - scene_detection_x264_progress_time >= 1:
                 scene_detection_x264_progress_time = time.time()
                 scene_detection_x264_progress_frames = min(scene_detection_x264_count_stats_frames(), scene_detection_x264_total_frames)
+                scene_detection_x264_fps.update(scene_detection_x264_progress_frames)
             if scene_detection_x264_process.poll() is not None or scene_detection_x264_total_frames <= 0:
                 scene_detection_x264_progress_percent = 100.0
                 scene_detection_x264_progress_frames_display = scene_detection_x264_total_frames_print
+                # The x264 process has finished: lock the rolling fps in place.
+                scene_detection_x264_fps.freeze()
             else:
                 scene_detection_x264_progress_percent = scene_detection_x264_progress_frames / scene_detection_x264_total_frames * 100
                 scene_detection_x264_progress_frames_display = scene_detection_x264_progress_frames
-            scene_detection_x264_progress_fps = scene_detection_x264_progress_frames_display / (time.time() - scene_detection_x264_start)
-            return scene_detection_x264_progress_frames_display, scene_detection_x264_progress_percent, scene_detection_x264_progress_fps
+            return scene_detection_x264_progress_frames_display, scene_detection_x264_progress_percent, scene_detection_x264_fps.current()
 
 
     if scene_detection_perform_av1an:
@@ -2040,6 +2081,8 @@ if not resume or not scene_detection_scenes_file.exists():
             if zone["zone"].scene_detection_method in ["x264_vapoursynth", "vapoursynth"]:
                 scene_detection_vapoursynth_total_frames += zone["end_frame"] - zone["start_frame"]
         scene_detection_vapoursynth_processed_frames = 0
+        scene_detection_vapoursynth_fps = RollingFPS()
+        scene_detection_vapoursynth_fps.update(0)
         for zone_i, zone in enumerate(zones):
             assert zone["zone"].scene_detection_method in ["av1an", "x264_vapoursynth", "vapoursynth", "external"], "Invalid `scene_detection_method`. Please check your config inside `Progression-Boost.py`."
 
@@ -2058,10 +2101,10 @@ if not resume or not scene_detection_scenes_file.exists():
                 luma_scenecut = np.zeros((scene_detection_clip.num_frames,), dtype=bool)
                 luma_scenecut_prev = True
 
-                start = time.time() - 0.000001
                 for offset_frame, frame in enumerate(scene_detection_clip.frames(backlog=48)):
                     current_frame = zone["start_frame"] + offset_frame
-                    scene_detection_vapoursynth_line = f"{frame_print(current_frame)} / {(scene_detection_vapoursynth_processed_frames + offset_frame + 1) / scene_detection_vapoursynth_total_frames * 100:5.1f}% / VapourSynth based scene detection / {offset_frame / (time.time() - start):.2f} fps"
+                    scene_detection_vapoursynth_fps.update(scene_detection_vapoursynth_processed_frames + offset_frame + 1)
+                    scene_detection_vapoursynth_line = f"{frame_print(current_frame)} / {(scene_detection_vapoursynth_processed_frames + offset_frame + 1) / scene_detection_vapoursynth_total_frames * 100:5.1f}% / VapourSynth based scene detection / {scene_detection_vapoursynth_fps.current():.2f} fps"
                     if scene_detection_perform_x264:
                         scene_detection_x264_line_frames, scene_detection_x264_line_percent, scene_detection_x264_line_fps = scene_detection_x264_progress()
                         scene_detection_x264_line = f"{frame_print(scene_detection_x264_line_frames)} / {scene_detection_x264_line_percent:5.1f}% / x264 based scene detection / {scene_detection_x264_line_fps:.2f} fps"
@@ -2096,7 +2139,7 @@ if not resume or not scene_detection_scenes_file.exists():
                 zones_luma_scenecut[zone_i] = luma_scenecut
                 scene_detection_vapoursynth_processed_frames += scene_detection_clip.num_frames
 
-        print(f"\r\033[K{frame_print(current_frame + 1)} / 100.0% / VapourSynth based scene detection complete", end="\n", flush=True)
+        print(f"\r\033[K{frame_print(current_frame + 1)} / 100.0% / VapourSynth based scene detection complete / {scene_detection_vapoursynth_fps.freeze():.2f} fps", end="\n", flush=True)
         if scene_detection_perform_x264:
             print("\r\033[K", end="", flush=True)
 
@@ -2139,7 +2182,7 @@ if not resume or not scene_detection_scenes_file.exists():
                   "open-GOP sources; make sure the BestSource VapourSynth plugin is installed so this script can "
                   "use it, and delete the temporary scene-detection folder before rerunning.\033[0m", flush=True)
             raise subprocess.CalledProcessError(scene_detection_x264_process.returncode, "av1an (x264 based scene detection)")
-        print(f"\r\033[K{frame_print(scene_detection_x264_total_frames_print)} / 100.0% / x264 based scene detection finished", end="\n", flush=True)
+        print(f"\r\033[K{frame_print(scene_detection_x264_total_frames_print)} / 100.0% / x264 based scene detection finished / {scene_detection_x264_fps.freeze():.2f} fps", end="\n", flush=True)
 
         zones_x264_scenecut = {}
         scene_detection_match_x264_I = re.compile(r"^in:(\d+) out:\d+ type:(\w)")

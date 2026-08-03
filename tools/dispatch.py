@@ -1028,17 +1028,17 @@ def warn_and_pause_if_paths_too_long(input_files, video_output_dir, temp_dir):
 
 # --- Python-safe source filename normalization ---
 # Every source video is renamed before anything else runs so that its filename
-# contains ONLY "." , a-z, A-Z and 0-9. Characters outside that set are folded
-# to their closest plain-ASCII equivalent first (o-with-macron -> o, sharp s ->
-# ss, ae-ligature -> ae, Cyrillic and Greek letters transliterated) and are
-# dropped when no equivalent exists (CJK, emoji, punctuation, brackets, spaces).
-# Doing this up front means ffmpeg, ffms2/VapourSynth, x264, av1an,
+# contains ONLY "." , "-" , a-z, A-Z and 0-9. Characters outside that set are
+# folded to their closest plain-ASCII equivalent first (o-with-macron -> o,
+# sharp s -> ss, ae-ligature -> ae, Cyrillic and Greek letters transliterated)
+# and are dropped when no equivalent exists (CJK, emoji, punctuation, brackets,
+# spaces). Doing this up front means ffmpeg, ffms2/VapourSynth, x264, av1an,
 # SvtAv1EncApp, MediaInfo and mkvmerge only ever see a plain ASCII path.
 FILENAME_ALLOWED_CHARS = frozenset(
     "abcdefghijklmnopqrstuvwxyz"
     "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
     "0123456789"
-    "."
+    ".-"
 )
 
 # What replaces spaces and every other kind of whitespace. "" deletes them,
@@ -1126,7 +1126,7 @@ def fold_char_to_ascii(ch):
 
 
 def sanitize_filename_stem(stem):
-    """Reduce a filename stem to "." , a-z, A-Z and 0-9 only."""
+    """Reduce a filename stem to "." , "-" , a-z, A-Z and 0-9 only."""
     pieces = []
     for ch in stem:
         if ch in FILENAME_ALLOWED_CHARS:
@@ -1139,12 +1139,16 @@ def sanitize_filename_stem(stem):
     # A leading dot hides the file, Windows silently drops a trailing dot, and
     # runs of dots confuse extension parsing - normalize all three.
     safe = re.sub(r"\.{2,}", ".", safe).strip(".")
+    # Hyphens are kept anywhere inside the name, but a leading one would make
+    # the filename look like a command-line switch to the backend tools.
+    safe = safe.lstrip("-")
     return safe or FILENAME_FALLBACK_STEM
 
 
 def sanitize_filename_extension(ext):
     """Return a lowercase extension built only from a-z and 0-9."""
-    body = "".join(c for c in ext.lower() if c in FILENAME_ALLOWED_CHARS and c != ".")
+    body = "".join(c for c in ext.lower()
+                   if c in FILENAME_ALLOWED_CHARS and c not in ".-")
     return f".{body}" if body else ""
 
 
@@ -1171,7 +1175,7 @@ def _blocked_by_other_file(dst_path, src_path):
 
 
 def sanitize_input_filenames(video_input_dir, extensions):
-    """Rename every source video so its name holds only "." , a-z, A-Z and 0-9.
+    """Rename every source video so its name holds only "." , "-" , a-z, A-Z and 0-9.
 
     This is the first step that touches the input files - it runs before scene
     detection, encoding, tagging and muxing - so no downstream tool ever has to
@@ -1211,7 +1215,7 @@ def sanitize_input_filenames(video_input_dir, extensions):
             print(f"{RED}[Dispatch] ERROR: could not rename {filename} -> "
                   f"{os.path.basename(dst_path)}: {e}{RESET}")
             print(f"{RED}[Dispatch]        Close anything using that file, or rename it by hand "
-                  f"so it only contains '.', a-z and 0-9, then run this again.{RESET}")
+                  f"so it only contains '.', '-', a-z and 0-9, then run this again.{RESET}")
             continue
 
         renamed += 1
