@@ -17,6 +17,46 @@
 # Auto-Boost-Essential
 # Modified for Av1an + Standard SVT-AV1 flow + FFVship + Zones Support
 
+import os as _bootstrap_os
+
+PLUGIN_ENV_VAR = "VAPOURSYNTH_EXTRA_PLUGIN_PATH"
+
+
+def vs_plugin_dir():
+    """Absolute path to the package's vs-plugins folder, or "" if it is gone."""
+    root_dir = _bootstrap_os.path.dirname(_bootstrap_os.path.dirname(_bootstrap_os.path.abspath(__file__)))
+    candidate = _bootstrap_os.path.join(root_dir, "VapourSynth", "vs-plugins")
+    return candidate if _bootstrap_os.path.isdir(candidate) else ""
+
+
+def ensure_vs_plugin_path():
+    """Point VapourSynth at the package's vs-plugins folder.
+
+    VapourSynth used to run in portable mode: a portable.vs marker next to
+    python.exe made the core autoload VapourSynth\\vs-plugins, which is where
+    this package keeps ffms2, DFTTest, libvs_placebo and vszip. VapourSynth 78
+    dropped that and reads VAPOURSYNTH_EXTRA_PLUGIN_PATH instead; without it
+    scripts fail with "No attribute with the name ffms2 exists".
+
+    This has to run before vstools pulls in a core, so it sits above the
+    imports. Child processes inherit the variable.
+    """
+    found = vs_plugin_dir()
+    if not found:
+        return ""
+
+    existing = [part for part in _bootstrap_os.environ.get(PLUGIN_ENV_VAR, "").split(_bootstrap_os.pathsep) if part]
+    if not existing:
+        # Set a single path: valid whether the core reads one path or a list.
+        _bootstrap_os.environ[PLUGIN_ENV_VAR] = found
+    elif not any(_bootstrap_os.path.normcase(part) == _bootstrap_os.path.normcase(found) for part in existing):
+        _bootstrap_os.environ[PLUGIN_ENV_VAR] = _bootstrap_os.pathsep.join(existing + [found])
+
+    return found
+
+
+ensure_vs_plugin_path()
+
 from vstools import vs, core, depth, DitherType, clip_async_render
 try:
     from vstools.functions.progress import get_render_progress, FPSColumn
@@ -52,7 +92,7 @@ import numpy as np
 import concurrent.futures
 from svt_fork_setup import setup_svt_av1_fork
 
-ver_str = "v3.1.1"
+ver_str = "v3.1.3"
 
 # --- TOOL PATHS HELPER ---
 def resolve_tool(portable_path_str: str, binary_name: str) -> Path:
@@ -943,6 +983,11 @@ if not rebuild_vpy:
         elif filter_state_marker not in _existing_vpy_text:
             console.print("[yellow]Existing VapourSynth script filter state differs from settings.txt; rebuilding.[/yellow]")
             rebuild_vpy = True
+        elif "_plugin_dir" not in _existing_vpy_text:
+            # Written before the vs-plugins fallback existed; on VapourSynth 78
+            # it would fail to find ffms2.
+            console.print("[yellow]Existing VapourSynth script predates the plugin fallback; rebuilding.[/yellow]")
+            rebuild_vpy = True
     except Exception:
         rebuild_vpy = True
 
@@ -973,6 +1018,19 @@ except Exception:
     DFTTest = None
 core.max_cache_size = 1024
 {filter_state}
+
+# VapourSynth 78 dropped the portable.vs autoload of the package's vs-plugins
+# folder, so ffms2/DFTTest/placebo/vszip are loaded by hand when the core did
+# not pick them up on its own. A no-op on installs that still autoload.
+import os as _os
+_plugin_dir = r"{plugin_dir}"
+if _plugin_dir and not hasattr(core, "ffms2") and _os.path.isdir(_plugin_dir):
+    for _dll in sorted(_os.listdir(_plugin_dir)):
+        if _dll.lower().endswith(".dll"):
+            try:
+                core.std.LoadPlugin(_os.path.join(_plugin_dir, _dll))
+            except Exception:
+                pass
 
 # Load Source
 src = core.ffms2.Source(source=r"{source}", cachefile=r"{cache}")
@@ -1081,9 +1139,10 @@ final.set_output(0)
     # Write Windows VPY (Absolute paths okay here for local python)
     with open(vpy_file, 'w') as file:
         file.write(vpy_template.format(
-            source=src_file, 
-            cache=cache_file, 
-            ct=crop_top, 
+            source=src_file,
+            cache=cache_file,
+            plugin_dir=vs_plugin_dir(),
+            ct=crop_top,
             cb=crop_bottom,
             cl=crop_left,
             cr=crop_right,

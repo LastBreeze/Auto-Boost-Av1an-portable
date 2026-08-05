@@ -18,6 +18,44 @@ BLUE = "\033[94m"
 RED = "\033[91m"
 RESET = "\033[0m"
 
+PLUGIN_ENV_VAR = "VAPOURSYNTH_EXTRA_PLUGIN_PATH"
+
+
+def vs_plugin_dir():
+    """Absolute path to the package's vs-plugins folder, or "" if it is gone."""
+    root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    candidate = os.path.join(root_dir, "VapourSynth", "vs-plugins")
+    return candidate if os.path.isdir(candidate) else ""
+
+
+def ensure_vs_plugin_path():
+    """Point VapourSynth at the package's vs-plugins folder.
+
+    VapourSynth used to run in portable mode: a portable.vs marker next to
+    python.exe made the core autoload VapourSynth\\vs-plugins, which is where
+    this package keeps ffms2, DFTTest, libvs_placebo and vszip. VapourSynth 78
+    dropped that and reads VAPOURSYNTH_EXTRA_PLUGIN_PATH instead; without it
+    the generated scripts fail with "No attribute with the name ffms2 exists".
+
+    Child processes (av1an, vspipe, cropdetect) inherit the variable, so one
+    call at startup covers the whole run.
+    """
+    found = vs_plugin_dir()
+    if not found:
+        return ""
+
+    existing = [part for part in os.environ.get(PLUGIN_ENV_VAR, "").split(os.pathsep) if part]
+    if not existing:
+        # Set a single path: valid whether the core reads one path or a list.
+        os.environ[PLUGIN_ENV_VAR] = found
+    elif not any(os.path.normcase(part) == os.path.normcase(found) for part in existing):
+        os.environ[PLUGIN_ENV_VAR] = os.pathsep.join(existing + [found])
+
+    return found
+
+
+ensure_vs_plugin_path()
+
 
 def format_elapsed_hhmmss(seconds):
     """Format elapsed seconds as hh:mm:ss, allowing totals longer than 24 hours."""
@@ -882,6 +920,11 @@ def build_vapoursynth_script(source_path, temp_dir, tools_dir, settings, autocro
             elif filter_state_marker not in existing_vpy_text:
                 print(f"[Dispatch] Existing VapourSynth script filter state differs; rebuilding: {vpy_file}")
                 rebuild_vpy = True
+            elif "_plugin_dir" not in existing_vpy_text:
+                # Written before the vs-plugins fallback existed; on VapourSynth
+                # 78 it would fail to find ffms2.
+                print(f"[Dispatch] Existing VapourSynth script predates the plugin fallback; rebuilding: {vpy_file}")
+                rebuild_vpy = True
         except Exception as e:
             print(f"[Dispatch] Warning: Could not inspect existing VapourSynth script ({e}); rebuilding: {vpy_file}")
             rebuild_vpy = True
@@ -911,6 +954,19 @@ except Exception:
     DFTTest = None
 core.max_cache_size = 1024
 {filter_state}
+
+# VapourSynth 78 dropped the portable.vs autoload of the package's vs-plugins
+# folder, so ffms2/DFTTest/placebo/vszip are loaded by hand when the core did
+# not pick them up on its own. A no-op on installs that still autoload.
+import os as _os
+_plugin_dir = r"{plugin_dir}"
+if _plugin_dir and not hasattr(core, "ffms2") and _os.path.isdir(_plugin_dir):
+    for _dll in sorted(_os.listdir(_plugin_dir)):
+        if _dll.lower().endswith(".dll"):
+            try:
+                core.std.LoadPlugin(_os.path.join(_plugin_dir, _dll))
+            except Exception:
+                pass
 
 # Load Source
 src = core.ffms2.Source(source=r"{source}", cachefile=r"{cache}")
@@ -1011,6 +1067,7 @@ final.set_output(0)
             f.write(vpy_template.format(
                 source=source_path,
                 cache=cache_file,
+                plugin_dir=vs_plugin_dir(),
                 ct=crop_top,
                 cb=crop_bottom,
                 cl=crop_left,
