@@ -187,6 +187,14 @@ s_crop_right = get_script_setting(script_settings, "right", "0")
 s_downscale = get_script_setting(script_settings, "downscale", "False")
 s_target_res = get_script_setting(script_settings, "target_resolution", "1920x1080")
 s_kernel = get_script_setting(script_settings, "kernel_type", "Hermite")
+s_dehalo = get_script_setting(script_settings, "dehalo", "False")
+s_dehalo_rx = get_script_setting(script_settings, "dehalo_rx", "2.0")
+s_dehalo_ry = get_script_setting(script_settings, "dehalo_ry", "2.0")
+s_dehalo_brightstr = get_script_setting(script_settings, "dehalo_brightstr", "1.0")
+s_dehalo_darkstr = get_script_setting(script_settings, "dehalo_darkstr", "0.0")
+s_dehalo_lowsens = get_script_setting(script_settings, "dehalo_lowsens", "50")
+s_dehalo_highsens = get_script_setting(script_settings, "dehalo_highsens", "50")
+s_dehalo_ss = get_script_setting(script_settings, "dehalo_ss", "1.5")
 s_denoise = get_script_setting(script_settings, "denoise", "False")
 s_denoise_setting = get_script_setting(script_settings, "denoise_setting", "")
 s_deband = get_script_setting(script_settings, "deband", "False")
@@ -194,8 +202,38 @@ s_deband_setting = get_script_setting(script_settings, "deband_setting", "")
 
 # Normalize boolean string
 do_downscale_bool = s_downscale.lower() == "true"
+do_dehalo_bool = s_dehalo.lower() == "true"
 do_denoise_bool = s_denoise.lower() == "true"
 do_deband_bool = s_deband.lower() == "true"
+
+# Dehalo values are written straight into the generated .vpy, so they are
+# validated here instead of trusting whatever is in settings.txt.
+dehalo_setting_warnings: list[str] = []
+
+
+def _read_dehalo_float(value: str, key_name: str, default_value: float,
+                       minimum: float | None = None, maximum: float | None = None) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        dehalo_setting_warnings.append(f"Invalid {key_name}={value!r}; using {default_value}.")
+        return default_value
+    if minimum is not None and parsed < minimum:
+        dehalo_setting_warnings.append(f"{key_name}={parsed} is below {minimum}; using {minimum}.")
+        return minimum
+    if maximum is not None and parsed > maximum:
+        dehalo_setting_warnings.append(f"{key_name}={parsed} is above {maximum}; using {maximum}.")
+        return maximum
+    return parsed
+
+
+dehalo_rx = _read_dehalo_float(s_dehalo_rx, "dehalo_rx", 2.0, minimum=1.0)
+dehalo_ry = _read_dehalo_float(s_dehalo_ry, "dehalo_ry", 2.0, minimum=1.0)
+dehalo_brightstr = _read_dehalo_float(s_dehalo_brightstr, "dehalo_brightstr", 1.0, minimum=0.0, maximum=1.0)
+dehalo_darkstr = _read_dehalo_float(s_dehalo_darkstr, "dehalo_darkstr", 0.0, minimum=0.0, maximum=1.0)
+dehalo_lowsens = _read_dehalo_float(s_dehalo_lowsens, "dehalo_lowsens", 50.0, minimum=0.0, maximum=100.0)
+dehalo_highsens = _read_dehalo_float(s_dehalo_highsens, "dehalo_highsens", 50.0, minimum=0.0, maximum=100.0)
+dehalo_ss = _read_dehalo_float(s_dehalo_ss, "dehalo_ss", 1.5, minimum=1.0)
 # -----------------------
 
 stage = int(args.stage)
@@ -710,6 +748,13 @@ def report_filter_status() -> None:
         active_filters.append("tonemap: HDR -> SDR (BT.709) via libplacebo")
     if do_downscale_bool:
         active_filters.append(f"downscale: target_resolution={s_target_res}, kernel_type={s_kernel}")
+    if do_dehalo_bool:
+        active_filters.append(
+            f"dehalo: rx={dehalo_rx}, ry={dehalo_ry}, brightstr={dehalo_brightstr}, "
+            f"darkstr={dehalo_darkstr}, lowsens={dehalo_lowsens}, highsens={dehalo_highsens}, ss={dehalo_ss}"
+        )
+        for warning in dehalo_setting_warnings:
+            console.print(f"[yellow]{warning}[/yellow]")
     if do_denoise_bool:
         active_filters.append(f"denoise: denoise_setting={s_denoise_setting or 'enabled'}")
     if do_deband_bool:
@@ -880,6 +925,13 @@ else:
     console.print(f"[yellow]Unknown crop mode {s_crop_mode!r}; using auto.[/yellow]")
     crop_mode = "auto"
 
+# Marker written into the generated .vpy so a cached script is rebuilt whenever a
+# settings.txt filter is toggled. Without it an existing .vpy is reused as-is and a
+# newly enabled filter would silently never run.
+filter_state_marker = (
+    f"# Filter state: dehalo={do_dehalo_bool}, denoise={do_denoise_bool}, deband={do_deband_bool}"
+)
+
 rebuild_vpy = not os.path.exists(vpy_file)
 if not rebuild_vpy:
     try:
@@ -887,6 +939,9 @@ if not rebuild_vpy:
             _existing_vpy_text = _f.read()
         if ("do_tonemap = True" in _existing_vpy_text) != tonemap_bool:
             console.print("[yellow]Existing VapourSynth script tonemap state differs from --tonemap; rebuilding.[/yellow]")
+            rebuild_vpy = True
+        elif filter_state_marker not in _existing_vpy_text:
+            console.print("[yellow]Existing VapourSynth script filter state differs from settings.txt; rebuilding.[/yellow]")
             rebuild_vpy = True
     except Exception:
         rebuild_vpy = True
@@ -904,10 +959,20 @@ if rebuild_vpy:
     report_crop_status(crop_mode, crop_top, crop_bottom, crop_left, crop_right)
     report_filter_status()
     
+    # settings.txt denoise/deband hooks. These are raw VapourSynth lines supplied by
+    # the user, injected verbatim only when the matching switch is on.
+    denoise_line = s_denoise_setting if do_denoise_bool and s_denoise_setting else ""
+    deband_line = s_deband_setting if do_deband_bool and s_deband_setting else ""
+
     # Template
     vpy_template = """
 from vstools import vs, core, initialize_clip, finalize_clip
+try:
+    from vsdenoise import DFTTest
+except Exception:
+    DFTTest = None
 core.max_cache_size = 1024
+{filter_state}
 
 # Load Source
 src = core.ffms2.Source(source=r"{source}", cachefile=r"{cache}")
@@ -932,6 +997,28 @@ if do_tonemap:
     elif src.format.id != vs.YUV420P16:
         src = src.resize.Bicubic(format=vs.YUV420P16)
     src = src.std.SetFrameProps(_Matrix=1, _Transfer=1, _Primaries=1)
+
+# DEHALO (settings.txt [dehalo]; always runs before denoise)
+do_dehalo = {dehalo}
+if do_dehalo:
+    import vsdehalo as deh
+    dehalo_kwargs = dict(
+        lowsens={dh_lowsens},
+        highsens={dh_highsens},
+        ss={dh_ss},
+        darkstr={dh_darkstr},
+        brightstr={dh_brightstr},
+    )
+    if hasattr(deh, "AlphaBlur"):
+        # vsjetpack >= 1.0: the rx/ry radius moved into the AlphaBlur blur object.
+        src = deh.dehalo_alpha(src, blur=deh.AlphaBlur(rx={dh_rx}, ry={dh_ry}), **dehalo_kwargs)
+    else:
+        # Older vsdehalo takes rx/ry directly.
+        src = deh.dehalo_alpha(src, rx={dh_rx}, ry={dh_ry}, **dehalo_kwargs)
+
+# Optional settings.txt denoise/deband hooks
+{denoise_line}
+{deband_line}
 
 # 1. CROP
 if {ct} > 0 or {cb} > 0 or {cl} > 0 or {cr} > 0:
@@ -1004,7 +1091,18 @@ final.set_output(0)
             target_res=s_target_res,
             kernel=s_kernel,
             convert=convert_yuv420p10,
-            tonemap=str(tonemap_bool)
+            tonemap=str(tonemap_bool),
+            dehalo=str(do_dehalo_bool),
+            dh_rx=dehalo_rx,
+            dh_ry=dehalo_ry,
+            dh_brightstr=dehalo_brightstr,
+            dh_darkstr=dehalo_darkstr,
+            dh_lowsens=dehalo_lowsens,
+            dh_highsens=dehalo_highsens,
+            dh_ss=dehalo_ss,
+            denoise_line=denoise_line,
+            deband_line=deband_line,
+            filter_state=filter_state_marker
         ))
 else:
     existing_crop_values = parse_crop_values_from_vpy(vpy_file)

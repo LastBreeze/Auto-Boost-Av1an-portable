@@ -656,6 +656,46 @@ def setting_is_true(settings, key_name, default_value="False"):
     return get_script_setting(settings, key_name, default_value).strip().lower() in ("1", "true", "yes", "y", "on")
 
 
+DEHALO_DEFAULTS = {
+    "rx": 2.0,
+    "ry": 2.0,
+    "brightstr": 1.0,
+    "darkstr": 0.0,
+    "lowsens": 50.0,
+    "highsens": 50.0,
+    "ss": 1.5,
+}
+
+
+def read_dehalo_float(value, key_name, default_value, minimum=None, maximum=None):
+    """Validate a numeric [dehalo] setting before it is written into the .vpy."""
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        print(f"[Dispatch] Warning: Invalid {key_name}={value!r}; using {default_value}.")
+        return default_value
+    if minimum is not None and parsed < minimum:
+        print(f"[Dispatch] Warning: {key_name}={parsed} is below {minimum}; using {minimum}.")
+        return minimum
+    if maximum is not None and parsed > maximum:
+        print(f"[Dispatch] Warning: {key_name}={parsed} is above {maximum}; using {maximum}.")
+        return maximum
+    return parsed
+
+
+def read_dehalo_settings(settings):
+    """Return the validated [dehalo] values used by the VapourSynth template."""
+    return {
+        "rx": read_dehalo_float(get_script_setting(settings, "dehalo_rx", "2.0"), "dehalo_rx", 2.0, minimum=1.0),
+        "ry": read_dehalo_float(get_script_setting(settings, "dehalo_ry", "2.0"), "dehalo_ry", 2.0, minimum=1.0),
+        "brightstr": read_dehalo_float(get_script_setting(settings, "dehalo_brightstr", "1.0"), "dehalo_brightstr", 1.0, minimum=0.0, maximum=1.0),
+        "darkstr": read_dehalo_float(get_script_setting(settings, "dehalo_darkstr", "0.0"), "dehalo_darkstr", 0.0, minimum=0.0, maximum=1.0),
+        "lowsens": read_dehalo_float(get_script_setting(settings, "dehalo_lowsens", "50"), "dehalo_lowsens", 50.0, minimum=0.0, maximum=100.0),
+        "highsens": read_dehalo_float(get_script_setting(settings, "dehalo_highsens", "50"), "dehalo_highsens", 50.0, minimum=0.0, maximum=100.0),
+        "ss": read_dehalo_float(get_script_setting(settings, "dehalo_ss", "1.5"), "dehalo_ss", 1.5, minimum=1.0),
+    }
+
+
 def read_crop_int(value, key_name):
     try:
         crop_value = int(value)
@@ -683,10 +723,15 @@ def report_crop_status(mode, top, bottom, left, right):
         print(f"{BLUE}[Dispatch] Crop: {normalized_mode} selected, no crop values active{RESET}")
 
 
-def report_filter_status(do_downscale, target_res, kernel, do_denoise, denoise_setting, do_deband, deband_setting):
+def report_filter_status(do_downscale, target_res, kernel, do_denoise, denoise_setting, do_deband, deband_setting, do_dehalo=False, dehalo_values=None):
     active_filters = []
     if do_downscale:
         active_filters.append(f"downscale: target_resolution={target_res}, kernel_type={kernel}")
+    if do_dehalo and dehalo_values:
+        active_filters.append(
+            "dehalo: rx={rx}, ry={ry}, brightstr={brightstr}, darkstr={darkstr}, "
+            "lowsens={lowsens}, highsens={highsens}, ss={ss}".format(**dehalo_values)
+        )
     if do_denoise:
         active_filters.append(f"denoise: denoise_setting={denoise_setting or 'enabled'}")
     if do_deband:
@@ -802,6 +847,8 @@ def build_vapoursynth_script(source_path, temp_dir, tools_dir, settings, autocro
     do_downscale = setting_is_true(settings, "downscale", "False")
     target_res = get_script_setting(settings, "target_resolution", "1920x1080")
     kernel = get_script_setting(settings, "kernel_type", "Hermite")
+    do_dehalo = setting_is_true(settings, "dehalo", "False")
+    dehalo_values = read_dehalo_settings(settings) if do_dehalo else None
     do_denoise = setting_is_true(settings, "denoise", "False")
     denoise_setting = get_script_setting(settings, "denoise_setting", "")
     do_deband = setting_is_true(settings, "deband", "False")
@@ -816,6 +863,11 @@ def build_vapoursynth_script(source_path, temp_dir, tools_dir, settings, autocro
         print(f"[Dispatch] Warning: Unknown crop mode {s_crop_mode!r}; using auto.")
         crop_mode = "auto"
 
+    # Marker written into the generated .vpy so a cached script is rebuilt whenever a
+    # settings.txt filter is toggled. Without it an existing .vpy is reused as-is and a
+    # newly enabled filter would silently never run.
+    filter_state_marker = f"# Filter state: dehalo={do_dehalo}, denoise={do_denoise}, deband={do_deband}"
+
     rebuild_vpy = not os.path.exists(vpy_file)
     if not rebuild_vpy:
         try:
@@ -826,6 +878,9 @@ def build_vapoursynth_script(source_path, temp_dir, tools_dir, settings, autocro
                 rebuild_vpy = True
             elif ("do_tonemap = True" in existing_vpy_text) != bool(tonemap):
                 print(f"[Dispatch] Existing VapourSynth script tonemap state differs; rebuilding: {vpy_file}")
+                rebuild_vpy = True
+            elif filter_state_marker not in existing_vpy_text:
+                print(f"[Dispatch] Existing VapourSynth script filter state differs; rebuilding: {vpy_file}")
                 rebuild_vpy = True
         except Exception as e:
             print(f"[Dispatch] Warning: Could not inspect existing VapourSynth script ({e}); rebuilding: {vpy_file}")
@@ -841,10 +896,12 @@ def build_vapoursynth_script(source_path, temp_dir, tools_dir, settings, autocro
             crop_left = read_crop_int(s_crop_left, "left")
             crop_right = read_crop_int(s_crop_right, "right")
         report_crop_status(crop_mode, crop_top, crop_bottom, crop_left, crop_right)
-        report_filter_status(do_downscale, target_res, kernel, do_denoise, denoise_setting, do_deband, deband_setting)
+        report_filter_status(do_downscale, target_res, kernel, do_denoise, denoise_setting, do_deband, deband_setting, do_dehalo, dehalo_values)
 
         denoise_line = denoise_setting if do_denoise and denoise_setting else ""
         deband_line = deband_setting if do_deband and deband_setting else ""
+        # Placeholders still need values when dehalo is off; the block is gated on do_dehalo.
+        dehalo_args = dehalo_values or DEHALO_DEFAULTS
 
         vpy_template = """
 from vstools import vs, core, initialize_clip, finalize_clip
@@ -853,6 +910,7 @@ try:
 except Exception:
     DFTTest = None
 core.max_cache_size = 1024
+{filter_state}
 
 # Load Source
 src = core.ffms2.Source(source=r"{source}", cachefile=r"{cache}")
@@ -877,6 +935,24 @@ if do_tonemap:
     elif src.format.id != vs.YUV420P16:
         src = src.resize.Bicubic(format=vs.YUV420P16)
     src = src.std.SetFrameProps(_Matrix=1, _Transfer=1, _Primaries=1)
+
+# DEHALO (settings.txt [dehalo]; always runs before denoise)
+do_dehalo = {dehalo}
+if do_dehalo:
+    import vsdehalo as deh
+    dehalo_kwargs = dict(
+        lowsens={dh_lowsens},
+        highsens={dh_highsens},
+        ss={dh_ss},
+        darkstr={dh_darkstr},
+        brightstr={dh_brightstr},
+    )
+    if hasattr(deh, "AlphaBlur"):
+        # vsjetpack >= 1.0: the rx/ry radius moved into the AlphaBlur blur object.
+        src = deh.dehalo_alpha(src, blur=deh.AlphaBlur(rx={dh_rx}, ry={dh_ry}), **dehalo_kwargs)
+    else:
+        # Older vsdehalo takes rx/ry directly.
+        src = deh.dehalo_alpha(src, rx={dh_rx}, ry={dh_ry}, **dehalo_kwargs)
 
 # Optional settings.txt denoise/deband hooks
 {denoise_line}
@@ -946,6 +1022,15 @@ final.set_output(0)
                 tonemap=str(bool(tonemap)),
                 denoise_line=denoise_line,
                 deband_line=deband_line,
+                dehalo=str(do_dehalo),
+                dh_rx=dehalo_args["rx"],
+                dh_ry=dehalo_args["ry"],
+                dh_brightstr=dehalo_args["brightstr"],
+                dh_darkstr=dehalo_args["darkstr"],
+                dh_lowsens=dehalo_args["lowsens"],
+                dh_highsens=dehalo_args["highsens"],
+                dh_ss=dehalo_args["ss"],
+                filter_state=filter_state_marker,
             ))
         if tonemap:
             print(f"{BLUE}[Dispatch] Filter active: tonemap HDR -> SDR (BT.709) via libplacebo{RESET}")
@@ -953,7 +1038,7 @@ final.set_output(0)
     else:
         existing_crop_values = parse_crop_values_from_vpy(vpy_file) or (0, 0, 0, 0)
         report_crop_status(crop_mode, *existing_crop_values)
-        report_filter_status(do_downscale, target_res, kernel, do_denoise, denoise_setting, do_deband, deband_setting)
+        report_filter_status(do_downscale, target_res, kernel, do_denoise, denoise_setting, do_deband, deband_setting, do_dehalo, dehalo_values)
         print(f"[Dispatch] Reusing existing VapourSynth script: {vpy_file}")
 
     return vpy_file
@@ -1697,6 +1782,7 @@ def main():
                 "-i", vpy_abspath,
                 "-e", "svt-av1",
                 "--no-defaults",
+                "--keep",
                 "--photon-noise", photon_noise,
                 "-w", workers,
                 "-s", scenes_for_av1an,
