@@ -69,7 +69,6 @@ def repair_vspreview_storage():
                 shutil.copy2(global_storage, backup_path)
             with open(global_storage, "w", encoding="utf-8") as f:
                 f.write("\n".join(lines) + "\n")
-            print(f"[VSPreview] Repaired missing zoom_index in: {global_storage}")
         except OSError as exc:
             print(f"[VSPreview] Warning: Could not repair storage {global_storage}: {exc}")
 
@@ -103,6 +102,33 @@ def cleanup(vpy_file):
             os.remove(f)
         except OSError:
             pass
+
+def index_sources(mkv_files):
+    """Pre-index sources with ffmsindex so indexing progress is visible.
+
+    core.ffms2.Source has no progress reporting, so a large file looks like a
+    hang before the preview window opens. ffmsindex writes the same
+    <file>.ffindex that ffms2.Source picks up, and prints a live percentage
+    while it works.
+    """
+    root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    ffmsindex = os.path.join(root_dir, "VapourSynth", "vs-plugins", "ffmsindex.exe")
+    if not os.path.exists(ffmsindex):
+        return
+
+    for mkv in mkv_files:
+        index_path = mkv + ".ffindex"
+        if os.path.exists(index_path):
+            continue
+
+        print(f"Indexing {os.path.basename(mkv)}")
+        try:
+            subprocess.run([ffmsindex, mkv, index_path], check=True)
+        except (OSError, subprocess.CalledProcessError) as exc:
+            # ffms2.Source will index it again itself, just without progress.
+            print(f"Warning: could not pre-index {mkv}: {exc}")
+        print()
+
 
 def create_vpy_script(mkv_files):
     """Generates the .vpy script content based on found MKV files."""
@@ -142,15 +168,54 @@ def create_vpy_script(mkv_files):
         
     lines.extend([
         "",
-        "# Find the smallest height among all loaded clips",
-        "min_height = min([c.height for c in clips])",
+        "def black_color(clip):",
+        "    \"\"\"Border colour that is actually black for this clip's format.\"\"\"",
+        "    fmt = clip.format",
+        "    if fmt.color_family == vs.YUV:",
+        "        if fmt.sample_type == vs.FLOAT:",
+        "            return [0.0, 0.0, 0.0]",
+        "        neutral = 1 << (fmt.bits_per_sample - 1)",
+        "        return [0, neutral, neutral]",
+        "    if fmt.sample_type == vs.FLOAT:",
+        "        return [0.0] * fmt.num_planes",
+        "    return [0] * fmt.num_planes",
+        "",
+        "",
+        "def pad_to_height(clip, target_height):",
+        "    \"\"\"Centre the clip in black bars so it reaches target_height.\"\"\"",
+        "    pad = target_height - clip.height",
+        "    if pad <= 0:",
+        "        return clip",
+        "    # Borders must be a multiple of the vertical chroma subsampling",
+        "    mod = 1 << clip.format.subsampling_h",
+        "    pad -= pad % mod",
+        "    if pad <= 0:",
+        "        return clip",
+        "    top = (pad // 2 // mod) * mod",
+        "    return core.std.AddBorders(clip, top=top, bottom=pad - top, color=black_color(clip))",
+        "",
+        "",
+        "widths = set(c.width for c in clips)",
+        "",
+        "if len(widths) == 1:",
+        "    # Same width, differing heights (e.g. a cropped encode next to the",
+        "    # untouched source): pad with black bars instead of rescaling, so the",
+        "    # pixels line up 1:1 for comparison.",
+        "    target_height = max(c.height for c in clips)",
+        "    clips = [pad_to_height(c, target_height) for c in clips]",
+        "else:",
+        "    # Differing widths: downscale everything to the smallest height",
+        "    min_height = min(c.height for c in clips)",
+        "    scaled = []",
+        "    for clip in clips:",
+        "        if clip.height > min_height:",
+        "            # Calculate new width, maintaining aspect ratio and ensuring mod 2 (even number) for chroma subsampling",
+        "            new_width = round((clip.width * (min_height / clip.height)) / 2) * 2",
+        "            clip = core.resize.Lanczos(clip, width=new_width, height=min_height)",
+        "        scaled.append(clip)",
+        "    clips = scaled",
         "",
         "for i, clip in enumerate(clips):",
-        "    if clip.height > min_height:",
-        "        # Calculate new width, maintaining aspect ratio and ensuring mod 2 (even number) for chroma subsampling",
-        "        new_width = round((clip.width * (min_height / clip.height)) / 2) * 2",
-        "        clip = core.resize.Lanczos(clip, width=new_width, height=min_height)",
-        "    ",
         "    # Add the subtitle with the filename",
         "    clip = core.sub.Subtitle(clip, text=[labels[i]], style=ass_style)",
         "    ",
@@ -177,14 +242,17 @@ def main():
         input("Press Enter to exit...")
         return
 
-    # 2. Generate the .vpy script
+    # 2. Index up front so the wait shows a percentage instead of a blank screen
+    index_sources(mkv_files)
+
+    # 3. Generate the .vpy script
     vpy_filename, script_content = create_vpy_script(mkv_files)
     
     print(f"Generating script: {vpy_filename} for {len(mkv_files)} file(s)...")
     with open(vpy_filename, "w", encoding="utf-8") as f:
         f.write(script_content)
 
-    # 3. Execute vspreview
+    # 4. Execute vspreview
     cmd = [sys.executable, "-m", "vspreview", vpy_filename]
     
     try:
@@ -194,7 +262,7 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
-        # 4. Cleanup on exit
+        # 5. Cleanup on exit
         print("Cleaning up temporary files...")
         cleanup(vpy_filename)
 

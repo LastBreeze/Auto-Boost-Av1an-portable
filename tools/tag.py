@@ -9,6 +9,7 @@ import shlex
 TOOLS_DIR = os.path.join("..", "tools")
 UNTAGGED_OPTIONS = {
     "--avx512": 0,
+    "--arch": 1,
     "--denoise": 1,
     "--fast-speed": 1,
     "--verbose": 0,

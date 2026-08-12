@@ -631,14 +631,25 @@ def setup_svt_av1_fork(target_fork="5fish"):
         target_subfolder = None
         subfolders = [d for d in fork_parent.iterdir() if d.is_dir()]
 
-        if not target_subfolder:
+        # The benchmark only needs an encoder that runs, so prefer the builds
+        # every CPU can execute. Never fall back to an arbitrary subfolder:
+        # picking an icelake/znver4/znver5 build on a CPU without AVX-512
+        # crashes the benchmark instead of just running it slowly.
+        for needle in ('x86-64-v3', 'znver2', 'x86-64-v2'):
             for sub in subfolders:
-                if 'x86-64-v3' in sub.name.lower():
+                if needle in sub.name.lower():
                     target_subfolder = sub
                     break
+            if target_subfolder:
+                break
 
-        if not target_subfolder and subfolders:
-            target_subfolder = subfolders[0]
+        if not target_subfolder:
+            if not subfolders:
+                # A fork like 'custom' can hold the exe directly.
+                target_subfolder = fork_parent
+            elif len(subfolders) == 1:
+                # Only one build shipped, so there is nothing safer to pick.
+                target_subfolder = subfolders[0]
 
         if target_subfolder:
             exe_src = target_subfolder / "SvtAv1EncApp.exe"
@@ -658,6 +669,9 @@ def setup_svt_av1_fork(target_fork="5fish"):
                     print(f"   - Error copying fork files: {e}", file=sys.stderr)
             else:
                 print(f"   - Error: SvtAv1EncApp.exe not found in {target_subfolder}", file=sys.stderr)
+        else:
+            print(f"   - Warning: No x86-64-v3/znver2 build found in {fork_parent.name}; "
+                  f"leaving the existing SvtAv1EncApp.exe in place.", file=sys.stderr)
     else:
         print(f"   - Warning: Could not find a fork directory matching '{target_fork}' in {FORKS_DIR}", file=sys.stderr)
 

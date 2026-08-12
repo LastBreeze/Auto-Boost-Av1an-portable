@@ -1,9 +1,66 @@
 import os
+import re
 import shutil
 
 BLUE = "\033[94m"
 RED = "\033[91m"
 RESET = "\033[0m"
+
+# The CPU build menu, and the cputarget= value each option stores in
+# tools\workercount-config.txt so the next build can default to it.
+ARCH_BY_CHOICE = {"1": "znver2", "2": "x86-64-v3", "3": "avx512"}
+CHOICE_BY_ARCH = {arch: choice for choice, arch in ARCH_BY_CHOICE.items()}
+
+
+def workercount_config_path():
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        "workercount-config.txt")
+
+
+def read_saved_arch():
+    """The cputarget= remembered in tools\\workercount-config.txt, or None."""
+    try:
+        with open(workercount_config_path(), "r", encoding="utf-8",
+                  errors="ignore") as handle:
+            text = handle.read()
+    except OSError:
+        return None
+    match = re.search(r"^\s*cputarget\s*=\s*(\S+)", text,
+                      re.IGNORECASE | re.MULTILINE)
+    if not match:
+        return None
+    arch = match.group(1).strip().lower()
+    return arch if arch in CHOICE_BY_ARCH else None
+
+
+def save_arch(arch):
+    """Remember the chosen CPU build in tools\\workercount-config.txt.
+
+    cputarget goes on the first line and the existing workers= line stays
+    last, because the .bat files read this file with a for/f loop where the
+    last line wins. For the same reason a file with no workers= line is left
+    alone: the .bats treat the file existing as "the worker benchmark already
+    ran", so writing a lone cputarget= would skip the benchmark and hand av1an
+    an empty worker count. Once any encode has run, the line is there and the
+    setting sticks.
+    """
+    path = workercount_config_path()
+    try:
+        with open(path, "r", encoding="utf-8", errors="ignore") as handle:
+            lines = handle.read().splitlines()
+    except OSError:
+        return
+    kept = [line for line in lines
+            if line.strip() and not re.match(r"\s*cputarget\s*=", line, re.IGNORECASE)]
+    if not any(re.match(r"\s*workers\s*=", line, re.IGNORECASE) for line in kept):
+        return
+    try:
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(f"cputarget={arch}\n")
+            for line in kept:
+                handle.write(line.rstrip() + "\n")
+    except OSError:
+        pass
 
 def enable_ansi_colors():
     if os.name != "nt":
@@ -20,6 +77,138 @@ def enable_ansi_colors():
 
 def clear_screen():
     os.system('cls' if os.name == 'nt' else 'clear')
+
+def setup_condor():
+    """Copy tools\\condor-builder.bat into the main folder so it can be run from there.
+
+    Returns True if the tool was set up (caller should stop), False to go back
+    to the main menu.
+    """
+    tools_dir = os.path.dirname(os.path.abspath(__file__))
+    root_dir = os.path.dirname(tools_dir)
+    source = os.path.join(tools_dir, "condor-builder.bat")
+    dest = os.path.join(root_dir, "condor-builder.bat")
+
+    if not os.path.exists(source):
+        print(f"\n{RED}Could not find tools\\condor-builder.bat.")
+        print(f"Your install may be incomplete - try re-downloading the package.{RESET}")
+        os.system('pause')
+        return True
+
+    if os.path.exists(dest):
+        print("\ncondor-builder.bat already exists in the main folder.")
+        print("Overwriting will discard any edits you made to it.\n")
+        overwrite = input("Replace it with a fresh copy? [1 Yes / 2 No] (Press Enter for No): ").strip()
+        if overwrite != "1":
+            print("\nLeft the existing condor-builder.bat alone. Nothing was changed.")
+            os.system('pause')
+            return True
+
+    shutil.copy2(source, dest)
+
+    print("\n-------------------------------------------------------------------------------")
+    print("Condor is ready.")
+    print("File: condor-builder.bat (main folder)")
+    print("-------------------------------------------------------------------------------")
+    print("Run it from the main folder to build a Condor batch script, which lets you")
+    print("set a target quality using CVVDP, SSIM2, butteraugli or XPSNR instead of a")
+    print("fixed CRF.")
+    print("-------------------------------------------------------------------------------")
+    os.system('pause')
+    return True
+
+def lqtc_acknowledgement():
+    """Show the LQTC "I understand" page.
+
+    Returns True if the user chose to continue, False to go back.
+    """
+    items = [
+        ["I will use the Windows command line to see if LQTC",
+         "displays an error for a hardware incompatibility."],
+        ["I know how to extract and apply my own AV1 grain synth",
+         "tables, and I will edit the grain .bat files in",
+         "video-output manually."],
+        ["I accept that LQTC might not be compatible with my PC."],
+        ["I accept and understand that this package has two target",
+         "based encoders, and if one doesn't work, I can use the",
+         "other."],
+        ["I know what x86-64-v3 / znver2 / avx512 means."],
+    ]
+
+    while True:
+        clear_screen()
+        print("================================================")
+        print("      Large Quality Target Collider (LQTC)      ")
+        print("================================================\n")
+        print("Before setting up LQTC, please read and accept the following:\n")
+        for item in items:
+            print(f"  I understand: {item[0]}")
+            for extra in item[1:]:
+                print(f"                {extra}")
+            print("")
+        print("------------------------------------------------")
+        print("  1. Continue -- I understand all of the above")
+        print("  2. Go back\n")
+        choice = input("Select [1/2] (Press Enter to go back): ").strip()
+
+        if choice == "1":
+            return True
+        if choice == "2" or choice == "":
+            return False
+
+def setup_lqtc():
+    """Copy tools\\lqtc-builder.bat into the main folder so it can be run from there.
+
+    Also copies the contents of tools\\grav1synth into video-output, since LQTC
+    needs it there.
+
+    Returns True if the tool was set up (caller should stop), False to go back
+    to the main menu.
+    """
+    tools_dir = os.path.dirname(os.path.abspath(__file__))
+    root_dir = os.path.dirname(tools_dir)
+    source = os.path.join(tools_dir, "lqtc-builder.bat")
+    dest = os.path.join(root_dir, "lqtc-builder.bat")
+
+    if not os.path.exists(source):
+        print(f"\n{RED}Could not find tools\\lqtc-builder.bat.")
+        print(f"Your install may be incomplete - try re-downloading the package.{RESET}")
+        os.system('pause')
+        return True
+
+    if os.path.exists(dest):
+        print("\nlqtc-builder.bat already exists in the main folder.")
+        print("Overwriting will discard any edits you made to it.\n")
+        overwrite = input("Replace it with a fresh copy? [1 Yes / 2 No] (Press Enter for No): ").strip()
+        if overwrite != "1":
+            print("\nLeft the existing lqtc-builder.bat alone. Nothing was changed.")
+            os.system('pause')
+            return True
+
+    shutil.copy2(source, dest)
+
+    grav1synth_src = os.path.join(tools_dir, "grav1synth")
+    grav1synth_dest = os.path.join(root_dir, "video-output")
+    grav1synth_copied = False
+    if os.path.isdir(grav1synth_src):
+        os.makedirs(grav1synth_dest, exist_ok=True)
+        shutil.copytree(grav1synth_src, grav1synth_dest, dirs_exist_ok=True)
+        grav1synth_copied = True
+    else:
+        print(f"\n{RED}Could not find tools\\grav1synth - skipping the grav1synth copy.")
+        print(f"Your install may be incomplete - try re-downloading the package.{RESET}")
+
+    print("\n-------------------------------------------------------------------------------")
+    print("Large Quality Target Collider is ready.")
+    print("File: lqtc-builder.bat (main folder)")
+    if grav1synth_copied:
+        print("grav1synth files copied into video-output.")
+    print("-------------------------------------------------------------------------------")
+    print("Run it from the main folder to build an LQTC batch script, which lets you")
+    print("set a target quality using CVVDP or SSIM2 instead of a fixed CRF.")
+    print("-------------------------------------------------------------------------------")
+    os.system('pause')
+    return True
 
 def setup_afterzone():
     """Copy tools\\AfterZone.bat into the main folder so it can be run from there.
@@ -76,16 +265,28 @@ def advanced_tools_menu():
         print("================================================")
         print("               Advanced Tools                   ")
         print("================================================\n")
-        print("  1. Setup AfterZone in the main folder\n")
-        print("  2. Go back\n")
-        print("")
+        print("  1. Setup Condor in the main folder\n")
+        print("  2. Setup Large Quality Target Collider in the main folder\n")
+        print("  3. Setup AfterZone in the main folder\n")
+        print("  4. Go back\n")
+        print("  Condor allows you to set a target quality using CVVDP, SSIM2")
+        print("  Butteraugli or XPSNR.\n")
+        print("  LQTC allows you to set a target quality using CVVDP or SSIM2")
+        print("  There is a potential that this Windows build will not work")
+        print("  on every system\n")
         print("  AfterZone allows you to reencode frame ranges with different")
         print("  settings after encoding is already completed.\n")
-        choice = input("Select [1/2]: ").strip()
+        choice = input("Select [1/2/3/4]: ").strip()
 
         if choice == "1":
-            return setup_afterzone()
+            return setup_condor()
         if choice == "2":
+            if lqtc_acknowledgement():
+                return setup_lqtc()
+            continue
+        if choice == "3":
+            return setup_afterzone()
+        if choice == "4":
             return False
 
 def main():
@@ -150,19 +351,37 @@ def main():
     fork_map = {"1": "5fish", "2": "essential", "3": "hdr", "4": "custom"}
     fork = fork_map.get(fork_choice, "essential")
 
-    avx512_value = "False"
+    arch_value = "x86-64-v3"
     if fork in ("5fish", "essential"):
         print("\n--------------------------------------------------------")
-        print("AVX-512 CPU Support")
+        print("CPU Build")
         print("--------------------------------------------------------")
-        print("Some 5fish/essential SVT-AV1 builds have an AVX-512 optimized exe.")
-        print("Only select Yes if you are sure your CPU supports AVX-512.")
-        print("If you are not sure, press Enter for the default: No.\n")
-        print("  1: Yes -- Use the AVX-512 optimized encoder executable")
-        print("  2: No  -- Use the standard encoder executable\n")
-        avx_choice = input("Does your CPU support AVX-512? [1 Yes / 2 No] (Press Enter for No): ").strip()
-        if avx_choice == "1":
-            avx512_value = "True"
+        print("The encoder comes in a few versions, each built for a different")
+        print("type of processor. They all produce the same video - a matching")
+        print("build just encodes it faster.")
+        print("")
+        print("Picking one your processor cannot run makes the encode stop with")
+        print("an error rather than harm anything, so a faster build is worth a")
+        print("try. If it will not start, build the bat again and take option 2,")
+        print("which works on every modern computer.\n")
+        print("  1: znver2    -- Try this one first. It is faster on AMD Ryzen")
+        print("                  3000 series and newer, and it runs on Intel")
+        print("                  processors too, so Intel users should give it")
+        print("                  a go before settling for x86-64-v3.\n")
+        print("  2: x86-64-v3 -- Works on any Intel or AMD processor from")
+        print("                  roughly 2015 onwards. The safe choice, and")
+        print("                  what to use if option 1 or 3 will not run.\n")
+        print("  3: AVX-512   -- Fastest, but only on processors that support")
+        print("                  AVX-512. That means recent AMD Ryzen (5000")
+        print("                  and newer) or certain Intel chips. Only pick")
+        print("                  this if you have checked that yours does.\n")
+        saved_arch = read_saved_arch()
+        default_choice = CHOICE_BY_ARCH.get(saved_arch, "1")
+        if saved_arch:
+            print(f"Last time you chose {saved_arch} (option {default_choice}).\n")
+        arch_choice = input(f"Select [1/2/3] (Press Enter for {default_choice}): ").strip()
+        arch_value = ARCH_BY_CHOICE.get(arch_choice, ARCH_BY_CHOICE[default_choice])
+        save_arch(arch_value)
 
     # --- HDR Handling (SVT-AV1-HDR fork only; other forks are asked at the end) ---
     tonemap_value = "False"
@@ -267,28 +486,26 @@ def main():
     print("\n--------------------------------------------------------")
     print("STEP 5 OF 5: Encoding Speed (Preset)")
     print("--------------------------------------------------------")
-    print("This controls how much time and CPU power the encoder spends")
-    print("searching for efficient ways to store your video.")
-    print("Slower presets = more effort, which usually means better")
-    print("quality for the file size (results vary by video).")
-    print("Faster presets = quicker encodes, but possibly less efficient")
-    print("and less quality.\n")
+    print("Controls how hard the encoder works to compress your video.")
+    print("Slower presets: better quality per MB, longer encode times.")
+    print("Faster presets: quicker encodes, larger files or slightly lower")
+    print("quality. Actual gains vary by source video.\n")
 
     print("  Recommended presets for this fork:")
-    print("  0 -- Slowest. Maximum effort. Great if you can wait.")
+    if fork != "5fish":
+        print("  0 -- Slowest. Maximum effort. Great if you can wait.")
     if fork == "hdr":
         print("  1 -- Improves on preset 2, especially for grainy")
         print("       video. Handles grain better and cleans up some")
         print("       artifacts that other presets can leave behind.")
         print("       With tune grain, it can bring extra quality")
         print("       improvements.")
-    else:
+    elif fork != "5fish":
         print("  1 -- Possible slight improvement over preset 2,")
         print("       at the cost of extra encode time.")
     print("  2 -- Very high effort. Still slow, but a good choice")
     print("       for encodes you care about.")
-    print("  3 -- Not useful at this time. Offers no significant")
-    print("       measurable advantage over preset 4.")
+    print("  3 -- Not useful at this time.")
     print("  4 -- DEFAULT. Fastest recommended preset. A solid")
     print("       balance of speed and efficiency. Use this if you")
     print("       have a slower CPU or need results sooner.\n")
@@ -297,27 +514,20 @@ def main():
     print("  quality while staying efficient, so output quality")
     print("  will suffer.\n")
 
+    if fork == "5fish":
+        print("  Quote from 5fish github repo:")
+        print("  \"even if you have time to burn, as of right now, we")
+        print("  don't recommend --preset 0. --preset 2 has a smart")
+        print("  system to filter candidates, while --preset 0 tests")
+        print("  through all the candidates. This smart filtering system")
+        print("  often outperforms doing the full tests, and for this")
+        print("  reason --preset 2 often gives a better result than")
+        print("  --preset 0\"\n")
+
     default_speed = "4"
     speed = input(f"Enter a preset speed (Press Enter for the recommended default of {default_speed}): ").strip()
     if not speed:
         speed = default_speed
-
-    # --- Dark Scene Quality Boost ---
-    print("\n--------------------------------------------------------")
-    print("Dark Scene Quality Boost")
-    print("--------------------------------------------------------")
-    print("By default, AV1 treats dark/low-light scenes as less important")
-    print("and gives them less detail. This can cause banding or")
-    print("blocking or detail loss in shadows and night scenes.")
-    print("--luminance-qp-bias counteracts that by boosting quality in")
-    print("those darker frames. How strong do you want that boost?\n")
-    print("  20 -- Light: a gentle correction, minimal impact on file size, start here")
-    print("  40 -- Balanced: solid improvement for most videos")
-    print("  60 -- Higher detail: more significant boosting for dark scenes, higher impact on file size\n")
-    luminance_qp_bias = input("Enter luminance QP bias (Press Enter for 20): ").strip()
-    if luminance_qp_bias not in ("20", "40", "60"):
-        luminance_qp_bias = "20"
-    luminance_param = f" --luminance-qp-bias {luminance_qp_bias}"
 
     # --- Build Parameter Strings ---
     fast_params = ""
@@ -326,20 +536,20 @@ def main():
     film_grain_note = ""
 
     if fork == "5fish":
-        fast_params = f"--scd 0 --lineart-psy-bias 3 --texture-psy-bias 3 --hbd-mds 0{luminance_param}"
-        final_params = f"--scd 0 --lineart-psy-bias 3 --texture-psy-bias 3 --hbd-mds 1{luminance_param} --lp 3 --photon-noise 200"
+        fast_params = "--scd 0 --lineart-psy-bias 3 --texture-psy-bias 3 --hbd-mds 0"
+        final_params = "--scd 0 --lineart-psy-bias 3 --texture-psy-bias 3 --hbd-mds 1 --lp 3 --photon-noise 200"
         has_rename = False
     elif fork == "essential":
-        fast_params = f"--scd 0 --enable-dlf 3{dist_preset}{luminance_param}"
-        final_params = f"--scd 0 --enable-dlf 3{dist_preset}{luminance_param} --lp 3 --photon-noise 200"
+        fast_params = f"--scd 0 --enable-dlf 3{dist_preset}"
+        final_params = f"--scd 0 --enable-dlf 3{dist_preset} --lp 3 --photon-noise 200"
         film_grain_note = ":: If you'd like to use --film-grain, then --photon-noise must be set to 0, do not remove the setting.\n"
     elif fork == "hdr":
         # Keep base clean for HDR, apply tuning/noise based on user input
-        fast_params = ("--tune 0" if "tune 0" in hdr_noise else "--tune 5") + luminance_param
-        final_params = f"{hdr_noise.strip()}{luminance_param} --lp 3"
+        fast_params = "--tune 0" if "tune 0" in hdr_noise else "--tune 5"
+        final_params = f"{hdr_noise.strip()} --lp 3"
     elif fork == "custom":
-        fast_params = luminance_param.strip()
-        final_params = f"{luminance_param.strip()} --lp 3 --photon-noise 200"
+        fast_params = ""
+        final_params = "--lp 3 --photon-noise 200"
 
     # --- Auto Crop ---
     print("\n--------------------------------------------------------")
@@ -428,8 +638,10 @@ def main():
     script += ":: example forks: 5fish, essential, hdr, custom\n"
     script += f'set "DENOISE={denoise_value}"\n'
     script += ":: DENOISE updates denoise=True/False in settings.txt before dispatch. 5fish defaults to True; all other forks default to False.\n"
-    script += f'set "AVX512={avx512_value}"\n'
-    script += ":: Set AVX512=True only if your CPU supports AVX-512 and the fork has an AVX-512 build.\n"
+    script += f'set "ARCH={arch_value}"\n'
+    script += ":: ARCH picks the CPU build of the encoder: x86-64-v3 (any modern CPU),\n"
+    script += ":: znver2 (AMD Ryzen 3000+), avx512 (only CPUs with AVX-512).\n"
+    script += ":: A fork without that build falls back to x86-64-v3. The hdr fork is x86-64-v3 only.\n"
     script += f'set "tonemap={tonemap_value}"\n'
     script += ":: tonemap=True converts HDR sources to SDR (BT.709) via libplacebo inside the VapourSynth script (uses GPU).\n"
     script += ":: tonemap=False: the hdr fork auto-detects HDR sources and applies matching SVT-AV1-HDR color settings; other forks encode as-is.\n"
@@ -465,25 +677,32 @@ def main():
 
     # Worker Check Encoding
     script += ":: --- STEP 1A: WORKER COUNT CHECK (ENCODE) ---\n" if mode == "autoboost" else ":: --- STEP 1: WORKER COUNT CHECK ---\n"
+    # Only the workers= line is read, so other keys in the file - such as the
+    # cputarget= this builder remembers - are ignored rather than overwriting
+    # the worker count.
+    read_workers = ("    for /f \"usebackq tokens=1,2 delims==\" %%a in (\"tools\\workercount-config.txt\") do (\n"
+                    "        if /I \"%%a\"==\"workers\" set \"WORKER_COUNT_CFG=%%b\"\n"
+                    "    )\n")
+    script += "set \"WORKER_COUNT_CFG=\"\n"
     script += "if exist \"tools\\workercount-config.txt\" (\n"
     if mode == "autoboost":
-        script += "    REM Read the worker count from the config file\n"
-    script += "    for /f \"usebackq tokens=2 delims==\" %%a in (\"tools\\workercount-config.txt\") do set WORKER_COUNT=%%a\n"
-    script += ") else (\n"
+        script += "    REM Read the worker count from the config file. Only workers= is read, so\n"
+        script += "    REM other keys, such as the cputarget= the builders remember, are ignored.\n"
+    script += read_workers
+    script += ")\n"
+    script += "if not defined WORKER_COUNT_CFG (\n"
     script += "    echo.\n    echo -------------------------------------------------------------------------------\n"
     script += "    echo First Run Detected: Calculating optimal encode worker count...\n"
     script += "    echo -------------------------------------------------------------------------------\n"
     script += "    \"VapourSynth\\python.exe\" \"tools\\workercount.py\"\n"
     if mode == "autoboost":
         script += "    \n    REM Reload config after generation\n"
-    script += "    for /f \"usebackq tokens=2 delims==\" %%a in (\"tools\\workercount-config.txt\") do set WORKER_COUNT=%%a\n"
+    script += read_workers
     if mode == "autoboost":
         script += "    \n    REM Pause so user can see the calculation results, then continue\n"
     script += "    echo.\n    echo Encode worker count calculated.\n"
-    if mode == "autoboost":
-        script += ")\n\n"
-    else:
-        script += ")\n\n"
+    script += ")\n"
+    script += "if defined WORKER_COUNT_CFG set \"WORKER_COUNT=%WORKER_COUNT_CFG%\"\n\n"
 
     # Optimized One-Time Benchmark (SSIMU2 vs-zip workers, Autoboost Only)
     if mode == "autoboost" and optimize_workers:
@@ -554,9 +773,9 @@ def main():
         script += film_grain_note
         
     if mode == "autoboost":
-        script += f"\"VapourSynth\\python.exe\" \"tools\\dispatch.py\" --fork %fork% --avx512 %AVX512% --denoise %DENOISE% --tonemap %tonemap% --crf %CRF%{autocrop_flag} --ssimu2 \"%SSIMU2_TOOL%\" %VERBOSE% --ssimu2-cpu-workers %SSIMU2_WORKERS% --resume --fast-speed 8 --final-speed %FINAL_SPEED% --workers %WORKER_COUNT% --fast-params \"%FAST_PARAMS%\" --final-params \"%FINAL_PARAMS%\"\n\n"
+        script += f"\"VapourSynth\\python.exe\" \"tools\\dispatch.py\" --fork %fork% --arch %ARCH% --denoise %DENOISE% --tonemap %tonemap% --crf %CRF%{autocrop_flag} --ssimu2 \"%SSIMU2_TOOL%\" %VERBOSE% --ssimu2-cpu-workers %SSIMU2_WORKERS% --resume --fast-speed 8 --final-speed %FINAL_SPEED% --workers %WORKER_COUNT% --fast-params \"%FAST_PARAMS%\" --final-params \"%FINAL_PARAMS%\"\n\n"
     else:
-        script += f"\"VapourSynth\\python.exe\" \"tools\\av1an-dispatch.py\" --resume %VERBOSE% --fork %fork% --avx512 %AVX512% --denoise %DENOISE% --tonemap %tonemap%{autocrop_flag} --crf %CRF% --workers %WORKER_COUNT% --final-speed %FINAL_SPEED% --final-params \"%av1an_settings%\"\n\n"
+        script += f"\"VapourSynth\\python.exe\" \"tools\\av1an-dispatch.py\" --resume %VERBOSE% --fork %fork% --arch %ARCH% --denoise %DENOISE% --tonemap %tonemap%{autocrop_flag} --crf %CRF% --workers %WORKER_COUNT% --final-speed %FINAL_SPEED% --final-params \"%av1an_settings%\"\n\n"
 
     script += "echo.\necho All tasks finished.\necho Ctrl+C to keep temp files and exit.\necho Or, to cleaup temp files:\npause\n\n"
     step_num += 1

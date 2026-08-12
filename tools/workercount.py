@@ -1496,8 +1496,20 @@ def run_benchmark(input_path, encoder_params):
 
 def write_config(workers):
     try:
+        # Carry over the cputarget= line the builders remember, above workers=
+        # (the .bat files read this file with a last-line-wins for/f loop, so
+        # the worker count has to stay on the last line).
+        cpu_line = ""
+        try:
+            with open(CONFIG_FILE, "r", encoding="utf-8", errors="ignore") as f:
+                match = re.search(r"^\s*cputarget\s*=\s*([A-Za-z0-9_.-]+)",
+                                  f.read(), re.IGNORECASE | re.MULTILINE)
+            if match:
+                cpu_line = f"cputarget={match.group(1).strip()}\n"
+        except OSError:
+            pass
         with open(CONFIG_FILE, "w") as f:
-            f.write(f"workers={workers}\n")
+            f.write(f"{cpu_line}workers={workers}\n")
         return True
     except Exception as e:
         print(f"Error writing config file: {e}")
@@ -1612,12 +1624,16 @@ def run_optimize_mode(bat_arg=None):
 
     # --- Set up the same SVT-AV1 fork the bat will use ---
     fork = (bat.get("fork", "essential") or "essential").strip()
-    avx512 = ("--avx512" in bat.get("avx512_flag", "")
-              or bat.get("avx512", "").strip().lower() in ("true", "1", "yes", "on"))
+    arch = (bat.get("arch", "") or "").strip()
+    if not arch:
+        # Bats generated before ARCH replaced AVX512.
+        avx512 = ("--avx512" in bat.get("avx512_flag", "")
+                  or bat.get("avx512", "").strip().lower() in ("true", "1", "yes", "on"))
+        arch = "avx512" if avx512 else "x86-64-v3"
     try:
         sys.path.insert(0, TOOLS_DIR)
         from svt_fork_setup import setup_svt_av1_fork
-        setup_svt_av1_fork(TOOLS_DIR, fork, avx512=avx512, verbose=True)
+        setup_svt_av1_fork(TOOLS_DIR, fork, arch=arch, verbose=True)
     except Exception as e:
         print(f"[Optimize] Warning: Could not set up SVT-AV1 fork '{fork}': {e}")
 

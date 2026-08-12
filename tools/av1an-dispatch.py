@@ -1,6 +1,7 @@
 import sys
 import subprocess
 import os
+import atexit
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import glob
 import json
@@ -628,8 +629,134 @@ def warn_and_pause_if_paths_too_long(input_files, video_output_dir, temp_dir):
         pause_for_long_paths(unique_long_paths)
 
 
+# --- Original input filename bookkeeping ---
+# Source videos are renamed to Python-safe names before anything else touches
+# them. The name each file had beforehand is recorded here (and mirrored to a
+# small JSON file inside video-input) so the file can be renamed back to it once
+# that file is finished. A run that dies before it can restore leaves the record
+# behind, and the next run picks it up and finishes the job.
+ORIGINAL_NAMES_RECORD = ".original-input-names.json"
+
+_ORIGINAL_INPUT_NAMES = {}     # absolute sanitized path -> original filename
+_RESTORED_INPUT_NAMES = set()  # absolute restored paths, so rescans leave them alone
+
+
+def _original_names_record_path(video_input_dir):
+    return os.path.join(video_input_dir, ORIGINAL_NAMES_RECORD)
+
+
+def _write_original_names_record(video_input_dir):
+    """Mirror the in-memory record to disk so a killed run can still be undone."""
+    entries = {
+        os.path.basename(path): original
+        for path, original in _ORIGINAL_INPUT_NAMES.items()
+        if os.path.dirname(path) == video_input_dir
+    }
+    record_path = _original_names_record_path(video_input_dir)
+    try:
+        if entries:
+            with open(record_path, "w", encoding="utf-8") as handle:
+                json.dump(entries, handle, indent=2, ensure_ascii=False)
+        elif os.path.exists(record_path):
+            os.remove(record_path)
+    except OSError as e:
+        print(f"[Dispatch] Warning: could not update {ORIGINAL_NAMES_RECORD}: {e}")
+
+
+def load_original_names_record(video_input_dir):
+    """Adopt renames left behind by a previous run that never got to restore them."""
+    record_path = _original_names_record_path(video_input_dir)
+    if not os.path.isfile(record_path):
+        return
+    try:
+        with open(record_path, "r", encoding="utf-8") as handle:
+            entries = json.load(handle)
+    except (OSError, ValueError) as e:
+        print(f"[Dispatch] Warning: could not read {ORIGINAL_NAMES_RECORD}: {e}")
+        return
+    if not isinstance(entries, dict):
+        return
+    for current_name, original_name in entries.items():
+        current_path = os.path.join(video_input_dir, current_name)
+        if isinstance(original_name, str) and os.path.isfile(current_path):
+            _ORIGINAL_INPUT_NAMES.setdefault(current_path, original_name)
+    _write_original_names_record(video_input_dir)
+
+
+def record_original_filename(video_input_dir, current_name, original_name):
+    """Remember what a sanitized input file was called before it was renamed."""
+    _ORIGINAL_INPUT_NAMES[os.path.join(video_input_dir, current_name)] = original_name
+    _write_original_names_record(video_input_dir)
+
+
+def restore_input_filename(current_path):
+    """Rename a finished input file back to the name it arrived with.
+
+    Returns the restored path, or None when there was nothing to restore.
+    """
+    original_name = _ORIGINAL_INPUT_NAMES.get(current_path)
+    if not original_name:
+        return None
+
+    video_input_dir = os.path.dirname(current_path)
+    if not os.path.isfile(current_path):
+        # Moved or deleted while it was being processed - nothing left to rename.
+        _ORIGINAL_INPUT_NAMES.pop(current_path, None)
+        _write_original_names_record(video_input_dir)
+        return None
+
+    dst_path = os.path.join(video_input_dir, original_name)
+    if os.path.exists(dst_path):
+        same = False
+        try:
+            same = os.path.samefile(dst_path, current_path)
+        except OSError:
+            same = False
+        if not same:
+            print(f"{RED}[Dispatch] Warning: cannot restore {os.path.basename(current_path)} -> "
+                  f"{original_name}: a different file already has that name.{RESET}")
+            return None
+
+    try:
+        os.rename(current_path, dst_path)
+    except OSError as e:
+        print(f"{RED}[Dispatch] Warning: could not restore original filename "
+              f"{original_name}: {e}{RESET}")
+        return None
+
+    _ORIGINAL_INPUT_NAMES.pop(current_path, None)
+    _RESTORED_INPUT_NAMES.add(dst_path)
+    _write_original_names_record(video_input_dir)
+    print(f"[Dispatch] Restored original input filename: "
+          f"{os.path.basename(current_path)} -> {original_name}")
+    return dst_path
+
+
+def restore_all_input_filenames():
+    """Put back every input filename still recorded as renamed."""
+    for current_path in sorted(_ORIGINAL_INPUT_NAMES):
+        restore_input_filename(current_path)
+
+
+def sanitize_filename_stem(stem):
+    """Drop parentheses and turn every run of whitespace into a single dot.
+
+    Square brackets are left alone - "[" and "]" are safe in a filename for the
+    tools this dispatcher drives.
+    """
+    safe_stem = ".".join(stem.replace("(", " ").replace(")", " ").split())
+    # A leading dot hides the file, Windows silently drops a trailing dot, and
+    # runs of dots confuse extension parsing - normalize all three.
+    safe_stem = re.sub(r"\.{2,}", ".", safe_stem).strip(".")
+    return safe_stem or "video"
+
+
 def sanitize_input_filenames(video_input_dir, extensions):
-    """Replace parentheses in supported video filenames with safe inner spaces before processing."""
+    """Drop parentheses and replace spaces with dots in supported video filenames.
+
+    The original name of every renamed file is recorded so it can be restored
+    once the encode for that file is finished (see restore_input_filenames).
+    """
     supported_exts = {pattern[1:].lower() for pattern in extensions if pattern.startswith("*")}
     renamed = 0
     for filename in sorted(os.listdir(video_input_dir)):
@@ -637,10 +764,16 @@ def sanitize_input_filenames(video_input_dir, extensions):
         if not os.path.isfile(src_path):
             continue
         stem, ext = os.path.splitext(filename)
-        if ext.lower() not in supported_exts or ("(" not in stem and ")" not in stem):
+        if ext.lower() not in supported_exts:
+            continue
+        if src_path in _RESTORED_INPUT_NAMES:
+            # Already processed and renamed back - do not sanitize it a second time.
             continue
 
-        safe_stem = " ".join(stem.replace("(", " ").replace(")", " ").split()) or "video"
+        safe_stem = sanitize_filename_stem(stem)
+        if f"{safe_stem}{ext}" == filename:
+            continue
+
         dst_path = os.path.join(video_input_dir, f"{safe_stem}{ext}")
         suffix = 1
         while os.path.exists(dst_path):
@@ -648,6 +781,7 @@ def sanitize_input_filenames(video_input_dir, extensions):
             suffix += 1
 
         os.rename(src_path, dst_path)
+        record_original_filename(video_input_dir, os.path.basename(dst_path), filename)
         renamed += 1
         print(f"[Dispatch] Renamed input file for Python-safe filename: {filename} -> {os.path.basename(dst_path)}")
 
@@ -695,20 +829,34 @@ def setting_is_true(settings, key_name, default_value="False"):
 
 
 DEHALO_DEFAULTS = {
-    "rx": 2.0,
-    "ry": 2.0,
-    "brightstr": 1.0,
-    "darkstr": 0.0,
-    "lowsens": 50.0,
-    "highsens": 50.0,
-    "ss": 1.5,
+    "strength": 5,
+    "rmode": 17,
+    "hot": False,
+    "smode": False,
+    "edgemask": "Prewitt",
 }
 
+# AWarp rejects a warp depth outside -128..127. edge_cleaner adds 4 to strength
+# when smode is on, so the usable ceiling drops by 4 in that mode.
+DEHALO_STRENGTH_MAX = 127
+DEHALO_SMODE_STRENGTH_MAX = DEHALO_STRENGTH_MAX - 4
 
-def read_dehalo_float(value, key_name, default_value, minimum=None, maximum=None):
-    """Validate a numeric [dehalo] setting before it is written into the .vpy."""
+# vsrgtools maps 1-24 onto the zsmooth Repair plugin and 26-28 onto expression
+# fallbacks; 0 is a no-op and 25 is unimplemented.
+DEHALO_RMODES = frozenset(list(range(0, 25)) + [26, 27, 28])
+
+# Keys from the old dehalo_alpha implementation. They are silently ignored now,
+# so say so rather than letting a stale settings.txt look like it still applies.
+DEHALO_LEGACY_KEYS = ("dehalo_rx", "dehalo_ry", "dehalo_brightstr", "dehalo_darkstr",
+                      "dehalo_lowsens", "dehalo_highsens", "dehalo_ss")
+
+DEHALO_EDGEMASK_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def read_dehalo_int(value, key_name, default_value, minimum=None, maximum=None):
+    """Validate a whole-number [dehalo] setting before it is written into the .vpy."""
     try:
-        parsed = float(value)
+        parsed = int(str(value).strip())
     except (TypeError, ValueError):
         print(f"[Dispatch] Warning: Invalid {key_name}={value!r}; using {default_value}.")
         return default_value
@@ -721,17 +869,80 @@ def read_dehalo_float(value, key_name, default_value, minimum=None, maximum=None
     return parsed
 
 
+def read_dehalo_bool(settings, key_name, default_value=False):
+    raw = get_script_setting(settings, key_name, str(default_value)).strip().lower()
+    if raw in ("1", "true", "yes", "y", "on"):
+        return True
+    if raw in ("0", "false", "no", "n", "off"):
+        return False
+    print(f"[Dispatch] Warning: Invalid {key_name}={raw!r}; using {default_value}.")
+    return default_value
+
+
+def read_dehalo_rmode(value):
+    """Validate dehalo_rmode against the repair modes vsrgtools actually implements."""
+    try:
+        parsed = int(str(value).strip())
+    except (TypeError, ValueError):
+        print(f"[Dispatch] Warning: Invalid dehalo_rmode={value!r}; using 17.")
+        return 17
+    if parsed not in DEHALO_RMODES:
+        print(f"[Dispatch] Warning: dehalo_rmode={parsed} is not a supported repair mode; using 17.")
+        return 17
+    return parsed
+
+
+def read_dehalo_edgemask(value):
+    """Validate dehalo_edgemask.
+
+    The name is written into the generated .vpy as a string literal, so it is
+    restricted to a bare identifier. Whether that identifier is a real
+    vsmasktools edge detector is resolved inside the .vpy, which keeps this
+    working across vsmasktools versions that add or rename detectors.
+    """
+    name = str(value).strip()
+    if not name:
+        return "Prewitt"
+    if not DEHALO_EDGEMASK_RE.match(name):
+        print(f"[Dispatch] Warning: Invalid dehalo_edgemask={value!r}; using Prewitt.")
+        return "Prewitt"
+    return name
+
+
+def warn_dehalo_legacy_keys(settings):
+    """Warn about [dehalo] keys left over from the dehalo_alpha implementation."""
+    stale = [key for key in DEHALO_LEGACY_KEYS if key in settings]
+    if stale:
+        print(f"[Dispatch] Warning: settings.txt [dehalo] still has {', '.join(stale)}; "
+              "these are ignored since dehalo now uses edge_cleaner.")
+
+
 def read_dehalo_settings(settings):
     """Return the validated [dehalo] values used by the VapourSynth template."""
+    warn_dehalo_legacy_keys(settings)
+    smode = read_dehalo_bool(settings, "dehalo_smode", False)
+    strength_max = DEHALO_SMODE_STRENGTH_MAX if smode else DEHALO_STRENGTH_MAX
     return {
-        "rx": read_dehalo_float(get_script_setting(settings, "dehalo_rx", "2.0"), "dehalo_rx", 2.0, minimum=1.0),
-        "ry": read_dehalo_float(get_script_setting(settings, "dehalo_ry", "2.0"), "dehalo_ry", 2.0, minimum=1.0),
-        "brightstr": read_dehalo_float(get_script_setting(settings, "dehalo_brightstr", "1.0"), "dehalo_brightstr", 1.0, minimum=0.0, maximum=1.0),
-        "darkstr": read_dehalo_float(get_script_setting(settings, "dehalo_darkstr", "0.0"), "dehalo_darkstr", 0.0, minimum=0.0, maximum=1.0),
-        "lowsens": read_dehalo_float(get_script_setting(settings, "dehalo_lowsens", "50"), "dehalo_lowsens", 50.0, minimum=0.0, maximum=100.0),
-        "highsens": read_dehalo_float(get_script_setting(settings, "dehalo_highsens", "50"), "dehalo_highsens", 50.0, minimum=0.0, maximum=100.0),
-        "ss": read_dehalo_float(get_script_setting(settings, "dehalo_ss", "1.5"), "dehalo_ss", 1.5, minimum=1.0),
+        "strength": read_dehalo_int(get_script_setting(settings, "dehalo_strength", "5"), "dehalo_strength", 5, minimum=0, maximum=strength_max),
+        "rmode": read_dehalo_rmode(get_script_setting(settings, "dehalo_rmode", "17")),
+        "hot": read_dehalo_bool(settings, "dehalo_hot", False),
+        "smode": smode,
+        "edgemask": read_dehalo_edgemask(get_script_setting(settings, "dehalo_edgemask", "Prewitt")),
     }
+
+
+def dehalo_filter_state(do_dehalo, dehalo_values):
+    """Compact [dehalo] description for the .vpy cache-invalidation marker.
+
+    The parameters are part of the marker so that changing one rebuilds a cached
+    .vpy; with only the on/off state in there, a strength change would silently
+    reuse the old script.
+    """
+    if not do_dehalo:
+        return "False"
+    values = dehalo_values or DEHALO_DEFAULTS
+    return ("edge_cleaner(strength={strength},rmode={rmode},hot={hot},"
+            "smode={smode},edgemask={edgemask})").format(**values)
 
 
 def read_crop_int(value, key_name):
@@ -767,8 +978,8 @@ def report_filter_status(do_downscale, target_res, kernel, do_denoise, denoise_s
         active_filters.append(f"downscale: target_resolution={target_res}, kernel_type={kernel}")
     if do_dehalo and dehalo_values:
         active_filters.append(
-            "dehalo: rx={rx}, ry={ry}, brightstr={brightstr}, darkstr={darkstr}, "
-            "lowsens={lowsens}, highsens={highsens}, ss={ss}".format(**dehalo_values)
+            "dehalo (edge_cleaner): strength={strength}, rmode={rmode}, hot={hot}, "
+            "smode={smode}, edgemask={edgemask}".format(**dehalo_values)
         )
     if do_denoise:
         active_filters.append(f"denoise: denoise_setting={denoise_setting or 'enabled'}")
@@ -904,7 +1115,10 @@ def build_vapoursynth_script(source_path, temp_dir, tools_dir, settings, autocro
     # Marker written into the generated .vpy so a cached script is rebuilt whenever a
     # settings.txt filter is toggled. Without it an existing .vpy is reused as-is and a
     # newly enabled filter would silently never run.
-    filter_state_marker = f"# Filter state: dehalo={do_dehalo}, denoise={do_denoise}, deband={do_deband}"
+    filter_state_marker = (
+        f"# Filter state: dehalo={dehalo_filter_state(do_dehalo, dehalo_values)}, "
+        f"denoise={do_denoise}, deband={do_deband}"
+    )
 
     rebuild_vpy = not os.path.exists(vpy_file)
     if not rebuild_vpy:
@@ -995,20 +1209,27 @@ if do_tonemap:
 # DEHALO (settings.txt [dehalo]; always runs before denoise)
 do_dehalo = {dehalo}
 if do_dehalo:
-    import vsdehalo as deh
-    dehalo_kwargs = dict(
-        lowsens={dh_lowsens},
-        highsens={dh_highsens},
-        ss={dh_ss},
-        darkstr={dh_darkstr},
-        brightstr={dh_brightstr},
+    from vsdehalo import edge_cleaner
+    from vsmasktools import EdgeDetect, Prewitt
+    # edge_cleaner warps edges via awarpsharp, which needs the AWarp plugin.
+    if not hasattr(core, "awarp"):
+        raise RuntimeError(
+            "dehalo=True needs the AWarp plugin: put AWarp.dll in VapourSynth/vs-plugins, "
+            "or set dehalo=False in settings.txt."
+        )
+    try:
+        dehalo_edgemask = EdgeDetect.ensure_obj("{dh_edgemask}")
+    except Exception:
+        print("[dehalo] Unknown dehalo_edgemask '{dh_edgemask}'; using Prewitt.")
+        dehalo_edgemask = Prewitt
+    src = edge_cleaner(
+        src,
+        strength={dh_strength},
+        rmode={dh_rmode},
+        hot={dh_hot},
+        smode={dh_smode},
+        edgemask=dehalo_edgemask,
     )
-    if hasattr(deh, "AlphaBlur"):
-        # vsjetpack >= 1.0: the rx/ry radius moved into the AlphaBlur blur object.
-        src = deh.dehalo_alpha(src, blur=deh.AlphaBlur(rx={dh_rx}, ry={dh_ry}), **dehalo_kwargs)
-    else:
-        # Older vsdehalo takes rx/ry directly.
-        src = deh.dehalo_alpha(src, rx={dh_rx}, ry={dh_ry}, **dehalo_kwargs)
 
 # Optional settings.txt denoise/deband hooks
 {denoise_line}
@@ -1080,13 +1301,11 @@ final.set_output(0)
                 denoise_line=denoise_line,
                 deband_line=deband_line,
                 dehalo=str(do_dehalo),
-                dh_rx=dehalo_args["rx"],
-                dh_ry=dehalo_args["ry"],
-                dh_brightstr=dehalo_args["brightstr"],
-                dh_darkstr=dehalo_args["darkstr"],
-                dh_lowsens=dehalo_args["lowsens"],
-                dh_highsens=dehalo_args["highsens"],
-                dh_ss=dehalo_args["ss"],
+                dh_strength=dehalo_args["strength"],
+                dh_rmode=dehalo_args["rmode"],
+                dh_hot=str(bool(dehalo_args["hot"])),
+                dh_smode=str(bool(dehalo_args["smode"])),
+                dh_edgemask=dehalo_args["edgemask"],
                 filter_state=filter_state_marker,
             ))
         if tonemap:
@@ -1617,7 +1836,7 @@ def main():
     final_params = ""
     resume = False
     selected_fork = "essential"
-    avx512 = False
+    arch = "x86-64-v3"
     denoise_setting = None
     autocrop = False
     convert_yuv420p10 = False
@@ -1636,12 +1855,16 @@ def main():
         elif arg == "--fork" and i + 1 < len(args):
             selected_fork = args[i+1]
             i += 2
+        elif arg == "--arch" and i + 1 < len(args) and not args[i + 1].startswith("--"):
+            arch = args[i + 1]
+            i += 2
         elif arg == "--avx512":
+            # Kept for .bat files generated before ARCH replaced AVX512.
             if i + 1 < len(args) and not args[i + 1].startswith("--"):
-                avx512 = parse_bool_setting(args[i + 1])
+                arch = "avx512" if parse_bool_setting(args[i + 1]) else "x86-64-v3"
                 i += 2
             else:
-                avx512 = True
+                arch = "avx512"
                 i += 1
         elif arg == "--denoise" and i + 1 < len(args):
             val = args[i+1].strip().lower()
@@ -1702,10 +1925,14 @@ def main():
         settings = load_script_settings(settings_path)
     ntfy_settings = settings
 
-    setup_svt_av1_fork(tools_dir, selected_fork, avx512=avx512, verbose=True)
+    setup_svt_av1_fork(tools_dir, selected_fork, arch=arch, verbose=True)
             
     # --- Gather Input Files ---
     extensions = ("*.mkv", "*.mp4", "*.m2ts")
+    load_original_names_record(video_input_dir)
+    # Backstop for Ctrl-C and unhandled errors: every recorded rename still gets
+    # undone on the way out, not only after a clean finish.
+    atexit.register(restore_all_input_filenames)
     sanitize_input_filenames(video_input_dir, extensions)
     input_files = gather_input_files(video_input_dir, extensions)
     known_input_files = set(input_files)
@@ -1736,10 +1963,11 @@ def main():
         
         if os.path.exists(final_output_path):
             print(f"[Dispatch] Output file already exists: {final_output_path}")
+            restore_input_filename(input_abspath_origin)
             continue
 
         try:
-            # Note: We are NO LONGER moving the file to temp. 
+            # Note: We are NO LONGER moving the file to temp.
             # We read directly from input_abspath_origin.
             
             # 1. Scene Detection
@@ -1962,7 +2190,12 @@ def main():
                 "Auto-Boost encode failed",
                 "An encode failed.",
             )
+        finally:
+            # This file is done with (encoded, skipped or failed) - give it its
+            # original name back.
+            restore_input_filename(input_abspath_origin)
 
+    restore_all_input_filenames()
     batch_elapsed = time.monotonic() - batch_started_at
 
     send_ntfy_notification(

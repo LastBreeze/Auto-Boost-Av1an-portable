@@ -119,11 +119,11 @@ def cleanup_workspace():
                 except OSError as e:
                     print(f"Error deleting {os.path.basename(file_path)}: {e}")
 
-    # 7. Specific Cleanup for 'video-input' (logs and *.bsindex)
+    # 7. Specific Cleanup for 'video-input' (logs, *.bsindex, *.json, dot folders)
     video_input_dir = os.path.join(cwd, 'video-input')
-    
+
     if os.path.exists(video_input_dir) and os.path.isdir(video_input_dir):
-        
+
         # A. Delete 'logs' folder inside video-input
         vi_logs_dir = os.path.join(video_input_dir, 'logs')
         if os.path.exists(vi_logs_dir) and os.path.isdir(vi_logs_dir):
@@ -133,14 +133,26 @@ def cleanup_workspace():
             except OSError as e:
                 print(f"Error deleting video-input logs: {e}")
 
-        # B. Delete *.bsindex inside video-input
-        vi_bsindex_files = glob.glob(os.path.join(video_input_dir, '*.bsindex'))
-        for file_path in vi_bsindex_files:
-            try:
-                os.remove(file_path)
-                print(f"Deleted file from video-input: {os.path.basename(file_path)}")
-            except OSError as e:
-                print(f"Error deleting {os.path.basename(file_path)}: {e}")
+        # B. Delete *.bsindex and *.json inside video-input
+        vi_patterns = ['*.bsindex', '*.json']
+        for pattern in vi_patterns:
+            for file_path in glob.glob(os.path.join(video_input_dir, pattern)):
+                try:
+                    os.remove(file_path)
+                    print(f"Deleted file from video-input: {os.path.basename(file_path)}")
+                except OSError as e:
+                    print(f"Error deleting {os.path.basename(file_path)}: {e}")
+
+        # C. Delete folders starting with a period inside video-input
+        # (e.g. .abc123 - the LQTC encoder's working/resume folder)
+        for item in os.listdir(video_input_dir):
+            item_path = os.path.join(video_input_dir, item)
+            if item.startswith(".") and os.path.isdir(item_path):
+                try:
+                    shutil.rmtree(item_path)
+                    print(f"Deleted temp folder from video-input: {item}")
+                except OSError as e:
+                    print(f"Error deleting folder {item}: {e}")
 
     # 8. Delete sample.mkv*.bsindex left next to this script (tools\)
     sample_bsindex_files = glob.glob(os.path.join(script_dir, 'sample.mkv*.bsindex'))

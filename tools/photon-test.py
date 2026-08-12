@@ -59,7 +59,8 @@ def select_essential_fork(tools_dir):
     except Exception as exc:
         print(f"Warning: Could not import svt_fork_setup.py: {exc}")
         return False
-    return setup_svt_av1_fork(tools_dir, "essential", avx512=False, verbose=True)
+    # x86-64-v3 runs on any modern CPU, which is what a test needs.
+    return setup_svt_av1_fork(tools_dir, "essential", arch="x86-64-v3", verbose=True)
 
 
 def detect_source_mkv(work_dir, requested_source=None):

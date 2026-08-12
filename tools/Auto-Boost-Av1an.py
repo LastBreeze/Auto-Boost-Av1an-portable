@@ -92,7 +92,7 @@ import numpy as np
 import concurrent.futures
 from svt_fork_setup import setup_svt_av1_fork
 
-ver_str = "v3.1.3"
+ver_str = "v3.3.1"
 
 # --- TOOL PATHS HELPER ---
 def resolve_tool(portable_path_str: str, binary_name: str) -> Path:
@@ -157,7 +157,8 @@ parser.add_argument("--convert-to-YUV420P10", action='store_true', help = "Conve
 parser.add_argument("-v", "--version", action='version', version = f"Auto-Boost-Essential {ver_str}")
 parser.add_argument("--debug", action='store_true', help = "Checks the installation and provides relevant information for troubleshooting | Default: not active")
 parser.add_argument("--fork", help="SVT-AV1 fork to copy before encoding: 5fish, essential, hdr, custom | Default: essential", default="essential")
-parser.add_argument("--avx512", action='store_true', help="Use AVX-512 SVT-AV1 build when the selected fork provides one")
+parser.add_argument("--avx512", action='store_true', help="Deprecated spelling of --arch avx512")
+parser.add_argument("--arch", help="CPU build of the SVT-AV1 fork to use: x86-64-v3, znver2, avx512 | Default: x86-64-v3", default=None)
 parser.add_argument("--tonemap", nargs="?", const="true", default="false", help="Tonemap HDR to SDR (BT.709) via libplacebo inside the VapourSynth script: true/false | Default: false")
 
 args = parser.parse_args()
@@ -228,13 +229,11 @@ s_downscale = get_script_setting(script_settings, "downscale", "False")
 s_target_res = get_script_setting(script_settings, "target_resolution", "1920x1080")
 s_kernel = get_script_setting(script_settings, "kernel_type", "Hermite")
 s_dehalo = get_script_setting(script_settings, "dehalo", "False")
-s_dehalo_rx = get_script_setting(script_settings, "dehalo_rx", "2.0")
-s_dehalo_ry = get_script_setting(script_settings, "dehalo_ry", "2.0")
-s_dehalo_brightstr = get_script_setting(script_settings, "dehalo_brightstr", "1.0")
-s_dehalo_darkstr = get_script_setting(script_settings, "dehalo_darkstr", "0.0")
-s_dehalo_lowsens = get_script_setting(script_settings, "dehalo_lowsens", "50")
-s_dehalo_highsens = get_script_setting(script_settings, "dehalo_highsens", "50")
-s_dehalo_ss = get_script_setting(script_settings, "dehalo_ss", "1.5")
+s_dehalo_strength = get_script_setting(script_settings, "dehalo_strength", "5")
+s_dehalo_rmode = get_script_setting(script_settings, "dehalo_rmode", "17")
+s_dehalo_hot = get_script_setting(script_settings, "dehalo_hot", "False")
+s_dehalo_smode = get_script_setting(script_settings, "dehalo_smode", "False")
+s_dehalo_edgemask = get_script_setting(script_settings, "dehalo_edgemask", "Prewitt")
 s_denoise = get_script_setting(script_settings, "denoise", "False")
 s_denoise_setting = get_script_setting(script_settings, "denoise_setting", "")
 s_deband = get_script_setting(script_settings, "deband", "False")
@@ -250,11 +249,25 @@ do_deband_bool = s_deband.lower() == "true"
 # validated here instead of trusting whatever is in settings.txt.
 dehalo_setting_warnings: list[str] = []
 
+# AWarp rejects a warp depth outside -128..127. edge_cleaner adds 4 to strength
+# when smode is on, so the usable ceiling drops by 4 in that mode.
+DEHALO_STRENGTH_MAX = 127
+DEHALO_SMODE_STRENGTH_MAX = DEHALO_STRENGTH_MAX - 4
 
-def _read_dehalo_float(value: str, key_name: str, default_value: float,
-                       minimum: float | None = None, maximum: float | None = None) -> float:
+# vsrgtools maps 1-24 onto the zsmooth Repair plugin and 26-28 onto expression
+# fallbacks; 0 is a no-op and 25 is unimplemented.
+DEHALO_RMODES = frozenset(list(range(0, 25)) + [26, 27, 28])
+
+# Keys from the old dehalo_alpha implementation. They are silently ignored now,
+# so say so rather than letting a stale settings.txt look like it still applies.
+DEHALO_LEGACY_KEYS = ("dehalo_rx", "dehalo_ry", "dehalo_brightstr", "dehalo_darkstr",
+                      "dehalo_lowsens", "dehalo_highsens", "dehalo_ss")
+
+
+def _read_dehalo_int(value: str, key_name: str, default_value: int,
+                     minimum: int | None = None, maximum: int | None = None) -> int:
     try:
-        parsed = float(value)
+        parsed = int(str(value).strip())
     except (TypeError, ValueError):
         dehalo_setting_warnings.append(f"Invalid {key_name}={value!r}; using {default_value}.")
         return default_value
@@ -267,13 +280,60 @@ def _read_dehalo_float(value: str, key_name: str, default_value: float,
     return parsed
 
 
-dehalo_rx = _read_dehalo_float(s_dehalo_rx, "dehalo_rx", 2.0, minimum=1.0)
-dehalo_ry = _read_dehalo_float(s_dehalo_ry, "dehalo_ry", 2.0, minimum=1.0)
-dehalo_brightstr = _read_dehalo_float(s_dehalo_brightstr, "dehalo_brightstr", 1.0, minimum=0.0, maximum=1.0)
-dehalo_darkstr = _read_dehalo_float(s_dehalo_darkstr, "dehalo_darkstr", 0.0, minimum=0.0, maximum=1.0)
-dehalo_lowsens = _read_dehalo_float(s_dehalo_lowsens, "dehalo_lowsens", 50.0, minimum=0.0, maximum=100.0)
-dehalo_highsens = _read_dehalo_float(s_dehalo_highsens, "dehalo_highsens", 50.0, minimum=0.0, maximum=100.0)
-dehalo_ss = _read_dehalo_float(s_dehalo_ss, "dehalo_ss", 1.5, minimum=1.0)
+def _read_dehalo_bool(value: str, key_name: str, default_value: bool = False) -> bool:
+    raw = str(value).strip().lower()
+    if raw in ("1", "true", "yes", "y", "on"):
+        return True
+    if raw in ("0", "false", "no", "n", "off"):
+        return False
+    dehalo_setting_warnings.append(f"Invalid {key_name}={value!r}; using {default_value}.")
+    return default_value
+
+
+def _read_dehalo_rmode(value: str) -> int:
+    try:
+        parsed = int(str(value).strip())
+    except (TypeError, ValueError):
+        dehalo_setting_warnings.append(f"Invalid dehalo_rmode={value!r}; using 17.")
+        return 17
+    if parsed not in DEHALO_RMODES:
+        dehalo_setting_warnings.append(f"dehalo_rmode={parsed} is not a supported repair mode; using 17.")
+        return 17
+    return parsed
+
+
+def _read_dehalo_edgemask(value: str) -> str:
+    """Validate dehalo_edgemask.
+
+    The name is written into the generated .vpy as a string literal, so it is
+    restricted to a bare identifier. Whether that identifier is a real
+    vsmasktools edge detector is resolved inside the .vpy, which keeps this
+    working across vsmasktools versions that add or rename detectors.
+    """
+    name = str(value).strip()
+    if not name:
+        return "Prewitt"
+    if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", name):
+        dehalo_setting_warnings.append(f"Invalid dehalo_edgemask={value!r}; using Prewitt.")
+        return "Prewitt"
+    return name
+
+
+dehalo_smode = _read_dehalo_bool(s_dehalo_smode, "dehalo_smode", False)
+dehalo_strength = _read_dehalo_int(
+    s_dehalo_strength, "dehalo_strength", 5, minimum=0,
+    maximum=DEHALO_SMODE_STRENGTH_MAX if dehalo_smode else DEHALO_STRENGTH_MAX,
+)
+dehalo_rmode = _read_dehalo_rmode(s_dehalo_rmode)
+dehalo_hot = _read_dehalo_bool(s_dehalo_hot, "dehalo_hot", False)
+dehalo_edgemask = _read_dehalo_edgemask(s_dehalo_edgemask)
+
+_stale_dehalo_keys = [key for key in DEHALO_LEGACY_KEYS if key in script_settings]
+if _stale_dehalo_keys:
+    dehalo_setting_warnings.append(
+        f"settings.txt [dehalo] still has {', '.join(_stale_dehalo_keys)}; "
+        "these are ignored since dehalo now uses edge_cleaner."
+    )
 # -----------------------
 
 stage = int(args.stage)
@@ -790,8 +850,8 @@ def report_filter_status() -> None:
         active_filters.append(f"downscale: target_resolution={s_target_res}, kernel_type={s_kernel}")
     if do_dehalo_bool:
         active_filters.append(
-            f"dehalo: rx={dehalo_rx}, ry={dehalo_ry}, brightstr={dehalo_brightstr}, "
-            f"darkstr={dehalo_darkstr}, lowsens={dehalo_lowsens}, highsens={dehalo_highsens}, ss={dehalo_ss}"
+            f"dehalo (edge_cleaner): strength={dehalo_strength}, rmode={dehalo_rmode}, "
+            f"hot={dehalo_hot}, smode={dehalo_smode}, edgemask={dehalo_edgemask}"
         )
         for warning in dehalo_setting_warnings:
             console.print(f"[yellow]{warning}[/yellow]")
@@ -967,9 +1027,17 @@ else:
 
 # Marker written into the generated .vpy so a cached script is rebuilt whenever a
 # settings.txt filter is toggled. Without it an existing .vpy is reused as-is and a
-# newly enabled filter would silently never run.
+# newly enabled filter would silently never run. The dehalo parameters are part of
+# the marker too, so retuning one of them also rebuilds the script.
+if do_dehalo_bool:
+    _dehalo_state = (
+        f"edge_cleaner(strength={dehalo_strength},rmode={dehalo_rmode},hot={dehalo_hot},"
+        f"smode={dehalo_smode},edgemask={dehalo_edgemask})"
+    )
+else:
+    _dehalo_state = "False"
 filter_state_marker = (
-    f"# Filter state: dehalo={do_dehalo_bool}, denoise={do_denoise_bool}, deband={do_deband_bool}"
+    f"# Filter state: dehalo={_dehalo_state}, denoise={do_denoise_bool}, deband={do_deband_bool}"
 )
 
 rebuild_vpy = not os.path.exists(vpy_file)
@@ -1059,20 +1127,27 @@ if do_tonemap:
 # DEHALO (settings.txt [dehalo]; always runs before denoise)
 do_dehalo = {dehalo}
 if do_dehalo:
-    import vsdehalo as deh
-    dehalo_kwargs = dict(
-        lowsens={dh_lowsens},
-        highsens={dh_highsens},
-        ss={dh_ss},
-        darkstr={dh_darkstr},
-        brightstr={dh_brightstr},
+    from vsdehalo import edge_cleaner
+    from vsmasktools import EdgeDetect, Prewitt
+    # edge_cleaner warps edges via awarpsharp, which needs the AWarp plugin.
+    if not hasattr(core, "awarp"):
+        raise RuntimeError(
+            "dehalo=True needs the AWarp plugin: put AWarp.dll in VapourSynth/vs-plugins, "
+            "or set dehalo=False in settings.txt."
+        )
+    try:
+        dehalo_edgemask = EdgeDetect.ensure_obj("{dh_edgemask}")
+    except Exception:
+        print("[dehalo] Unknown dehalo_edgemask '{dh_edgemask}'; using Prewitt.")
+        dehalo_edgemask = Prewitt
+    src = edge_cleaner(
+        src,
+        strength={dh_strength},
+        rmode={dh_rmode},
+        hot={dh_hot},
+        smode={dh_smode},
+        edgemask=dehalo_edgemask,
     )
-    if hasattr(deh, "AlphaBlur"):
-        # vsjetpack >= 1.0: the rx/ry radius moved into the AlphaBlur blur object.
-        src = deh.dehalo_alpha(src, blur=deh.AlphaBlur(rx={dh_rx}, ry={dh_ry}), **dehalo_kwargs)
-    else:
-        # Older vsdehalo takes rx/ry directly.
-        src = deh.dehalo_alpha(src, rx={dh_rx}, ry={dh_ry}, **dehalo_kwargs)
 
 # Optional settings.txt denoise/deband hooks
 {denoise_line}
@@ -1152,13 +1227,11 @@ final.set_output(0)
             convert=convert_yuv420p10,
             tonemap=str(tonemap_bool),
             dehalo=str(do_dehalo_bool),
-            dh_rx=dehalo_rx,
-            dh_ry=dehalo_ry,
-            dh_brightstr=dehalo_brightstr,
-            dh_darkstr=dehalo_darkstr,
-            dh_lowsens=dehalo_lowsens,
-            dh_highsens=dehalo_highsens,
-            dh_ss=dehalo_ss,
+            dh_strength=dehalo_strength,
+            dh_rmode=dehalo_rmode,
+            dh_hot=str(dehalo_hot),
+            dh_smode=str(dehalo_smode),
+            dh_edgemask=dehalo_edgemask,
             denoise_line=denoise_line,
             deband_line=deband_line,
             filter_state=filter_state_marker
@@ -1881,21 +1954,50 @@ def calculate_metric() -> None:
     _write_metric_log_from_scores([score if score is not None else 0.0 for score in score_list], ssimu2_log_file, skip, len(source_clip))
 
 def metrics_aggregation(score_list: list[float]) -> tuple[float, float, float]:
-    filtered_score_list = [score if score >= 0 else 0.0 for score in score_list]
-    sorted_score_list = sorted(filtered_score_list)
-    
+    """
+    Aggregate one scene's per-frame metric scores into (mean, bad-tail mean, min).
+
+    The second value is what drives CRF boosting. It used to be the 15th
+    percentile via quantiles(n=100)[14], but a fixed-rank percentile does not
+    mean the same thing at every scene length: with the exclusive method the
+    cut point sits at 15*(m+1)/100, so on a 24-frame scene it lands between
+    the first and second distinct samples (effectively the single worst frame),
+    while on a 240-frame scene it lands around the 12th worst. Short scenes
+    were therefore judged on one unlucky frame and boosted more noisily than
+    long ones.
+
+    Averaging the worst TAIL_FRACTION of samples keeps a constant meaning
+    across scene lengths and is less sensitive to a single outlier, while
+    still targeting the bad frames the same way the percentile did.
+
+    Negative scores are no longer clamped to 0.0: SSIMULACRA2 legitimately
+    returns negative values on badly broken frames, and those are exactly the
+    frames that should pull the boost down rather than being floored.
+
+    :param score_list: per-frame metric scores for one scene
+    :type score_list: list[float]
+
+    :return: mean score, mean of the worst TAIL_FRACTION, and minimum score
+    :rtype: tuple[float, float, float]
+    """
+    TAIL_FRACTION = 0.20
+
+    sorted_score_list = sorted(score_list)
+
     if not sorted_score_list:
         return 0.0, 0.0, 0.0
-    
-    average = sum(filtered_score_list)/len(filtered_score_list)
-    
-    # Handle single-frame or extremely short scenes where quantiles fails (needs >=2 points)
-    if len(sorted_score_list) < 2:
-        return (average, sorted_score_list[0], sorted_score_list[0])
-    
-    percentile_15 = quantiles(sorted_score_list, n=100)[14]
+
+    average = sum(sorted_score_list) / len(sorted_score_list)
+
+    # Use at least 2 samples where they exist, and never more than we have.
+    # Dividing by len(tail) rather than k keeps single-sample scenes correct.
+    k = min(len(sorted_score_list),
+            max(2, ceil(len(sorted_score_list) * TAIL_FRACTION)))
+    tail = sorted_score_list[:k]
+    tail_mean = sum(tail) / len(tail)
+
     min_score = sorted_score_list[0]
-    return (average, percentile_15, min_score)
+    return (average, tail_mean, min_score)
 
 # --- ZONES HELPERS ---
 
@@ -2263,7 +2365,7 @@ if zones_msg:
 console.print("[bold]Auto-Boost-Av1an start!\n")
 
 # Make direct Auto-Boost invocations behave like the generated .bat dispatchers.
-setup_svt_av1_fork(tools_dir, args.fork, avx512=args.avx512, verbose=verbose)
+setup_svt_av1_fork(tools_dir, args.fork, arch=args.arch, avx512=args.avx512, verbose=verbose)
 # -------------------------------
 
 if no_boosting:

@@ -27,21 +27,19 @@ target_resolution=1920
 kernel_type=Spline36
 
 [dehalo]
-# Dehalo is applied before denoise.
+# Dehalo is applied before denoise. Uses vsdehalo.edge_cleaner.
 # Options available: True, False
 dehalo=False
-# Halo removal radius (horizontal / vertical)
-dehalo_rx=2.0
-dehalo_ry=2.0
-# How hard bright halos are suppressed (0.0 = off, 1.0 = full)
-dehalo_brightstr=1.0
-# How hard dark halos are suppressed (0.0 = off, 1.0 = full)
-dehalo_darkstr=0.0
-# Edge mask sensitivity, 0-100
-dehalo_lowsens=50
-dehalo_highsens=50
-# Supersampling factor used to avoid aliasing on the treated edges
-dehalo_ss=1.5
+# How hard edges are warped inward, 0-127 (0-123 when dehalo_smode=True)
+dehalo_strength=5
+# Repair mode that reins the warp back in. 0-24, 26-28
+dehalo_rmode=17
+# Extra repair pass against leftover bright specks. True, False
+dehalo_hot=False
+# Second, stronger cleaning pass. True, False
+dehalo_smode=False
+# Edge detector used to build the mask
+dehalo_edgemask=Prewitt
 
 [denoise]
 denoise=True
@@ -92,48 +90,55 @@ deband_setting=src = core.placebo.Deband(src, threshold=1.5, planes=1)
 #
 # Dehalo runs BEFORE denoise, so denoise smooths whatever dehalo leaves behind.
 #
+# This uses edge_cleaner from vsdehalo. Instead of blurring the halo away, it
+# warps the picture slightly so the pixels just outside an edge get pulled into
+# the edge, which swallows the glow while keeping the line itself sharp.
+#
+# edge_cleaner only touches luma. Chroma is passed through untouched.
+#
 # dehalo=True/False
 #   Master switch. False (default) skips the filter entirely.
 #
-# dehalo_rx / dehalo_ry (default 2.0, must be at least 1.0)
-#   How wide a halo the filter looks for, in pixels, horizontally (rx) and
-#   vertically (ry). Think of it as "how far out from the edge does the glow
-#   reach?" Raise it for thick, obvious halos; lower it for thin ones.
-#   Too high softens the picture and starts eating detail near edges.
-#     1.5 = subtle halos
-#     2.0 = typical (recommended starting point)
-#     3.0 = thick halos on heavily sharpened sources
-#   Keep rx and ry equal unless the halos are clearly stretched in one
-#   direction (some anamorphic or badly resized sources).
+# dehalo_strength (default 5, range 0-127)
+#   How far the edges are warped inward, which is effectively how much halo
+#   gets eaten. This is the main knob.
+#     3     = very light touch
+#     5     = typical (recommended starting point)
+#     10-16 = heavy halos on aggressively sharpened sources
+#   Too high visibly distorts lines and makes thin detail wobble or vanish, so
+#   raise it in small steps and compare. If dehalo_smode=True the usable
+#   ceiling is 123, because smode adds 4 internally.
 #
-# dehalo_brightstr (default 1.0, range 0.0-1.0)
-#   Strength against BRIGHT halos - the white/light glow around dark lines.
-#   This is the common case. 1.0 removes them fully, 0.5 halves them,
-#   0.0 leaves them alone. Lower this first if lines start looking thin.
+# dehalo_rmode (default 17, valid 0-24 and 26-28)
+#   Repair mode. After warping, the result is clamped against the original so
+#   the warp cannot run away and invent detail. 17 is the sane default and
+#   almost never needs changing. 0 disables the clamp entirely, which lets the
+#   warp do whatever it likes - not recommended. 1 is the most conservative.
 #
-# dehalo_darkstr (default 0.0, range 0.0-1.0)
-#   Strength against DARK halos - the dark smear on the light side of an edge.
-#   Left at 0.0 on purpose: dark halos are rarer, and removing them very easily
-#   destroys line art. Only raise it (try 0.2-0.5) if you can actually see
-#   dark rings, and check the result.
+# dehalo_hot (default False)
+#   Runs one more repair pass afterwards aimed at leftover bright specks along
+#   edges. Turn it on if cleaned edges still show sparkly dots. Costs a little
+#   speed and softens edges slightly.
 #
-# dehalo_lowsens / dehalo_highsens (default 50 / 50, range 0-100)
-#   These control the mask that decides which pixels count as "halo". The
-#   filter is applied fully below lowsens and skipped entirely above highsens,
-#   blending in between. Lower values = more aggressive (treats more of the
-#   frame as halo). Higher values = more conservative (only the most obvious
-#   halos are touched). The defaults are fine for almost everything; raise
-#   both to about 60-70 if dehalo is damaging areas that had no halos.
+# dehalo_smode (default False)
+#   Second, stronger cleaning pass. It bumps the strength by 4 and then applies
+#   a second masked pass built from the difference between the source and a
+#   smoothed version, which catches halos the first pass missed. Use it only
+#   when normal mode is clearly not enough - it is noticeably more destructive
+#   to fine line art.
 #
-# dehalo_ss (default 1.5)
-#   Supersampling factor. The filter internally works at a higher resolution
-#   so the edges it rebuilds do not come out jagged. 1.5 is the usual value;
-#   2.0 is slightly cleaner but slower; 1.0 disables it and is fastest but can
-#   leave aliasing (stair-stepping) on diagonal lines.
+# dehalo_edgemask (default Prewitt)
+#   Which edge detector builds the mask deciding where the filter is allowed to
+#   work. Prewitt is the default and a good general choice. Other useful names:
+#   Sobel, Scharr, Kirsch, FDoG, Kroon, TEdge. Names are case-insensitive and
+#   come from vsmasktools; an unknown name falls back to Prewitt with a warning.
+#   Roughly, Kirsch and Scharr catch more edges (more aggressive), and Prewitt
+#   or Sobel are more restrained.
 #
 # Suggested starting points:
-#   * Anime with visible edge glow: dehalo=True, rx/ry=2.0, brightstr=1.0
-#   * Mild halos / careful pass:    dehalo=True, rx/ry=1.5, brightstr=0.6
+#   * Anime with visible edge glow: dehalo=True, dehalo_strength=5
+#   * Mild halos / careful pass:    dehalo=True, dehalo_strength=3
+#   * Stubborn heavy halos:         dehalo=True, dehalo_strength=10, dehalo_smode=True
 #   * Clean live action:            dehalo=False
 #
 # [denoise]

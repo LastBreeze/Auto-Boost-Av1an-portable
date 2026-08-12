@@ -9,8 +9,10 @@ set "fork=essential"
 :: example forks: 5fish, essential, hdr, custom
 set "DENOISE=False"
 :: DENOISE updates denoise=True/False in settings.txt before dispatch. 5fish should use True; other forks default to False.
-set "AVX512=False"
-:: Set AVX512=True only if your CPU supports AVX-512 and the fork has an AVX-512 build.
+set "ARCH=x86-64-v3"
+:: ARCH picks the CPU build of the encoder: x86-64-v3 (any modern CPU),
+:: znver2 (AMD Ryzen 3000+), avx512 (only CPUs with AVX-512).
+:: A fork without that build falls back to x86-64-v3. The hdr fork is x86-64-v3 only.
 
 del tools\bat*.txt
 move *.mkv video-input
@@ -30,10 +32,15 @@ type NUL > "tools\bat-used-%~nx0.txt"
 set "PATH=%~dp0VapourSynth;%~dp0tools\av1an;%~dp0tools\MKVToolNix;%PATH%"
 
 :: --- STEP 1A: WORKER COUNT CHECK (ENCODE) ---
+set "WORKER_COUNT_CFG="
 if exist "tools\workercount-config.txt" (
-    REM Read the worker count from the config file
-    for /f "usebackq tokens=2 delims==" %%a in ("tools\workercount-config.txt") do set WORKER_COUNT=%%a
-) else (
+    REM Read the worker count from the config file. Only workers= is read, so
+    REM other keys, such as the cputarget= the builders remember, are ignored.
+    for /f "usebackq tokens=1,2 delims==" %%a in ("tools\workercount-config.txt") do (
+        if /I "%%a"=="workers" set "WORKER_COUNT_CFG=%%b"
+    )
+)
+if not defined WORKER_COUNT_CFG (
     echo.
     echo -------------------------------------------------------------------------------
     echo First Run Detected: Calculating optimal encode worker count...
@@ -41,12 +48,15 @@ if exist "tools\workercount-config.txt" (
     "VapourSynth\python.exe" "tools\workercount.py"
     
     REM Reload config after generation
-    for /f "usebackq tokens=2 delims==" %%a in ("tools\workercount-config.txt") do set WORKER_COUNT=%%a
+    for /f "usebackq tokens=1,2 delims==" %%a in ("tools\workercount-config.txt") do (
+        if /I "%%a"=="workers" set "WORKER_COUNT_CFG=%%b"
+    )
     
     REM Pause so user can see the calculation results, then continue
     echo.
     echo Encode worker count calculated.
 )
+if defined WORKER_COUNT_CFG set "WORKER_COUNT=%WORKER_COUNT_CFG%"
 
 :: --- STEP 1B: WORKER COUNT CHECK (SSIMU2) ---
 if exist "tools\workercount-ssimu2.txt" (
@@ -92,7 +102,7 @@ echo Encoding inputs from: video-input
 echo Outputs will go to:   video-output
 echo.
 :: If you'd like to use --film-grain, then --photon-noise must be set to 0, do not remove the setting.
-"VapourSynth\python.exe" "tools\dispatch.py" --fork %fork% --avx512 %AVX512% --denoise %DENOISE% --crf %CRF% --autocrop --ssimu2 %SSIMU2_TOOL% --ssimu2-cpu-workers %SSIMU2_WORKERS% --resume --fast-speed 8 --final-speed %FINAL_SPEED% --workers %WORKER_COUNT% --fast-params "%FAST_PARAMS%" --final-params "%FINAL_PARAMS%"
+"VapourSynth\python.exe" "tools\dispatch.py" --fork %fork% --arch %ARCH% --denoise %DENOISE% --crf %CRF% --autocrop --ssimu2 %SSIMU2_TOOL% --ssimu2-cpu-workers %SSIMU2_WORKERS% --resume --fast-speed 8 --final-speed %FINAL_SPEED% --workers %WORKER_COUNT% --fast-params "%FAST_PARAMS%" --final-params "%FINAL_PARAMS%"
 
 echo.
 echo All tasks finished.

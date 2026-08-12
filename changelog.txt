@@ -1,12 +1,48 @@
 Changelog
 
+v3.3.1
+---------------------------------
+• x86-64-v3 option added to bat-builder for older CPU enjoyers who cannot use znver2.
+• x86-64-v3 builds added to Large Quality Target Collider.
+• Dehalo settings.txt solution switched to edge_cleaner to better protect frames.
+• CVVDP target quality range suggestions tightened for target quality encoders.
+
+v3.3
+---------------------------------
+• Condor added to bat-builder advanced options. This is a target quality encoder. You choose a target, it
+  auto adjusts the crf value to meet that target.
+
+v3.2
+---------------------------------
+• Large Quality Target Collider added to bat-builder advanced options.
+  Target Quality (TQ) Encoding: Instead of setting a fixed bitrate or CRF, you set a target psychovisual
+  quality range lqtc uses advanced metrics like CVVDP, SSIMULACRA2 to test each scene with multiple probes
+  until the output fits your desired quality target.
+• Improved per-scene quality scoring. Instead of reading one frame near the bad end of the list, it now
+  averages the worst 20% of measured frames, so short and long scenes are judged the same way.
+• Fixed a rare wrong CRF on very short scenes, where the old scoring could return a nonsense negative score.
+• SSIMU2 scores below zero are no longer rounded up to 0, so the worst frames properly count towards a boost.
+
+v3.1.3
+---------------------------------
+• Added settings-preview, this will read filter parameters from settings.txt then launch vspreview
+• Fixed dehalo bug
+
+v3.1.2
+---------------------------------
+• Added a dehalo filter, off by default. Turn it on with dehalo=True in the new [dehalo] section of
+  settings.txt, where rx/ry, brightstr, darkstr, lowsens/highsens and ss are all adjustable.
+  See the "# info" notes at the bottom of settings.txt for what each one does.
+• A filter you switch on or off in settings.txt now takes effect on a re-run. Previously the
+  VapourSynth script left in temp was reused as-is, so the change was silently skipped.
+
 v3.1.1
 ---------------------------------
 • audio-encoding (Opus/AC3/E-AC3) no longer applies zlib compression to subtitle tracks by default.
   It is now a setting, zlib-subtitles=False, at the bottom of each settings-encode-*-audio.txt.
   Set it to True to get the space saving back, which is worthwhile for heavily typeset ASS signs.
 • AfterZone is now resumable if you need/want to interrupt av1an.
-• Adjust tagging so mediainfo is more complient for encoding settings.
+• Adjust tagging to be more compliant for encoding settings visible in mediainfo.
 
 v3.1
 ---------------------------------

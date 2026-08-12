@@ -253,20 +253,27 @@ def apply_geometry(clip):
 # DEHALO (settings.txt [dehalo]; always runs before denoise)
 do_dehalo = {dehalo}
 if do_dehalo:
-    import vsdehalo as deh
-    dehalo_kwargs = dict(
-        lowsens={dh_lowsens},
-        highsens={dh_highsens},
-        ss={dh_ss},
-        darkstr={dh_darkstr},
-        brightstr={dh_brightstr},
+    from vsdehalo import edge_cleaner
+    from vsmasktools import EdgeDetect, Prewitt
+    # edge_cleaner warps edges via awarpsharp, which needs the AWarp plugin.
+    if not hasattr(core, "awarp"):
+        raise RuntimeError(
+            "dehalo=True needs the AWarp plugin: put AWarp.dll in VapourSynth/vs-plugins, "
+            "or set dehalo=False in settings.txt."
+        )
+    try:
+        dehalo_edgemask = EdgeDetect.ensure_obj("{dh_edgemask}")
+    except Exception:
+        print("[dehalo] Unknown dehalo_edgemask '{dh_edgemask}'; using Prewitt.")
+        dehalo_edgemask = Prewitt
+    src = edge_cleaner(
+        src,
+        strength={dh_strength},
+        rmode={dh_rmode},
+        hot={dh_hot},
+        smode={dh_smode},
+        edgemask=dehalo_edgemask,
     )
-    if hasattr(deh, "AlphaBlur"):
-        # vsjetpack >= 1.0: the rx/ry radius moved into the AlphaBlur blur object.
-        src = deh.dehalo_alpha(src, blur=deh.AlphaBlur(rx={dh_rx}, ry={dh_ry}), **dehalo_kwargs)
-    else:
-        # Older vsdehalo takes rx/ry directly.
-        src = deh.dehalo_alpha(src, rx={dh_rx}, ry={dh_ry}, **dehalo_kwargs)
 
 # Optional settings.txt denoise/deband hooks
 {denoise_line}
@@ -358,14 +365,15 @@ def build_preview_script(dispatch, source_path, settings, crop_values):
             denoise_line=denoise_setting if do_denoise and denoise_setting else "",
             deband_line=deband_setting if do_deband and deband_setting else "",
             dehalo=str(do_dehalo),
-            dh_rx=dehalo_args["rx"],
-            dh_ry=dehalo_args["ry"],
-            dh_brightstr=dehalo_args["brightstr"],
-            dh_darkstr=dehalo_args["darkstr"],
-            dh_lowsens=dehalo_args["lowsens"],
-            dh_highsens=dehalo_args["highsens"],
-            dh_ss=dehalo_args["ss"],
-            filter_state=f"# Filter state: dehalo={do_dehalo}, denoise={do_denoise}, deband={do_deband}",
+            dh_strength=dehalo_args["strength"],
+            dh_rmode=dehalo_args["rmode"],
+            dh_hot=str(bool(dehalo_args["hot"])),
+            dh_smode=str(bool(dehalo_args["smode"])),
+            dh_edgemask=dehalo_args["edgemask"],
+            filter_state=(
+                f"# Filter state: dehalo={dispatch.dehalo_filter_state(do_dehalo, dehalo_values)}, "
+                f"denoise={do_denoise}, deband={do_deband}"
+            ),
             filter_summary=filter_summary,
             geometry_active=str(bool(geometry_active)),
         ))
