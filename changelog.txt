@@ -1,5 +1,9 @@
 Changelog
 
+v3.3.3
+---------------------------------
+• Swap out a DLL that was making dehalo not work on some PCs.
+
 v3.3.2
 ---------------------------------
 • Photon noise moved out of the encoder parameters and onto condor.exe itself, so Condor now builds and

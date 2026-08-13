@@ -1,4 +1,6 @@
 from pathlib import Path
+import ctypes
+import hashlib
 import shutil
 
 
@@ -33,6 +35,100 @@ def normalize_arch(arch) -> str:
     return DEFAULT_ARCH
 
 
+# zsmooth ships two Windows builds and neither one dispatches on the CPU at
+# runtime: the plain x86_64 build needs AVX2, and the znver4 build is compiled
+# with AVX-512 throughout. Running the znver4 build on a CPU without AVX-512
+# kills the process the first time any zsmooth function is called - no Python
+# traceback, just a silent exit. That path is reached through dehalo=True,
+# because vsdehalo.edge_cleaner -> vsrgtools.repair -> zsmooth.Repair.
+#
+# So the plain build is the default and the znver4 build is only swapped in when
+# the .bat asks for ARCH=avx512.
+ZSMOOTH_BUILD_DIR_NAME = "zsmooth-builds"
+ZSMOOTH_ACTIVE_NAME = "zsmooth.dll"
+ZSMOOTH_BUILDS = {
+    "avx512": "zsmooth-znver4.dll",
+    DEFAULT_ARCH: "zsmooth-x86_64.dll",
+}
+PF_AVX512F_INSTRUCTIONS_AVAILABLE = 41
+
+
+def cpu_supports_avx512() -> bool:
+    """True when this CPU can actually run AVX-512 code.
+
+    Guards against a .bat built on an AVX-512 machine being copied to one
+    without it, which is exactly how the znver4 build gets installed on a CPU
+    that cannot run it.
+    """
+    try:
+        return bool(ctypes.windll.kernel32.IsProcessorFeaturePresent(
+            PF_AVX512F_INSTRUCTIONS_AVAILABLE))
+    except Exception:
+        # Not Windows, or the call is unavailable. Assume the worst and keep
+        # the build that runs everywhere.
+        return False
+
+
+def _file_digest(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def setup_zsmooth_plugin(tools_dir: str | Path, arch=None, verbose: bool = True) -> bool:
+    """Copy the zsmooth build matching arch into VapourSynth/vs-plugins.
+
+    Returns True when the active zsmooth.dll ends up being the right build,
+    False when nothing could be done (missing folder, locked file). A missing
+    zsmooth-builds folder is not an error: older copies of the package keep
+    whatever zsmooth.dll they already have.
+    """
+    def log(msg: str):
+        if verbose:
+            print(f"[zsmooth] {msg}")
+
+    tools_dir = Path(tools_dir)
+    builds_dir = tools_dir / ZSMOOTH_BUILD_DIR_NAME
+    plugins_dir = tools_dir.parent / "VapourSynth" / "vs-plugins"
+
+    if not builds_dir.is_dir() or not plugins_dir.is_dir():
+        return False
+
+    arch_key = normalize_arch(arch)
+    wanted_key = "avx512" if arch_key == "avx512" else DEFAULT_ARCH
+
+    if wanted_key == "avx512" and not cpu_supports_avx512():
+        log("ARCH=avx512 was selected but this CPU has no AVX-512 - using the "
+            "x86_64 build instead (the znver4 build would crash on the first "
+            "dehalo frame).")
+        wanted_key = DEFAULT_ARCH
+
+    source = builds_dir / ZSMOOTH_BUILDS[wanted_key]
+    if not source.exists():
+        fallback = builds_dir / ZSMOOTH_BUILDS[DEFAULT_ARCH]
+        if wanted_key != DEFAULT_ARCH and fallback.exists():
+            log(f"{source.name} is missing - using {fallback.name} instead.")
+            source, wanted_key = fallback, DEFAULT_ARCH
+        else:
+            log(f"No zsmooth build found in {builds_dir}")
+            return False
+
+    active = plugins_dir / ZSMOOTH_ACTIVE_NAME
+    if active.exists() and active.stat().st_size == source.stat().st_size:
+        try:
+            if _file_digest(active) == _file_digest(source):
+                return True
+        except OSError:
+            pass  # Unreadable for some reason; fall through and recopy.
+
+    try:
+        shutil.copy2(source, active)
+    except OSError as exc:
+        log(f"Could not install {source.name}: {exc}")
+        return False
+
+    log(f"Installed {source.name} as {ZSMOOTH_ACTIVE_NAME} (ARCH={arch_key}).")
+    return True
+
+
 def _norm(text: str) -> str:
     return text.lower().replace("_", "-").replace(" ", "")
 
@@ -54,6 +150,9 @@ def setup_svt_av1_fork(tools_dir: str | Path, fork: str = "essential", arch=None
     named by arch ('x86-64-v3', 'znver2' or 'avx512'), falling back to x86-64-v3
     when that fork has no such build. hdr always uses x86-64-v3.
     Essential also copies ffms2.dll when present.
+
+    arch='avx512' is downgraded to x86-64-v3 on a CPU without AVX-512, so a .bat
+    generated on an AVX-512 machine still runs on one without it.
 
     avx512 is the pre-arch spelling of the same choice and is still honoured
     when arch is not given, so older callers and .bat files keep working.
@@ -78,6 +177,15 @@ def setup_svt_av1_fork(tools_dir: str | Path, fork: str = "essential", arch=None
     def log(msg: str):
         if verbose:
             print(f"[SVT Fork] {msg}")
+
+    # An avx512 .bat built on one machine and run on another would otherwise
+    # install an icelake/znver4 SvtAv1EncApp.exe that the CPU cannot execute,
+    # failing at the encode step the same way the znver4 zsmooth build fails at
+    # the dehalo step. Downgrade to the build every modern CPU can run.
+    if arch_key == "avx512" and not cpu_supports_avx512():
+        log(f"ARCH=avx512 was selected but this CPU has no AVX-512 - using the "
+            f"{DEFAULT_ARCH} build instead.")
+        arch_key = DEFAULT_ARCH
 
     if not forks_dir.exists():
         log(f"Forks directory not found: {forks_dir}")

@@ -575,6 +575,8 @@ def main():
     ntfy_settings = settings
 
     ad.setup_svt_av1_fork(tools_dir, options["fork"], arch=options["arch"], verbose=True)
+    # Must run before any .vpy is generated: dehalo=True calls into zsmooth.
+    ad.setup_zsmooth_plugin(tools_dir, arch=options["arch"], verbose=True)
 
     # --- Gather Input Files ---
     extensions = ("*.mkv", "*.mp4", "*.m2ts")

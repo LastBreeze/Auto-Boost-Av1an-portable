@@ -14,7 +14,7 @@ import urllib.parse
 import urllib.request
 import unicodedata
 from wakepy import keep
-from svt_fork_setup import setup_svt_av1_fork
+from svt_fork_setup import setup_svt_av1_fork, setup_zsmooth_plugin
 
 BLUE = "\033[94m"
 RED = "\033[91m"
@@ -1591,6 +1591,8 @@ def main():
             print(f"\033[94m[Dispatch] Using optimized SSIMU2 worker/stream count from bat: {custom_ssimu2}\033[0m")
 
     setup_svt_av1_fork(tools_dir, selected_fork, arch=arch, verbose=verbose_mode)
+    # Must run before any .vpy is generated: dehalo=True calls into zsmooth.
+    setup_zsmooth_plugin(tools_dir, arch=arch, verbose=verbose_mode)
 
     # --- Worker Safety Check ---
     strip_lp_3 = False

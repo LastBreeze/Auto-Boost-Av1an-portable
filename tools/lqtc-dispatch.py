@@ -8,6 +8,7 @@ import re
 import time
 import urllib.parse
 import urllib.request
+from svt_fork_setup import cpu_supports_avx512
 
 try:
     from wakepy import keep
@@ -132,8 +133,21 @@ def resolve_lqtc_exe(tools_dir, backend, fork, arch):
     moved. If the selected CPU build is missing we fall back to the x86-64-v3
     build of the same combination - the one any modern CPU can run - rather
     than failing the whole run.
+
+    ARCH=avx512 is also downgraded to x86-64-v3 when the CPU has no AVX-512,
+    which happens when a .bat generated on an AVX-512 machine is run on one
+    without it. A per-arch build has no runtime fallback of its own: it dies
+    with an illegal instruction once it reaches its SIMD kernels, and it can
+    get as far as printing a banner first, so the crash looks like the encode
+    simply vanished.
     """
     lqtc_dir = os.path.join(tools_dir, LQTC_DIR_NAME)
+
+    if normalize_arch(arch) == "avx512" and not cpu_supports_avx512():
+        print(f"{BLUE}[Dispatch] ARCH=avx512 was selected but this CPU has no AVX-512 -{RESET}")
+        print(f"{BLUE}[Dispatch] using the {DEFAULT_ARCH} build instead.{RESET}")
+        arch = DEFAULT_ARCH
+
     wanted = lqtc_exe_name(backend, fork, arch)
     wanted_path = os.path.join(lqtc_dir, wanted)
     if os.path.exists(wanted_path):

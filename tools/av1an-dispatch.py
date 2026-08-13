@@ -13,7 +13,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 from wakepy import keep
-from svt_fork_setup import setup_svt_av1_fork
+from svt_fork_setup import setup_svt_av1_fork, setup_zsmooth_plugin
 
 BLUE = "\033[94m"
 RED = "\033[91m"
@@ -1926,7 +1926,9 @@ def main():
     ntfy_settings = settings
 
     setup_svt_av1_fork(tools_dir, selected_fork, arch=arch, verbose=True)
-            
+    # Must run before any .vpy is generated: dehalo=True calls into zsmooth.
+    setup_zsmooth_plugin(tools_dir, arch=arch, verbose=True)
+
     # --- Gather Input Files ---
     extensions = ("*.mkv", "*.mp4", "*.m2ts")
     load_original_names_record(video_input_dir)
