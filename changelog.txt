@@ -1,5 +1,10 @@
 Changelog
 
+v3.3.2
+---------------------------------
+• Photon noise moved out of the encoder parameters and onto condor.exe itself, so Condor now builds and
+  applies the grain table instead of passing the option through to the encoder.
+
 v3.3.1
 ---------------------------------
 • x86-64-v3 option added to bat-builder for older CPU enjoyers who cannot use znver2.

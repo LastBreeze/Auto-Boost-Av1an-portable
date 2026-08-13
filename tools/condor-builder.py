@@ -135,13 +135,13 @@ def print_header():
     print("===============================================\n")
     print("This tool will create a batch script that encodes your videos to a")
     print("visual quality target instead of a fixed CRF. Condor measures each")
-    print("scene and picks the quantizer that hits the quality you asked for.\n")
+    print("scene and picks the crf that hits the quality you asked for.\n")
     print("Just answer the questions below and your script will be ready to run.\n")
 
 
 def print_support_notes(condor_present):
     print("--------------------------------------------------------")
-    print("  * There is no CRF setting. Target Quality chooses a quantizer")
+    print("  * There is no CRF setting. Target Quality chooses a crf")
     print("    per scene, and you set the quality target it aims for.")
     if not condor_present:
         print("")
@@ -173,9 +173,9 @@ def build_batch_file(tools_dir, root_dir):
     print("                    Use your own custom encoder binary.")
     print("                    Place SvtAv1EncApp.exe in:")
     print(f"                    tools\\{AV1AN_DIR_NAME}\\svt-av1 forks\\custom\n")
-    fork_choice = input("Select [1-4] (Press Enter for 2): ").strip()
+    fork_choice = input("Select [1-4] (Press Enter for 1): ").strip()
     fork_map = {"1": "5fish", "2": "essential", "3": "hdr", "4": "custom"}
-    fork = fork_map.get(fork_choice, "essential")
+    fork = fork_map.get(fork_choice, "5fish")
 
     arch_value = "x86-64-v3"
     if fork in ("5fish", "essential"):
@@ -210,15 +210,7 @@ def build_batch_file(tools_dir, root_dir):
         save_arch(arch_value)
 
     denoise_value = "True" if fork == "5fish" else "False"
-    if fork == "5fish":
-        print("\n--------------------------------------------------------")
-        print("5fish Denoise Recommendation")
-        print("--------------------------------------------------------")
-        print("For 5fish, denoise=True will be enabled in settings.txt.")
-        print("The .bat scripts have the ability to edit denoise= in settings.txt")
-        print("This is highly recommended with:")
-        print("denoise_setting=src = DFTTest().denoise(src, {0.00:0.30, 0.40:0.30, 0.60:0.60, 0.80:1.50, 1.00:2.00}, planes=[0, 1, 2])\n")
-    else:
+    if fork != "5fish":
         print("\nDenoise will be set to False in settings.txt for this generated batch file.")
 
     # --- 2. Metric ---
@@ -295,24 +287,24 @@ def build_batch_file(tools_dir, root_dir):
 
     # --- 4. Quantizer range ---
     print("\n--------------------------------------------------------")
-    print("STEP 4 OF 9: Quantizer Search Range")
+    print("STEP 4 OF 9: CRF Search Range")
     print("--------------------------------------------------------")
-    print("Target Quality can only pick a quantizer from inside this range.")
+    print("Target Quality can only pick a CRF from inside this range.")
     print("It is a guard rail, not a quality setting: a narrow range keeps the")
     print("search quick and stops one odd scene running away, but if a scene")
     print("cannot reach your target inside it, the range is what gets blamed.\n")
     print(f"  DEFAULT: {DEFAULT_MIN_QUANTIZER}-{DEFAULT_MAX_QUANTIZER}, which suits 1080p.")
-    print("  Condor's own default is 5-55, which spends probes on quantizers")
+    print("  Condor's own default is 5-55, which spends probes on CRF values")
     print("  that nothing at this resolution ever wants.\n")
     print("  Widen it if Condor reports it could not reach your target.\n")
-    min_quantizer = ask_int("Enter the lowest quantizer", DEFAULT_MIN_QUANTIZER, 0, 63)
-    max_quantizer = ask_int("Enter the highest quantizer", DEFAULT_MAX_QUANTIZER, int(min_quantizer) + 1, 63)
+    min_quantizer = ask_int("Enter the lowest CRF", DEFAULT_MIN_QUANTIZER, 0, 63)
+    max_quantizer = ask_int("Enter the highest CRF", DEFAULT_MAX_QUANTIZER, int(min_quantizer) + 1, 63)
 
     # --- 5. Target profile ---
     print("\n--------------------------------------------------------")
     print("STEP 5 OF 9: Target Quality Profile")
     print("--------------------------------------------------------")
-    print("To find a quantizer, Condor test-encodes part of each scene and")
+    print("To find a CRF, Condor test-encodes part of each scene and")
     print("measures it. This decides how much of the scene it measures and")
     print("how it turns those frame scores into one number.\n")
     print("  1: fast     -- Measures 11 frames from the middle of the scene")
@@ -352,7 +344,7 @@ def build_batch_file(tools_dir, root_dir):
         content = f"essential-d{val}"
         if val != "0":
             dist_preset = f" --distortion-bias-preset {val}"
-        fork_params = f"--scd 0 --enable-dlf 3{dist_preset} --lp 3 --photon-noise 200"
+        fork_params = f"--scd 0 --enable-dlf 3{dist_preset} --lp 3"
     elif fork == "hdr":
         print("\n--------------------------------------------------------")
         print("STEP 6 OF 9: Film Grain / Noise Handling (hdr fork)")
@@ -374,26 +366,44 @@ def build_batch_file(tools_dir, root_dir):
             content = "hdr-clean"
             fork_params = "--tune 0 --noise 4 --lp 3"
     elif fork == "5fish":
-        print("\n--------------------------------------------------------")
-        print("STEP 6 OF 9: Encoder Parameters (5fish fork)")
-        print("--------------------------------------------------------")
-        print("The 5fish fork has a settled parameter set in this package, so")
-        print("there is nothing to choose here. The .bat will use:\n")
-        print("  --scd 0 --lineart-psy-bias 3 --texture-psy-bias 3")
-        print("  --hbd-mds 1 --lp 3 --photon-noise 200\n")
-        print("Open the generated .bat in Notepad++ to change them.\n")
-        input("Press Enter to continue...")
-        fork_params = "--scd 0 --lineart-psy-bias 3 --texture-psy-bias 3 --hbd-mds 1 --lp 3 --photon-noise 200"
+        fork_params = "--scd 0 --lineart-psy-bias 3 --texture-psy-bias 3 --hbd-mds 1 --lp 3"
     else:
         print("\n--------------------------------------------------------")
         print("STEP 6 OF 9: Encoder Parameters (custom fork)")
         print("--------------------------------------------------------")
         print("A custom binary gets a minimal parameter set, since this tool")
         print("cannot know what your build supports:\n")
-        print("  --lp 3 --photon-noise 200\n")
+        print("  --lp 3\n")
         print("Open the generated .bat in Notepad++ to change them.\n")
         input("Press Enter to continue...")
-        fork_params = "--lp 3 --photon-noise 200"
+        fork_params = "--lp 3"
+
+    # --- Grain synthesis: photon noise vs. the encoder's own film grain ---
+    # Condor builds the photon noise table itself, so --photon-noise belongs on
+    # the condor.exe command line and not in --params. tools\av1an\condor.txt is
+    # explicit that it must not be combined with the encoder's internal film
+    # grain synthesis, so this is an either/or. The hdr fork settles its own
+    # grain handling in STEP 6 above and is left out of this question.
+    photon_noise = ""
+    if fork != "hdr":
+        print("\n--------------------------------------------------------")
+        print("Grain Synthesis")
+        print("--------------------------------------------------------")
+        print("AV1 can rebuild grain during playback instead of spending")
+        print("bitrate encoding it. There are two ways to do that, and only")
+        print("one of them can be used at a time:\n")
+        print("  1: Photon noise -- DEFAULT. Condor generates a grain table")
+        print("     from a film ISO model and applies it. Fixed at ISO 200,")
+        print("     the recommended minimum, which is mostly there to stop")
+        print("     gradient banding in skies and dark scenes.\n")
+        print("  2: Film grain   -- The encoder synthesises its own grain")
+        print("     instead, at strength 6. Better suited to genuinely grainy")
+        print("     film sources. No photon noise is used in this mode.\n")
+        if input("Select [1/2] (Press Enter for 1, photon noise 200): ").strip() == "2":
+            fork_params += " --film-grain 6"
+            content += "-fg"
+        else:
+            photon_noise = "200"
 
     # --- 7. Preset speed ---
     print("\n--------------------------------------------------------")
@@ -424,8 +434,7 @@ def build_batch_file(tools_dir, root_dir):
     print("       have a slower CPU or need results sooner.\n")
     print("  WARNING: Presets faster than 4 are not recommended.")
     print("  They skip many of the tools designed to preserve")
-    print("  quality while staying efficient, so output quality")
-    print("  will suffer.\n")
+    print("  quality while staying efficient, quality suffers.\n")
     print("  Remember Target Quality test-encodes every scene before the")
     print("  real encode starts, so a slow preset costs you twice here.\n")
     if fork == "5fish":
@@ -532,6 +541,12 @@ def build_batch_file(tools_dir, root_dir):
     script += ":: Do not add --crf here: Target Quality chooses a quantizer per scene.\n"
     script += ":: Do not add colour settings (--color-primaries, --mastering-display, ...):\n"
     script += ":: the dispatcher adds those per file from MediaInfo.\n"
+    script += ":: Do not add --photon-noise here either; it goes in PHOTON_NOISE below.\n"
+    script += f'set "PHOTON_NOISE={photon_noise}"\n'
+    script += ":: PHOTON_NOISE is an ISO strength passed to condor.exe itself, not to the encoder:\n"
+    script += ":: Condor generates the grain table and applies it. 200 is the recommended minimum.\n"
+    script += ":: Leave it empty when condor_params uses the encoder's own --film-grain instead.\n"
+    script += ":: condor.txt is explicit that the two must not be combined.\n"
     script += f'set "FINAL_SPEED={speed}"\n'
     script += f'set "fork={fork}"\n'
     script += ":: example forks: 5fish, essential, hdr, custom\n"
@@ -597,11 +612,12 @@ def build_batch_file(tools_dir, root_dir):
         " --metric %METRIC% --target %TARGET% --min-quantizer %MIN_QUANTIZER%"
         " --max-quantizer %MAX_QUANTIZER% --target-profile %TARGET_PROFILE% --gpu %GPU%"
         " --decoder %DECODER% --concat %CONCAT% --workers %WORKERS%"
+        " --photon-noise %PHOTON_NOISE%"
         " --final-speed %FINAL_SPEED% --final-params \"%condor_params%\"\n\n"
     )
     step_num += 1
 
-    script += "echo.\necho All tasks finished.\necho Ctrl+C to keep temp files and exit.\necho Or, to cleaup temp files:\npause\n\n"
+    script += "echo.\necho All tasks finished.\necho Ctrl+C to keep temp files and exit.\necho Or, to cleanup temp files:\npause\n\n"
 
     script += f":: --- STEP {step_num}: CLEANUP ---\n"
     script += "echo Cleaning up temporary files and folders...\n"
@@ -615,24 +631,6 @@ def build_batch_file(tools_dir, root_dir):
     print("Success! Your batch script has been generated:")
     print(f"File: {output_filename}")
     print("-------------------------------------------------------------------------------")
-    print(f"Encoder:         tools\\{AV1AN_DIR_NAME}\\{CONDOR_EXE_NAME} + the {fork} SVT-AV1 fork")
-    print(f"Quality target:  {target}  ({metric}, {target_profile} profile)")
-    print(f"Quantizer range: {min_quantizer}-{max_quantizer}")
-    print(f"Workers:         {workers or 'benchmarked by Condor on every run'}")
-    print(f"Encoder params:  --preset {speed} {condor_params}")
-    print("-------------------------------------------------------------------------------")
-    print("Drop your video files into the 'video-input' folder, then double-click")
-    print("the .bat file to start encoding. Encoded files will appear in 'video-output'.")
-    print("")
-    if metric in VSHIP_METRICS:
-        print(f"This metric runs on the GPU through tools\\vs-hip\\libvship_{gpu.upper()}.dll,")
-        print("which the dispatcher copies into VapourSynth\\vs-plugins on the first run.")
-        print("If the metric fails to load, re-run this builder and pick the other backend.")
-        print("")
-    print("If an encode is interrupted, run the same .bat again and it will resume from")
-    print("temp\\<name>-condor. To start a file over instead, delete its")
-    print("temp\\<name>-condor.json and temp\\<name>-condor folder first.")
-    print("")
     print("Want to tweak the settings manually? Open the .bat file in Notepad++.")
     print("-------------------------------------------------------------------------------")
     os.system('pause')

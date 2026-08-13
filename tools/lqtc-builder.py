@@ -582,7 +582,7 @@ def build_batch_file(tools_dir, root_dir):
         " --display \"%DISPLAY_FILE%\" --params \"%lqtc_params%\"\n\n"
     )
 
-    script += "echo.\necho All tasks finished.\necho Ctrl+C to keep temp files and exit.\necho Or, to cleaup temp files:\npause\n\n"
+    script += "echo.\necho All tasks finished.\necho Ctrl+C to keep temp files and exit.\necho Or, to cleanup temp files:\npause\n\n"
 
     script += ":: --- STEP 2: CLEANUP ---\n"
     script += "echo Cleaning up temporary files and folders...\n"

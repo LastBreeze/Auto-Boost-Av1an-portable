@@ -5,6 +5,7 @@ import atexit
 import copy
 import importlib.util
 import json
+import re
 import shutil
 import subprocess
 import time
@@ -391,6 +392,7 @@ def parse_args(args):
         "concat": "mkvmerge",
         "gpu": "nvidia",
         "workers": "",
+        "photon_noise": "",
         "final_speed": "4",
         "final_params": "",
         "verbose": False,
@@ -464,6 +466,9 @@ def parse_args(args):
         elif arg == "--workers" and has_value(i):
             parsed["workers"] = args[i + 1]
             i += 2
+        elif arg == "--photon-noise" and has_value(i):
+            parsed["photon_noise"] = args[i + 1]
+            i += 2
         elif arg == "--final-speed" and has_value(i):
             parsed["final_speed"] = args[i + 1]
             i += 2
@@ -529,6 +534,26 @@ def main():
     # root, so SvtAv1EncApp can open the table whatever directory Condor spawns
     # its workers in.
     final_params = ad.resolve_fgs_table_path(options["final_params"], root_dir, tools_dir)
+
+    # Photon noise is Condor's own option, not an encoder parameter: Condor
+    # builds the grain table and applies it, so it goes on the condor.exe
+    # command line. tools\av1an\condor.txt states it must not be combined with
+    # the encoder's internal film grain synthesis, so --film-grain in the
+    # parameters wins and photon noise is dropped. A --photon-noise left in an
+    # older .bat's params is removed as well, so it cannot be applied twice.
+    photon_noise = (options["photon_noise"] or "").strip()
+    if photon_noise:
+        if re.search(r"(?<!\S)--film-grain(?!-denoise)(?!\S)", final_params):
+            print(f"{RED}[Dispatch] --film-grain is in the encoder parameters, so Condor's{RESET}")
+            print(f"{RED}[Dispatch] photon noise (ISO {photon_noise}) will not be used. Blank out{RESET}")
+            print(f"{RED}[Dispatch] PHOTON_NOISE in the .bat to silence this.{RESET}")
+            photon_noise = ""
+        else:
+            stripped = re.sub(r"(?<!\S)--photon-noise(?:\s+\S+)?(?!\S)", "", final_params)
+            if stripped != final_params:
+                print("[Dispatch] Removed --photon-noise from the encoder parameters; "
+                      f"Condor applies it instead (ISO {photon_noise}).")
+                final_params = " ".join(stripped.split())
 
     # --- Portable environment ---
     ensure_vsscript_path(root_dir)
@@ -703,6 +728,8 @@ def main():
                     "--target", target,
                     "--params", encoder_params,
                 ]
+                if photon_noise:
+                    cmd_init.extend(["--photon-noise", photon_noise])
                 if workers:
                     cmd_init.extend(["-w", workers])
 

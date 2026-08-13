@@ -67,7 +67,7 @@ echo.
 echo.
 echo All tasks finished.
 echo Ctrl+C to keep temp files and exit.
-echo Or, to cleaup temp files:
+echo Or, to cleanup temp files:
 pause
 
 :: --- STEP 4: CLEANUP ---

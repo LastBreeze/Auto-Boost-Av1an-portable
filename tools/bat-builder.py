@@ -111,7 +111,7 @@ def setup_condor():
     print("File: condor-builder.bat (main folder)")
     print("-------------------------------------------------------------------------------")
     print("Run it from the main folder to build a Condor batch script, which lets you")
-    print("set a target quality using CVVDP, SSIM2, butteraugli or XPSNR instead of a")
+    print("set a target quality using CVVDP, SSIM2, butteraugli instead of a")
     print("fixed CRF.")
     print("-------------------------------------------------------------------------------")
     os.system('pause')
@@ -270,7 +270,7 @@ def advanced_tools_menu():
         print("  3. Setup AfterZone in the main folder\n")
         print("  4. Go back\n")
         print("  Condor allows you to set a target quality using CVVDP, SSIM2")
-        print("  Butteraugli or XPSNR.\n")
+        print("  or Butteraugli.\n")
         print("  LQTC allows you to set a target quality using CVVDP or SSIM2")
         print("  There is a potential that this Windows build will not work")
         print("  on every system\n")
@@ -777,7 +777,7 @@ def main():
     else:
         script += f"\"VapourSynth\\python.exe\" \"tools\\av1an-dispatch.py\" --resume %VERBOSE% --fork %fork% --arch %ARCH% --denoise %DENOISE% --tonemap %tonemap%{autocrop_flag} --crf %CRF% --workers %WORKER_COUNT% --final-speed %FINAL_SPEED% --final-params \"%av1an_settings%\"\n\n"
 
-    script += "echo.\necho All tasks finished.\necho Ctrl+C to keep temp files and exit.\necho Or, to cleaup temp files:\npause\n\n"
+    script += "echo.\necho All tasks finished.\necho Ctrl+C to keep temp files and exit.\necho Or, to cleanup temp files:\npause\n\n"
     step_num += 1
 
     # Cleanup
