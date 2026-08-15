@@ -1,7 +1,6 @@
 import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import atexit
 import copy
 import importlib.util
 import json
@@ -580,10 +579,8 @@ def main():
 
     # --- Gather Input Files ---
     extensions = ("*.mkv", "*.mp4", "*.m2ts")
-    ad.load_original_names_record(video_input_dir)
-    # Backstop for Ctrl-C and unhandled errors: every recorded rename still gets
-    # undone on the way out, not only after a clean finish.
-    atexit.register(ad.restore_all_input_filenames)
+    # The rename is permanent - a source file keeps its safe name for good, so a
+    # second run finds nothing left to rename.
     ad.sanitize_input_filenames(video_input_dir, extensions)
     input_files = ad.gather_input_files(video_input_dir, extensions)
     known_input_files = set(input_files)
@@ -614,7 +611,6 @@ def main():
 
         if os.path.exists(final_output_path):
             print(f"[Dispatch] Output file already exists: {final_output_path}")
-            ad.restore_input_filename(input_abspath_origin)
             continue
 
         try:
@@ -834,8 +830,6 @@ def main():
                 print(f"[Dispatch] Error: Expected output file not found: {temp_output_mkv}")
 
             if output_moved:
-                ad.restore_input_filename(input_abspath_origin)
-
                 timing_report = {
                     "filename": filename,
                     "scene_detection": scene_detection_elapsed,

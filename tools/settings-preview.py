@@ -275,6 +275,54 @@ if do_dehalo:
         edgemask=dehalo_edgemask,
     )
 
+# FINE_DEHALO (settings.txt [fine_dehalo]; the alternative to [dehalo], also before denoise)
+do_fine_dehalo = {fine_dehalo}
+if do_fine_dehalo:
+    from vsdehalo import fine_dehalo as _fine_dehalo
+    from vsmasktools import EdgeDetect, Robinson3
+    # Every mask stage and the dehalo itself go through vsexprtools.norm_expr,
+    # which calls core.akarin.Expr. Unlike edge_cleaner this needs no AWarp.
+    if not hasattr(core, "akarin"):
+        raise RuntimeError(
+            "fine_dehalo=True needs the akarin plugin: put akarin.dll in VapourSynth/vs-plugins, "
+            "or set fine_dehalo=False in settings.txt."
+        )
+    # box_blur inside the mask pipeline is vszip.BoxBlur.
+    if not hasattr(core, "vszip"):
+        raise RuntimeError(
+            "fine_dehalo=True needs the vszip plugin: put vszip.dll in VapourSynth/vs-plugins, "
+            "or set fine_dehalo=False in settings.txt."
+        )
+    # ss=1 swaps supersampling for vsrgtools.repair, and contra>0 pulls in
+    # contrasharpening_dehalo; both land on zsmooth.Repair. With ss>1 and no
+    # contra, zsmooth is never touched.
+    if ({fd_ss} == 1.0 or {fd_contra} > 0.0) and not hasattr(core, "zsmooth"):
+        raise RuntimeError(
+            "fine_dehalo with fine_dehalo_ss=1.0 or fine_dehalo_contra>0 needs the zsmooth plugin: "
+            "put zsmooth.dll in VapourSynth/vs-plugins, raise fine_dehalo_ss above 1.0 and set "
+            "fine_dehalo_contra=0, or set fine_dehalo=False in settings.txt."
+        )
+    try:
+        fine_dehalo_edgemask = EdgeDetect.ensure_obj("{fd_edgemask}")
+    except Exception:
+        print("[fine_dehalo] Unknown fine_dehalo_edgemask '{fd_edgemask}'; using Robinson3.")
+        fine_dehalo_edgemask = Robinson3
+    # pre_ss is left at its default of 1 on purpose: raising it routes through
+    # vsaa.NNEDI3, which needs the znedi3 or sneedif plugin, and neither ships
+    # with this package.
+    src = _fine_dehalo(
+        src,
+        lowsens={fd_lowsens},
+        highsens={fd_highsens},
+        ss={fd_ss},
+        darkstr={fd_darkstr},
+        brightstr={fd_brightstr},
+        rx={fd_rx},
+        ry={fd_ry},
+        edgemask=fine_dehalo_edgemask,
+        contra={fd_contra},
+    )
+
 # Optional settings.txt denoise/deband hooks
 {denoise_line}
 {deband_line}
@@ -314,8 +362,12 @@ def build_preview_script(dispatch, source_path, settings, crop_values):
     do_downscale = dispatch.setting_is_true(settings, "downscale", "False")
     target_res = dispatch.get_script_setting(settings, "target_resolution", "1920x1080")
     kernel = dispatch.get_script_setting(settings, "kernel_type", "Hermite")
+    # Stops here rather than previewing a chain the encoder would refuse to build.
+    dispatch.check_dehalo_exclusive(settings)
     do_dehalo = dispatch.setting_is_true(settings, "dehalo", "False")
     dehalo_values = dispatch.read_dehalo_settings(settings) if do_dehalo else None
+    do_fine_dehalo = dispatch.setting_is_true(settings, "fine_dehalo", "False")
+    fine_dehalo_values = dispatch.read_fine_dehalo_settings(settings) if do_fine_dehalo else None
     do_denoise = dispatch.setting_is_true(settings, "denoise", "False")
     denoise_setting = dispatch.get_script_setting(settings, "denoise_setting", "")
     do_deband = dispatch.setting_is_true(settings, "deband", "False")
@@ -325,6 +377,7 @@ def build_preview_script(dispatch, source_path, settings, crop_values):
     dispatch.report_filter_status(
         do_downscale, target_res, kernel, do_denoise, denoise_setting,
         do_deband, deband_setting, do_dehalo, dehalo_values,
+        do_fine_dehalo, fine_dehalo_values,
     )
 
     geometry_active = do_downscale or any((crop_top, crop_bottom, crop_left, crop_right))
@@ -334,6 +387,8 @@ def build_preview_script(dispatch, source_path, settings, crop_values):
     active_names = []
     if do_dehalo:
         active_names.append("dehalo")
+    if do_fine_dehalo:
+        active_names.append("fine_dehalo")
     if do_denoise and denoise_setting:
         active_names.append("denoise")
     if do_deband and deband_setting:
@@ -348,6 +403,7 @@ def build_preview_script(dispatch, source_path, settings, crop_values):
         print(f"{RED}[Preview] Nothing is enabled in settings.txt; both outputs will look identical.{RESET}")
 
     dehalo_args = dehalo_values or dispatch.DEHALO_DEFAULTS
+    fine_dehalo_args = fine_dehalo_values or dispatch.FINE_DEHALO_DEFAULTS
 
     TEMP_DIR.mkdir(exist_ok=True)
     with open(vpy_file, "w", encoding="utf-8", newline="\n") as f:
@@ -370,8 +426,19 @@ def build_preview_script(dispatch, source_path, settings, crop_values):
             dh_hot=str(bool(dehalo_args["hot"])),
             dh_smode=str(bool(dehalo_args["smode"])),
             dh_edgemask=dehalo_args["edgemask"],
+            fine_dehalo=str(do_fine_dehalo),
+            fd_rx=fine_dehalo_args["rx"],
+            fd_ry=fine_dehalo_args["ry"],
+            fd_darkstr=fine_dehalo_args["darkstr"],
+            fd_brightstr=fine_dehalo_args["brightstr"],
+            fd_lowsens=fine_dehalo_args["lowsens"],
+            fd_highsens=fine_dehalo_args["highsens"],
+            fd_ss=fine_dehalo_args["ss"],
+            fd_contra=fine_dehalo_args["contra"],
+            fd_edgemask=fine_dehalo_args["edgemask"],
             filter_state=(
                 f"# Filter state: dehalo={dispatch.dehalo_filter_state(do_dehalo, dehalo_values)}, "
+                f"fine_dehalo={dispatch.fine_dehalo_filter_state(do_fine_dehalo, fine_dehalo_values)}, "
                 f"denoise={do_denoise}, deband={do_deband}"
             ),
             filter_summary=filter_summary,

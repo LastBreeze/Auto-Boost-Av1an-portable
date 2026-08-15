@@ -1,5 +1,21 @@
 Changelog
 
+v3.3.5
+---------------------------------
+• AfterZone features added: automate adding crf and tf-strength custom levels to zones txt.
+  Batch encoding multiple files.
+
+v3.3.4
+---------------------------------
+• Added AMD builds of vship and FFVship, giving AMD GPUs a native SSIMU2 backend instead of leaving
+  Vulkan as the only option.
+• The SSIMU2 benchmark now detects your GPU chip vendor and only tests the backends that card can actually
+  run, so it finishes sooner. If the vendor cannot be detected, every backend is tested.
+• Updated Condor. svt-av1's native --photon-noise is now omitted in target quality probes, though the.
+  Condor-builder bat files in 3.3.3+ use Condor's photon-noise tables, not svt-av1's. --film-grain already
+  already has similar behavior: omitted from target quality probing, only applied during encoding stage.
+• Condor target quality custom encoder params fix, making target quality encoding faster.
+
 v3.3.3
 ---------------------------------
 • Swap out a DLL that was making dehalo not work on some PCs.

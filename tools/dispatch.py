@@ -2,9 +2,7 @@ import sys
 import subprocess
 import os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import atexit
 import glob
-import json
 import re
 import shutil
 import threading
@@ -1186,109 +1184,6 @@ def _blocked_by_other_file(dst_path, src_path):
         return True
 
 
-# --- Original input filename bookkeeping ---
-# Source videos are renamed to Python-safe names before anything else touches
-# them. The name each file had beforehand is recorded here (and mirrored to a
-# small JSON file inside video-input) so the file can be renamed back to it once
-# that file is finished. A run that dies before it can restore leaves the record
-# behind, and the next run picks it up and finishes the job.
-ORIGINAL_NAMES_RECORD = ".original-input-names.json"
-
-_ORIGINAL_INPUT_NAMES = {}     # absolute sanitized path -> original filename
-_RESTORED_INPUT_NAMES = set()  # absolute restored paths, so rescans leave them alone
-
-
-def _original_names_record_path(video_input_dir):
-    return os.path.join(video_input_dir, ORIGINAL_NAMES_RECORD)
-
-
-def _write_original_names_record(video_input_dir):
-    """Mirror the in-memory record to disk so a killed run can still be undone."""
-    entries = {
-        os.path.basename(path): original
-        for path, original in _ORIGINAL_INPUT_NAMES.items()
-        if os.path.dirname(path) == video_input_dir
-    }
-    record_path = _original_names_record_path(video_input_dir)
-    try:
-        if entries:
-            with open(record_path, "w", encoding="utf-8") as handle:
-                json.dump(entries, handle, indent=2, ensure_ascii=False)
-        elif os.path.exists(record_path):
-            os.remove(record_path)
-    except OSError as e:
-        print(f"{RED}[Dispatch] Warning: could not update {ORIGINAL_NAMES_RECORD}: {e}{RESET}")
-
-
-def load_original_names_record(video_input_dir):
-    """Adopt renames left behind by a previous run that never got to restore them."""
-    record_path = _original_names_record_path(video_input_dir)
-    if not os.path.isfile(record_path):
-        return
-    try:
-        with open(record_path, "r", encoding="utf-8") as handle:
-            entries = json.load(handle)
-    except (OSError, ValueError) as e:
-        print(f"{RED}[Dispatch] Warning: could not read {ORIGINAL_NAMES_RECORD}: {e}{RESET}")
-        return
-    if not isinstance(entries, dict):
-        return
-    for current_name, original_name in entries.items():
-        current_path = os.path.join(video_input_dir, current_name)
-        if isinstance(original_name, str) and os.path.isfile(current_path):
-            _ORIGINAL_INPUT_NAMES.setdefault(current_path, original_name)
-    _write_original_names_record(video_input_dir)
-
-
-def record_original_filename(video_input_dir, current_name, original_name):
-    """Remember what a sanitized input file was called before it was renamed."""
-    _ORIGINAL_INPUT_NAMES[os.path.join(video_input_dir, current_name)] = original_name
-    _write_original_names_record(video_input_dir)
-
-
-def restore_input_filename(current_path):
-    """Rename a finished input file back to the name it arrived with.
-
-    Returns the restored path, or None when there was nothing to restore.
-    """
-    original_name = _ORIGINAL_INPUT_NAMES.get(current_path)
-    if not original_name:
-        return None
-
-    video_input_dir = os.path.dirname(current_path)
-    if not os.path.isfile(current_path):
-        # Moved or deleted while it was being processed - nothing left to rename.
-        _ORIGINAL_INPUT_NAMES.pop(current_path, None)
-        _write_original_names_record(video_input_dir)
-        return None
-
-    dst_path = os.path.join(video_input_dir, original_name)
-    if _blocked_by_other_file(dst_path, current_path):
-        print(f"{RED}[Dispatch] Warning: cannot restore {os.path.basename(current_path)} -> "
-              f"{original_name}: a different file already has that name.{RESET}")
-        return None
-
-    try:
-        os.rename(current_path, dst_path)
-    except OSError as e:
-        print(f"{RED}[Dispatch] Warning: could not restore original filename "
-              f"{original_name}: {e}{RESET}")
-        return None
-
-    _ORIGINAL_INPUT_NAMES.pop(current_path, None)
-    _RESTORED_INPUT_NAMES.add(dst_path)
-    _write_original_names_record(video_input_dir)
-    print(f"[Dispatch] Restored original input filename: "
-          f"{os.path.basename(current_path)} -> {original_name}")
-    return dst_path
-
-
-def restore_all_input_filenames():
-    """Put back every input filename still recorded as renamed."""
-    for current_path in sorted(_ORIGINAL_INPUT_NAMES):
-        restore_input_filename(current_path)
-
-
 def sanitize_input_filenames(video_input_dir, extensions):
     """Rename every source video so its name holds only "." , "-" , "[" , "]" , a-z, A-Z and 0-9.
 
@@ -1297,6 +1192,9 @@ def sanitize_input_filenames(video_input_dir, extensions):
     cope with a non-ASCII path. Spaces become dots and brackets are kept, so
     "Dead End no Boken [1080p].mkv" (with a macron on the o) becomes
     "Dead.End.no.Boken.[1080p].mkv".
+
+    The rename is permanent: a file keeps its safe name once it has one, both
+    while it is being encoded and after the batch is finished.
     """
     supported_exts = {pattern[1:].lower() for pattern in extensions if pattern.startswith("*")}
     renamed = 0
@@ -1312,9 +1210,6 @@ def sanitize_input_filenames(video_input_dir, extensions):
             continue
         ext = os.path.splitext(filename)[1]
         if ext.lower() not in supported_exts:
-            continue
-        if src_path in _RESTORED_INPUT_NAMES:
-            # Already processed and renamed back - do not sanitize it a second time.
             continue
 
         safe_name = safe_input_filename(filename)
@@ -1337,7 +1232,6 @@ def sanitize_input_filenames(video_input_dir, extensions):
                   f"so it only contains '.', '-', '[', ']', a-z and 0-9, then run this again.{RESET}")
             continue
 
-        record_original_filename(video_input_dir, os.path.basename(dst_path), filename)
         renamed += 1
         print(f"{BLUE}[Dispatch] Renamed source file to a fully safe name: {filename} -> "
               f"{os.path.basename(dst_path)}{RESET}")
@@ -1446,13 +1340,9 @@ def main():
     # --- Rename Source Files To Python-Safe Names (must be the first step) ---
     # Do this before argument parsing, scene detection or anything else touches
     # the files, so every later stage only ever sees ".", "-", "[", "]", a-z,
-    # A-Z and 0-9. Each original name is recorded and put back once that file is
-    # finished.
+    # A-Z and 0-9. The rename is permanent - a source file keeps its safe name
+    # for good, so a second run finds nothing left to rename.
     extensions = ("*.mkv", "*.mp4", "*.m2ts")
-    load_original_names_record(video_input_dir)
-    # Backstop for Ctrl-C and unhandled errors: every recorded rename still gets
-    # undone on the way out, not only after a clean finish.
-    atexit.register(restore_all_input_filenames)
     sanitize_input_filenames(video_input_dir, extensions)
 
     # --- Argument Parsing (settings + dispatcher-only options) ---
@@ -1639,7 +1529,6 @@ def main():
         if os.path.exists(final_output_path):
             print(f"[Dispatch] Output file already exists: {final_output_path}")
             print("[Dispatch] Skipping...")
-            restore_input_filename(input_abspath_origin)
             continue
 
         file_started_at = time.monotonic()
@@ -1904,12 +1793,7 @@ def main():
                 "Auto-Boost encode failed",
                 "An encode failed.",
             )
-        finally:
-            # This file is done with (encoded, skipped or failed) - give it its
-            # original name back.
-            restore_input_filename(input_abspath_origin)
 
-    restore_all_input_filenames()
     batch_elapsed = time.monotonic() - batch_started_at
 
     send_ntfy_notification(

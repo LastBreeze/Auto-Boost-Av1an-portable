@@ -1,7 +1,6 @@
 import sys
 import subprocess
 import os
-import atexit
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import glob
 import json
@@ -629,115 +628,6 @@ def warn_and_pause_if_paths_too_long(input_files, video_output_dir, temp_dir):
         pause_for_long_paths(unique_long_paths)
 
 
-# --- Original input filename bookkeeping ---
-# Source videos are renamed to Python-safe names before anything else touches
-# them. The name each file had beforehand is recorded here (and mirrored to a
-# small JSON file inside video-input) so the file can be renamed back to it once
-# that file is finished. A run that dies before it can restore leaves the record
-# behind, and the next run picks it up and finishes the job.
-ORIGINAL_NAMES_RECORD = ".original-input-names.json"
-
-_ORIGINAL_INPUT_NAMES = {}     # absolute sanitized path -> original filename
-_RESTORED_INPUT_NAMES = set()  # absolute restored paths, so rescans leave them alone
-
-
-def _original_names_record_path(video_input_dir):
-    return os.path.join(video_input_dir, ORIGINAL_NAMES_RECORD)
-
-
-def _write_original_names_record(video_input_dir):
-    """Mirror the in-memory record to disk so a killed run can still be undone."""
-    entries = {
-        os.path.basename(path): original
-        for path, original in _ORIGINAL_INPUT_NAMES.items()
-        if os.path.dirname(path) == video_input_dir
-    }
-    record_path = _original_names_record_path(video_input_dir)
-    try:
-        if entries:
-            with open(record_path, "w", encoding="utf-8") as handle:
-                json.dump(entries, handle, indent=2, ensure_ascii=False)
-        elif os.path.exists(record_path):
-            os.remove(record_path)
-    except OSError as e:
-        print(f"[Dispatch] Warning: could not update {ORIGINAL_NAMES_RECORD}: {e}")
-
-
-def load_original_names_record(video_input_dir):
-    """Adopt renames left behind by a previous run that never got to restore them."""
-    record_path = _original_names_record_path(video_input_dir)
-    if not os.path.isfile(record_path):
-        return
-    try:
-        with open(record_path, "r", encoding="utf-8") as handle:
-            entries = json.load(handle)
-    except (OSError, ValueError) as e:
-        print(f"[Dispatch] Warning: could not read {ORIGINAL_NAMES_RECORD}: {e}")
-        return
-    if not isinstance(entries, dict):
-        return
-    for current_name, original_name in entries.items():
-        current_path = os.path.join(video_input_dir, current_name)
-        if isinstance(original_name, str) and os.path.isfile(current_path):
-            _ORIGINAL_INPUT_NAMES.setdefault(current_path, original_name)
-    _write_original_names_record(video_input_dir)
-
-
-def record_original_filename(video_input_dir, current_name, original_name):
-    """Remember what a sanitized input file was called before it was renamed."""
-    _ORIGINAL_INPUT_NAMES[os.path.join(video_input_dir, current_name)] = original_name
-    _write_original_names_record(video_input_dir)
-
-
-def restore_input_filename(current_path):
-    """Rename a finished input file back to the name it arrived with.
-
-    Returns the restored path, or None when there was nothing to restore.
-    """
-    original_name = _ORIGINAL_INPUT_NAMES.get(current_path)
-    if not original_name:
-        return None
-
-    video_input_dir = os.path.dirname(current_path)
-    if not os.path.isfile(current_path):
-        # Moved or deleted while it was being processed - nothing left to rename.
-        _ORIGINAL_INPUT_NAMES.pop(current_path, None)
-        _write_original_names_record(video_input_dir)
-        return None
-
-    dst_path = os.path.join(video_input_dir, original_name)
-    if os.path.exists(dst_path):
-        same = False
-        try:
-            same = os.path.samefile(dst_path, current_path)
-        except OSError:
-            same = False
-        if not same:
-            print(f"{RED}[Dispatch] Warning: cannot restore {os.path.basename(current_path)} -> "
-                  f"{original_name}: a different file already has that name.{RESET}")
-            return None
-
-    try:
-        os.rename(current_path, dst_path)
-    except OSError as e:
-        print(f"{RED}[Dispatch] Warning: could not restore original filename "
-              f"{original_name}: {e}{RESET}")
-        return None
-
-    _ORIGINAL_INPUT_NAMES.pop(current_path, None)
-    _RESTORED_INPUT_NAMES.add(dst_path)
-    _write_original_names_record(video_input_dir)
-    print(f"[Dispatch] Restored original input filename: "
-          f"{os.path.basename(current_path)} -> {original_name}")
-    return dst_path
-
-
-def restore_all_input_filenames():
-    """Put back every input filename still recorded as renamed."""
-    for current_path in sorted(_ORIGINAL_INPUT_NAMES):
-        restore_input_filename(current_path)
-
-
 def sanitize_filename_stem(stem):
     """Drop parentheses and turn every run of whitespace into a single dot.
 
@@ -754,8 +644,8 @@ def sanitize_filename_stem(stem):
 def sanitize_input_filenames(video_input_dir, extensions):
     """Drop parentheses and replace spaces with dots in supported video filenames.
 
-    The original name of every renamed file is recorded so it can be restored
-    once the encode for that file is finished (see restore_input_filenames).
+    The rename is permanent: a file keeps its safe name once it has one, both
+    while it is being encoded and after the batch is finished.
     """
     supported_exts = {pattern[1:].lower() for pattern in extensions if pattern.startswith("*")}
     renamed = 0
@@ -765,9 +655,6 @@ def sanitize_input_filenames(video_input_dir, extensions):
             continue
         stem, ext = os.path.splitext(filename)
         if ext.lower() not in supported_exts:
-            continue
-        if src_path in _RESTORED_INPUT_NAMES:
-            # Already processed and renamed back - do not sanitize it a second time.
             continue
 
         safe_stem = sanitize_filename_stem(stem)
@@ -781,7 +668,6 @@ def sanitize_input_filenames(video_input_dir, extensions):
             suffix += 1
 
         os.rename(src_path, dst_path)
-        record_original_filename(video_input_dir, os.path.basename(dst_path), filename)
         renamed += 1
         print(f"[Dispatch] Renamed input file for Python-safe filename: {filename} -> {os.path.basename(dst_path)}")
 
@@ -945,6 +831,144 @@ def dehalo_filter_state(do_dehalo, dehalo_values):
             "smode={smode},edgemask={edgemask})").format(**values)
 
 
+FINE_DEHALO_DEFAULTS = {
+    "rx": 2,
+    "ry": 2,
+    "darkstr": 0.0,
+    "brightstr": 1.0,
+    "lowsens": 50.0,
+    "highsens": 50.0,
+    "ss": 1.5,
+    "contra": 0.0,
+    "edgemask": "Robinson3",
+}
+
+# rx/ry are Morpho.expand iteration counts, not pixel radii. 0 builds an empty
+# mask and dehalos nothing; much past 8 the mask swallows the line it should be
+# protecting.
+FINE_DEHALO_RADIUS_MIN = 1
+FINE_DEHALO_RADIUS_MAX = 8
+
+# dehalo_alpha raises CustomIndexError unless lowsens/highsens are both within
+# 0-100, with -1 on BOTH as its documented way to switch that mask off. One of
+# the pair set to -1 on its own is the error case, so it is caught here.
+FINE_DEHALO_SENS_OFF = -1.0
+
+# fine_dehalo's pre_ss supersampler runs through vsaa.NNEDI3, which needs the
+# znedi3 or sneedif plugin. Neither ships in VapourSynth/vs-plugins, so pre_ss
+# is deliberately not exposed in settings.txt and the .vpy never sets it.
+
+
+def read_fine_dehalo_float(value, key_name, default_value, minimum=None, maximum=None):
+    """Validate a decimal [fine_dehalo] setting before it is written into the .vpy."""
+    try:
+        parsed = float(str(value).strip())
+    except (TypeError, ValueError):
+        print(f"[Dispatch] Warning: Invalid {key_name}={value!r}; using {default_value}.")
+        return default_value
+    if minimum is not None and parsed < minimum:
+        print(f"[Dispatch] Warning: {key_name}={parsed} is below {minimum}; using {minimum}.")
+        return minimum
+    if maximum is not None and parsed > maximum:
+        print(f"[Dispatch] Warning: {key_name}={parsed} is above {maximum}; using {maximum}.")
+        return maximum
+    return parsed
+
+
+def read_fine_dehalo_sens(settings):
+    """Validate the lowsens/highsens pair.
+
+    They are read together because -1 is only legal when both carry it; a lone
+    -1 would reach dehalo_alpha and raise there, mid-encode.
+    """
+    raw_low = get_script_setting(settings, "fine_dehalo_lowsens", "50")
+    raw_high = get_script_setting(settings, "fine_dehalo_highsens", "50")
+
+    def as_float(raw, key_name):
+        try:
+            return float(str(raw).strip())
+        except (TypeError, ValueError):
+            print(f"[Dispatch] Warning: Invalid {key_name}={raw!r}; using 50.")
+            return 50.0
+
+    low = as_float(raw_low, "fine_dehalo_lowsens")
+    high = as_float(raw_high, "fine_dehalo_highsens")
+
+    low_off = low == FINE_DEHALO_SENS_OFF
+    high_off = high == FINE_DEHALO_SENS_OFF
+    if low_off and high_off:
+        return FINE_DEHALO_SENS_OFF, FINE_DEHALO_SENS_OFF
+    if low_off or high_off:
+        print("[Dispatch] Warning: fine_dehalo_lowsens/fine_dehalo_highsens only accept -1 when "
+              "both are -1; using 50 for both.")
+        return 50.0, 50.0
+
+    return (
+        read_fine_dehalo_float(low, "fine_dehalo_lowsens", 50.0, minimum=0.0, maximum=100.0),
+        read_fine_dehalo_float(high, "fine_dehalo_highsens", 50.0, minimum=0.0, maximum=100.0),
+    )
+
+
+def read_fine_dehalo_settings(settings):
+    """Return the validated [fine_dehalo] values used by the VapourSynth template."""
+    lowsens, highsens = read_fine_dehalo_sens(settings)
+    return {
+        "rx": read_dehalo_int(get_script_setting(settings, "fine_dehalo_rx", "2"), "fine_dehalo_rx", 2,
+                              minimum=FINE_DEHALO_RADIUS_MIN, maximum=FINE_DEHALO_RADIUS_MAX),
+        "ry": read_dehalo_int(get_script_setting(settings, "fine_dehalo_ry", "2"), "fine_dehalo_ry", 2,
+                              minimum=FINE_DEHALO_RADIUS_MIN, maximum=FINE_DEHALO_RADIUS_MAX),
+        "darkstr": read_fine_dehalo_float(get_script_setting(settings, "fine_dehalo_darkstr", "0.0"),
+                                          "fine_dehalo_darkstr", 0.0, minimum=0.0, maximum=1.0),
+        "brightstr": read_fine_dehalo_float(get_script_setting(settings, "fine_dehalo_brightstr", "1.0"),
+                                            "fine_dehalo_brightstr", 1.0, minimum=0.0, maximum=1.0),
+        "lowsens": lowsens,
+        "highsens": highsens,
+        "ss": read_fine_dehalo_float(get_script_setting(settings, "fine_dehalo_ss", "1.5"),
+                                     "fine_dehalo_ss", 1.5, minimum=1.0, maximum=4.0),
+        "contra": read_fine_dehalo_float(get_script_setting(settings, "fine_dehalo_contra", "0.0"),
+                                         "fine_dehalo_contra", 0.0, minimum=0.0, maximum=4.0),
+        "edgemask": read_fine_dehalo_edgemask(get_script_setting(settings, "fine_dehalo_edgemask", "Robinson3")),
+    }
+
+
+def read_fine_dehalo_edgemask(value):
+    """Validate fine_dehalo_edgemask; same identifier rule as dehalo_edgemask."""
+    name = str(value).strip()
+    if not name:
+        return "Robinson3"
+    if not DEHALO_EDGEMASK_RE.match(name):
+        print(f"[Dispatch] Warning: Invalid fine_dehalo_edgemask={value!r}; using Robinson3.")
+        return "Robinson3"
+    return name
+
+
+def fine_dehalo_filter_state(do_fine_dehalo, fine_dehalo_values):
+    """Compact [fine_dehalo] description for the .vpy cache-invalidation marker."""
+    if not do_fine_dehalo:
+        return "False"
+    values = fine_dehalo_values or FINE_DEHALO_DEFAULTS
+    return ("fine_dehalo(rx={rx},ry={ry},darkstr={darkstr},brightstr={brightstr},"
+            "lowsens={lowsens},highsens={highsens},ss={ss},contra={contra},"
+            "edgemask={edgemask})").format(**values)
+
+
+def check_dehalo_exclusive(settings):
+    """Refuse to build a .vpy that would run both dehalo filters.
+
+    edge_cleaner and fine_dehalo attack the same artifact by different means.
+    Chaining them means the second one is handed edges the first already
+    altered, which is what destroys thin line art, so this stops the run rather
+    than silently picking a winner.
+    """
+    if setting_is_true(settings, "dehalo", "False") and setting_is_true(settings, "fine_dehalo", "False"):
+        print(f"{RED}[Dispatch] ERROR: dehalo=True and fine_dehalo=True are mutually exclusive.{RESET}")
+        print(f"{RED}[Dispatch]        Set one of them to False in settings.txt.{RESET}")
+        print(f"{RED}[Dispatch]        [dehalo] warps edges inward (edge_cleaner); [fine_dehalo]{RESET}")
+        print(f"{RED}[Dispatch]        blurs the halo behind an edge mask. Running both would{RESET}")
+        print(f"{RED}[Dispatch]        dehalo an already dehaloed clip and eat thin lines.{RESET}")
+        sys.exit(1)
+
+
 def read_crop_int(value, key_name):
     try:
         crop_value = int(value)
@@ -972,7 +996,7 @@ def report_crop_status(mode, top, bottom, left, right):
         print(f"{BLUE}[Dispatch] Crop: {normalized_mode} selected, no crop values active{RESET}")
 
 
-def report_filter_status(do_downscale, target_res, kernel, do_denoise, denoise_setting, do_deband, deband_setting, do_dehalo=False, dehalo_values=None):
+def report_filter_status(do_downscale, target_res, kernel, do_denoise, denoise_setting, do_deband, deband_setting, do_dehalo=False, dehalo_values=None, do_fine_dehalo=False, fine_dehalo_values=None):
     active_filters = []
     if do_downscale:
         active_filters.append(f"downscale: target_resolution={target_res}, kernel_type={kernel}")
@@ -980,6 +1004,12 @@ def report_filter_status(do_downscale, target_res, kernel, do_denoise, denoise_s
         active_filters.append(
             "dehalo (edge_cleaner): strength={strength}, rmode={rmode}, hot={hot}, "
             "smode={smode}, edgemask={edgemask}".format(**dehalo_values)
+        )
+    if do_fine_dehalo and fine_dehalo_values:
+        active_filters.append(
+            "fine_dehalo: rx={rx}, ry={ry}, darkstr={darkstr}, brightstr={brightstr}, "
+            "lowsens={lowsens}, highsens={highsens}, ss={ss}, contra={contra}, "
+            "edgemask={edgemask}".format(**fine_dehalo_values)
         )
     if do_denoise:
         active_filters.append(f"denoise: denoise_setting={denoise_setting or 'enabled'}")
@@ -1096,8 +1126,12 @@ def build_vapoursynth_script(source_path, temp_dir, tools_dir, settings, autocro
     do_downscale = setting_is_true(settings, "downscale", "False")
     target_res = get_script_setting(settings, "target_resolution", "1920x1080")
     kernel = get_script_setting(settings, "kernel_type", "Hermite")
+    # Stops here rather than letting a both-on settings.txt reach the encoder.
+    check_dehalo_exclusive(settings)
     do_dehalo = setting_is_true(settings, "dehalo", "False")
     dehalo_values = read_dehalo_settings(settings) if do_dehalo else None
+    do_fine_dehalo = setting_is_true(settings, "fine_dehalo", "False")
+    fine_dehalo_values = read_fine_dehalo_settings(settings) if do_fine_dehalo else None
     do_denoise = setting_is_true(settings, "denoise", "False")
     denoise_setting = get_script_setting(settings, "denoise_setting", "")
     do_deband = setting_is_true(settings, "deband", "False")
@@ -1117,6 +1151,7 @@ def build_vapoursynth_script(source_path, temp_dir, tools_dir, settings, autocro
     # newly enabled filter would silently never run.
     filter_state_marker = (
         f"# Filter state: dehalo={dehalo_filter_state(do_dehalo, dehalo_values)}, "
+        f"fine_dehalo={fine_dehalo_filter_state(do_fine_dehalo, fine_dehalo_values)}, "
         f"denoise={do_denoise}, deband={do_deband}"
     )
 
@@ -1153,12 +1188,13 @@ def build_vapoursynth_script(source_path, temp_dir, tools_dir, settings, autocro
             crop_left = read_crop_int(s_crop_left, "left")
             crop_right = read_crop_int(s_crop_right, "right")
         report_crop_status(crop_mode, crop_top, crop_bottom, crop_left, crop_right)
-        report_filter_status(do_downscale, target_res, kernel, do_denoise, denoise_setting, do_deband, deband_setting, do_dehalo, dehalo_values)
+        report_filter_status(do_downscale, target_res, kernel, do_denoise, denoise_setting, do_deband, deband_setting, do_dehalo, dehalo_values, do_fine_dehalo, fine_dehalo_values)
 
         denoise_line = denoise_setting if do_denoise and denoise_setting else ""
         deband_line = deband_setting if do_deband and deband_setting else ""
         # Placeholders still need values when dehalo is off; the block is gated on do_dehalo.
         dehalo_args = dehalo_values or DEHALO_DEFAULTS
+        fine_dehalo_args = fine_dehalo_values or FINE_DEHALO_DEFAULTS
 
         vpy_template = """
 from vstools import vs, core, initialize_clip, finalize_clip
@@ -1229,6 +1265,54 @@ if do_dehalo:
         hot={dh_hot},
         smode={dh_smode},
         edgemask=dehalo_edgemask,
+    )
+
+# FINE_DEHALO (settings.txt [fine_dehalo]; the alternative to [dehalo], also before denoise)
+do_fine_dehalo = {fine_dehalo}
+if do_fine_dehalo:
+    from vsdehalo import fine_dehalo as _fine_dehalo
+    from vsmasktools import EdgeDetect, Robinson3
+    # Every mask stage and the dehalo itself go through vsexprtools.norm_expr,
+    # which calls core.akarin.Expr. Unlike edge_cleaner this needs no AWarp.
+    if not hasattr(core, "akarin"):
+        raise RuntimeError(
+            "fine_dehalo=True needs the akarin plugin: put akarin.dll in VapourSynth/vs-plugins, "
+            "or set fine_dehalo=False in settings.txt."
+        )
+    # box_blur inside the mask pipeline is vszip.BoxBlur.
+    if not hasattr(core, "vszip"):
+        raise RuntimeError(
+            "fine_dehalo=True needs the vszip plugin: put vszip.dll in VapourSynth/vs-plugins, "
+            "or set fine_dehalo=False in settings.txt."
+        )
+    # ss=1 swaps supersampling for vsrgtools.repair, and contra>0 pulls in
+    # contrasharpening_dehalo; both land on zsmooth.Repair. With ss>1 and no
+    # contra, zsmooth is never touched.
+    if ({fd_ss} == 1.0 or {fd_contra} > 0.0) and not hasattr(core, "zsmooth"):
+        raise RuntimeError(
+            "fine_dehalo with fine_dehalo_ss=1.0 or fine_dehalo_contra>0 needs the zsmooth plugin: "
+            "put zsmooth.dll in VapourSynth/vs-plugins, raise fine_dehalo_ss above 1.0 and set "
+            "fine_dehalo_contra=0, or set fine_dehalo=False in settings.txt."
+        )
+    try:
+        fine_dehalo_edgemask = EdgeDetect.ensure_obj("{fd_edgemask}")
+    except Exception:
+        print("[fine_dehalo] Unknown fine_dehalo_edgemask '{fd_edgemask}'; using Robinson3.")
+        fine_dehalo_edgemask = Robinson3
+    # pre_ss is left at its default of 1 on purpose: raising it routes through
+    # vsaa.NNEDI3, which needs the znedi3 or sneedif plugin, and neither ships
+    # with this package.
+    src = _fine_dehalo(
+        src,
+        lowsens={fd_lowsens},
+        highsens={fd_highsens},
+        ss={fd_ss},
+        darkstr={fd_darkstr},
+        brightstr={fd_brightstr},
+        rx={fd_rx},
+        ry={fd_ry},
+        edgemask=fine_dehalo_edgemask,
+        contra={fd_contra},
     )
 
 # Optional settings.txt denoise/deband hooks
@@ -1306,6 +1390,16 @@ final.set_output(0)
                 dh_hot=str(bool(dehalo_args["hot"])),
                 dh_smode=str(bool(dehalo_args["smode"])),
                 dh_edgemask=dehalo_args["edgemask"],
+                fine_dehalo=str(do_fine_dehalo),
+                fd_rx=fine_dehalo_args["rx"],
+                fd_ry=fine_dehalo_args["ry"],
+                fd_darkstr=fine_dehalo_args["darkstr"],
+                fd_brightstr=fine_dehalo_args["brightstr"],
+                fd_lowsens=fine_dehalo_args["lowsens"],
+                fd_highsens=fine_dehalo_args["highsens"],
+                fd_ss=fine_dehalo_args["ss"],
+                fd_contra=fine_dehalo_args["contra"],
+                fd_edgemask=fine_dehalo_args["edgemask"],
                 filter_state=filter_state_marker,
             ))
         if tonemap:
@@ -1314,7 +1408,7 @@ final.set_output(0)
     else:
         existing_crop_values = parse_crop_values_from_vpy(vpy_file) or (0, 0, 0, 0)
         report_crop_status(crop_mode, *existing_crop_values)
-        report_filter_status(do_downscale, target_res, kernel, do_denoise, denoise_setting, do_deband, deband_setting, do_dehalo, dehalo_values)
+        report_filter_status(do_downscale, target_res, kernel, do_denoise, denoise_setting, do_deband, deband_setting, do_dehalo, dehalo_values, do_fine_dehalo, fine_dehalo_values)
         print(f"[Dispatch] Reusing existing VapourSynth script: {vpy_file}")
 
     return vpy_file
@@ -1931,10 +2025,8 @@ def main():
 
     # --- Gather Input Files ---
     extensions = ("*.mkv", "*.mp4", "*.m2ts")
-    load_original_names_record(video_input_dir)
-    # Backstop for Ctrl-C and unhandled errors: every recorded rename still gets
-    # undone on the way out, not only after a clean finish.
-    atexit.register(restore_all_input_filenames)
+    # The rename is permanent - a source file keeps its safe name for good, so a
+    # second run finds nothing left to rename.
     sanitize_input_filenames(video_input_dir, extensions)
     input_files = gather_input_files(video_input_dir, extensions)
     known_input_files = set(input_files)
@@ -1965,7 +2057,6 @@ def main():
         
         if os.path.exists(final_output_path):
             print(f"[Dispatch] Output file already exists: {final_output_path}")
-            restore_input_filename(input_abspath_origin)
             continue
 
         try:
@@ -2192,12 +2283,7 @@ def main():
                 "Auto-Boost encode failed",
                 "An encode failed.",
             )
-        finally:
-            # This file is done with (encoded, skipped or failed) - give it its
-            # original name back.
-            restore_input_filename(input_abspath_origin)
 
-    restore_all_input_filenames()
     batch_elapsed = time.monotonic() - batch_started_at
 
     send_ntfy_notification(

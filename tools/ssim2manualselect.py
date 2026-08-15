@@ -20,6 +20,14 @@ TOOL_CHOICES = [
         "dll": "libvship_NVIDIA.dll",
     },
     {
+        "label": "vs-hip AMD (GPU/VapourSynth plugin)",
+        "tool": "vs-hip",
+        "variant": "amd",
+        "filter_tool": "vs-hip",
+        "kind": "gpu",
+        "dll": "libvship_AMD.dll",
+    },
+    {
         "label": "vs-hip Vulkan (GPU/VapourSynth plugin)",
         "tool": "vs-hip",
         "variant": "vulkan",
@@ -31,6 +39,13 @@ TOOL_CHOICES = [
         "label": "FFVship NVIDIA (GPU executable)",
         "tool": "ffvship_nvidia",
         "variant": "nvidia",
+        "filter_tool": "vs-zip",
+        "kind": "gpu",
+    },
+    {
+        "label": "FFVship AMD (GPU executable)",
+        "tool": "ffvship_amd",
+        "variant": "amd",
         "filter_tool": "vs-zip",
         "kind": "gpu",
     },
@@ -175,11 +190,13 @@ def benchmark_selected(choice):
         if choice["tool"] == "vs-hip":
             fps, count, elapsed = wc.run_gpu_suite(choice["dll"], encoded_file, choice["variant"])
             count_name = "streams"
-        elif choice["tool"] == "ffvship_nvidia":
-            fps, count, elapsed = wc.run_ffvship_suite(wc.FFVSHIP_NVIDIA_EXE, "nvidia", encoded_file)
-            count_name = "streams"
-        elif choice["tool"] == "ffvship_vulkan":
-            fps, count, elapsed = wc.run_ffvship_suite(wc.FFVSHIP_VULKAN_EXE, "vulkan", encoded_file)
+        elif choice["tool"].startswith("ffvship"):
+            # GPU_BACKENDS maps variant -> (vs-hip DLL, FFVship exe), so the exe
+            # paths stay defined in one place alongside the automatic benchmark.
+            backend = wc.GPU_BACKENDS.get(choice["variant"])
+            if not backend:
+                raise RuntimeError(f"Unknown FFVship variant: {choice['variant']}")
+            fps, count, elapsed = wc.run_ffvship_suite(backend[1], choice["variant"], encoded_file)
             count_name = "streams"
         elif choice["tool"] == "vs-zip":
             fps, count, elapsed = wc.benchmark_cpu_vszip(encoded_file, use_filters=False)

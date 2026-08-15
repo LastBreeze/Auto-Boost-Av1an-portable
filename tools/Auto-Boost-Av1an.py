@@ -92,7 +92,7 @@ import numpy as np
 import concurrent.futures
 from svt_fork_setup import setup_svt_av1_fork
 
-ver_str = "v3.3.3"
+ver_str = "v3.3.5"
 
 # --- TOOL PATHS HELPER ---
 def resolve_tool(portable_path_str: str, binary_name: str) -> Path:
@@ -234,6 +234,16 @@ s_dehalo_rmode = get_script_setting(script_settings, "dehalo_rmode", "17")
 s_dehalo_hot = get_script_setting(script_settings, "dehalo_hot", "False")
 s_dehalo_smode = get_script_setting(script_settings, "dehalo_smode", "False")
 s_dehalo_edgemask = get_script_setting(script_settings, "dehalo_edgemask", "Prewitt")
+s_fine_dehalo = get_script_setting(script_settings, "fine_dehalo", "False")
+s_fine_dehalo_rx = get_script_setting(script_settings, "fine_dehalo_rx", "2")
+s_fine_dehalo_ry = get_script_setting(script_settings, "fine_dehalo_ry", "2")
+s_fine_dehalo_darkstr = get_script_setting(script_settings, "fine_dehalo_darkstr", "0.0")
+s_fine_dehalo_brightstr = get_script_setting(script_settings, "fine_dehalo_brightstr", "1.0")
+s_fine_dehalo_lowsens = get_script_setting(script_settings, "fine_dehalo_lowsens", "50")
+s_fine_dehalo_highsens = get_script_setting(script_settings, "fine_dehalo_highsens", "50")
+s_fine_dehalo_ss = get_script_setting(script_settings, "fine_dehalo_ss", "1.5")
+s_fine_dehalo_contra = get_script_setting(script_settings, "fine_dehalo_contra", "0.0")
+s_fine_dehalo_edgemask = get_script_setting(script_settings, "fine_dehalo_edgemask", "Robinson3")
 s_denoise = get_script_setting(script_settings, "denoise", "False")
 s_denoise_setting = get_script_setting(script_settings, "denoise_setting", "")
 s_deband = get_script_setting(script_settings, "deband", "False")
@@ -242,6 +252,7 @@ s_deband_setting = get_script_setting(script_settings, "deband_setting", "")
 # Normalize boolean string
 do_downscale_bool = s_downscale.lower() == "true"
 do_dehalo_bool = s_dehalo.lower() == "true"
+do_fine_dehalo_bool = s_fine_dehalo.lower() == "true"
 do_denoise_bool = s_denoise.lower() == "true"
 do_deband_bool = s_deband.lower() == "true"
 
@@ -334,6 +345,114 @@ if _stale_dehalo_keys:
         f"settings.txt [dehalo] still has {', '.join(_stale_dehalo_keys)}; "
         "these are ignored since dehalo now uses edge_cleaner."
     )
+
+# edge_cleaner and fine_dehalo attack the same artifact by different means.
+# Chaining them hands the second one edges the first already altered, which is
+# what destroys thin line art, so this stops the run rather than silently
+# picking a winner. Checked here, at settings-parse time, so nothing is encoded
+# before the user hears about it.
+if do_dehalo_bool and do_fine_dehalo_bool:
+    print("ERROR: dehalo=True and fine_dehalo=True are mutually exclusive.")
+    print("       Set one of them to False in settings.txt.")
+    print("       [dehalo] warps edges inward (edge_cleaner); [fine_dehalo] blurs")
+    print("       the halo behind an edge mask. Running both would dehalo an")
+    print("       already dehaloed clip and eat thin lines.")
+    raise SystemExit(1)
+
+# rx/ry are Morpho.expand iteration counts, not pixel radii. 0 builds an empty
+# mask and dehalos nothing; much past 8 the mask swallows the line it should be
+# protecting.
+FINE_DEHALO_RADIUS_MIN = 1
+FINE_DEHALO_RADIUS_MAX = 8
+
+# dehalo_alpha raises CustomIndexError unless lowsens/highsens are both within
+# 0-100, with -1 on BOTH as its documented way to switch that mask off. One of
+# the pair set to -1 on its own is the error case, so it is caught here.
+FINE_DEHALO_SENS_OFF = -1.0
+
+# fine_dehalo's pre_ss supersampler runs through vsaa.NNEDI3, which needs the
+# znedi3 or sneedif plugin. Neither ships in VapourSynth/vs-plugins, so pre_ss
+# is deliberately not exposed in settings.txt and the .vpy never sets it.
+
+
+def _read_fine_dehalo_float(value: str, key_name: str, default_value: float,
+                            minimum: float | None = None, maximum: float | None = None) -> float:
+    try:
+        parsed = float(str(value).strip())
+    except (TypeError, ValueError):
+        dehalo_setting_warnings.append(f"Invalid {key_name}={value!r}; using {default_value}.")
+        return default_value
+    if minimum is not None and parsed < minimum:
+        dehalo_setting_warnings.append(f"{key_name}={parsed} is below {minimum}; using {minimum}.")
+        return minimum
+    if maximum is not None and parsed > maximum:
+        dehalo_setting_warnings.append(f"{key_name}={parsed} is above {maximum}; using {maximum}.")
+        return maximum
+    return parsed
+
+
+def _read_fine_dehalo_sens() -> tuple[float, float]:
+    """Validate the lowsens/highsens pair.
+
+    They are read together because -1 is only legal when both carry it; a lone
+    -1 would reach dehalo_alpha and raise there, mid-encode.
+    """
+    def as_float(raw: str, key_name: str) -> float:
+        try:
+            return float(str(raw).strip())
+        except (TypeError, ValueError):
+            dehalo_setting_warnings.append(f"Invalid {key_name}={raw!r}; using 50.")
+            return 50.0
+
+    low = as_float(s_fine_dehalo_lowsens, "fine_dehalo_lowsens")
+    high = as_float(s_fine_dehalo_highsens, "fine_dehalo_highsens")
+
+    low_off = low == FINE_DEHALO_SENS_OFF
+    high_off = high == FINE_DEHALO_SENS_OFF
+    if low_off and high_off:
+        return FINE_DEHALO_SENS_OFF, FINE_DEHALO_SENS_OFF
+    if low_off or high_off:
+        dehalo_setting_warnings.append(
+            "fine_dehalo_lowsens/fine_dehalo_highsens only accept -1 when both are -1; "
+            "using 50 for both."
+        )
+        return 50.0, 50.0
+
+    return (
+        _read_fine_dehalo_float(low, "fine_dehalo_lowsens", 50.0, minimum=0.0, maximum=100.0),
+        _read_fine_dehalo_float(high, "fine_dehalo_highsens", 50.0, minimum=0.0, maximum=100.0),
+    )
+
+
+def _read_fine_dehalo_edgemask(value: str) -> str:
+    """Validate fine_dehalo_edgemask; same identifier rule as dehalo_edgemask."""
+    name = str(value).strip()
+    if not name:
+        return "Robinson3"
+    if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", name):
+        dehalo_setting_warnings.append(f"Invalid fine_dehalo_edgemask={value!r}; using Robinson3.")
+        return "Robinson3"
+    return name
+
+
+fine_dehalo_rx = _read_dehalo_int(
+    s_fine_dehalo_rx, "fine_dehalo_rx", 2,
+    minimum=FINE_DEHALO_RADIUS_MIN, maximum=FINE_DEHALO_RADIUS_MAX,
+)
+fine_dehalo_ry = _read_dehalo_int(
+    s_fine_dehalo_ry, "fine_dehalo_ry", 2,
+    minimum=FINE_DEHALO_RADIUS_MIN, maximum=FINE_DEHALO_RADIUS_MAX,
+)
+fine_dehalo_darkstr = _read_fine_dehalo_float(
+    s_fine_dehalo_darkstr, "fine_dehalo_darkstr", 0.0, minimum=0.0, maximum=1.0)
+fine_dehalo_brightstr = _read_fine_dehalo_float(
+    s_fine_dehalo_brightstr, "fine_dehalo_brightstr", 1.0, minimum=0.0, maximum=1.0)
+fine_dehalo_lowsens, fine_dehalo_highsens = _read_fine_dehalo_sens()
+fine_dehalo_ss = _read_fine_dehalo_float(
+    s_fine_dehalo_ss, "fine_dehalo_ss", 1.5, minimum=1.0, maximum=4.0)
+fine_dehalo_contra = _read_fine_dehalo_float(
+    s_fine_dehalo_contra, "fine_dehalo_contra", 0.0, minimum=0.0, maximum=4.0)
+fine_dehalo_edgemask = _read_fine_dehalo_edgemask(s_fine_dehalo_edgemask)
 # -----------------------
 
 stage = int(args.stage)
@@ -855,6 +974,16 @@ def report_filter_status() -> None:
         )
         for warning in dehalo_setting_warnings:
             console.print(f"[yellow]{warning}[/yellow]")
+    if do_fine_dehalo_bool:
+        active_filters.append(
+            f"fine_dehalo: rx={fine_dehalo_rx}, ry={fine_dehalo_ry}, "
+            f"darkstr={fine_dehalo_darkstr}, brightstr={fine_dehalo_brightstr}, "
+            f"lowsens={fine_dehalo_lowsens}, highsens={fine_dehalo_highsens}, "
+            f"ss={fine_dehalo_ss}, contra={fine_dehalo_contra}, edgemask={fine_dehalo_edgemask}"
+        )
+        # dehalo and fine_dehalo cannot both be on, so this list is never printed twice.
+        for warning in dehalo_setting_warnings:
+            console.print(f"[yellow]{warning}[/yellow]")
     if do_denoise_bool:
         active_filters.append(f"denoise: denoise_setting={s_denoise_setting or 'enabled'}")
     if do_deband_bool:
@@ -1036,8 +1165,18 @@ if do_dehalo_bool:
     )
 else:
     _dehalo_state = "False"
+if do_fine_dehalo_bool:
+    _fine_dehalo_state = (
+        f"fine_dehalo(rx={fine_dehalo_rx},ry={fine_dehalo_ry},darkstr={fine_dehalo_darkstr},"
+        f"brightstr={fine_dehalo_brightstr},lowsens={fine_dehalo_lowsens},"
+        f"highsens={fine_dehalo_highsens},ss={fine_dehalo_ss},contra={fine_dehalo_contra},"
+        f"edgemask={fine_dehalo_edgemask})"
+    )
+else:
+    _fine_dehalo_state = "False"
 filter_state_marker = (
-    f"# Filter state: dehalo={_dehalo_state}, denoise={do_denoise_bool}, deband={do_deband_bool}"
+    f"# Filter state: dehalo={_dehalo_state}, fine_dehalo={_fine_dehalo_state}, "
+    f"denoise={do_denoise_bool}, deband={do_deband_bool}"
 )
 
 rebuild_vpy = not os.path.exists(vpy_file)
@@ -1149,6 +1288,54 @@ if do_dehalo:
         edgemask=dehalo_edgemask,
     )
 
+# FINE_DEHALO (settings.txt [fine_dehalo]; the alternative to [dehalo], also before denoise)
+do_fine_dehalo = {fine_dehalo}
+if do_fine_dehalo:
+    from vsdehalo import fine_dehalo as _fine_dehalo
+    from vsmasktools import EdgeDetect, Robinson3
+    # Every mask stage and the dehalo itself go through vsexprtools.norm_expr,
+    # which calls core.akarin.Expr. Unlike edge_cleaner this needs no AWarp.
+    if not hasattr(core, "akarin"):
+        raise RuntimeError(
+            "fine_dehalo=True needs the akarin plugin: put akarin.dll in VapourSynth/vs-plugins, "
+            "or set fine_dehalo=False in settings.txt."
+        )
+    # box_blur inside the mask pipeline is vszip.BoxBlur.
+    if not hasattr(core, "vszip"):
+        raise RuntimeError(
+            "fine_dehalo=True needs the vszip plugin: put vszip.dll in VapourSynth/vs-plugins, "
+            "or set fine_dehalo=False in settings.txt."
+        )
+    # ss=1 swaps supersampling for vsrgtools.repair, and contra>0 pulls in
+    # contrasharpening_dehalo; both land on zsmooth.Repair. With ss>1 and no
+    # contra, zsmooth is never touched.
+    if ({fd_ss} == 1.0 or {fd_contra} > 0.0) and not hasattr(core, "zsmooth"):
+        raise RuntimeError(
+            "fine_dehalo with fine_dehalo_ss=1.0 or fine_dehalo_contra>0 needs the zsmooth plugin: "
+            "put zsmooth.dll in VapourSynth/vs-plugins, raise fine_dehalo_ss above 1.0 and set "
+            "fine_dehalo_contra=0, or set fine_dehalo=False in settings.txt."
+        )
+    try:
+        fine_dehalo_edgemask = EdgeDetect.ensure_obj("{fd_edgemask}")
+    except Exception:
+        print("[fine_dehalo] Unknown fine_dehalo_edgemask '{fd_edgemask}'; using Robinson3.")
+        fine_dehalo_edgemask = Robinson3
+    # pre_ss is left at its default of 1 on purpose: raising it routes through
+    # vsaa.NNEDI3, which needs the znedi3 or sneedif plugin, and neither ships
+    # with this package.
+    src = _fine_dehalo(
+        src,
+        lowsens={fd_lowsens},
+        highsens={fd_highsens},
+        ss={fd_ss},
+        darkstr={fd_darkstr},
+        brightstr={fd_brightstr},
+        rx={fd_rx},
+        ry={fd_ry},
+        edgemask=fine_dehalo_edgemask,
+        contra={fd_contra},
+    )
+
 # Optional settings.txt denoise/deband hooks
 {denoise_line}
 {deband_line}
@@ -1232,6 +1419,16 @@ final.set_output(0)
             dh_hot=str(dehalo_hot),
             dh_smode=str(dehalo_smode),
             dh_edgemask=dehalo_edgemask,
+            fine_dehalo=str(do_fine_dehalo_bool),
+            fd_rx=fine_dehalo_rx,
+            fd_ry=fine_dehalo_ry,
+            fd_darkstr=fine_dehalo_darkstr,
+            fd_brightstr=fine_dehalo_brightstr,
+            fd_lowsens=fine_dehalo_lowsens,
+            fd_highsens=fine_dehalo_highsens,
+            fd_ss=fine_dehalo_ss,
+            fd_contra=fine_dehalo_contra,
+            fd_edgemask=fine_dehalo_edgemask,
             denoise_line=denoise_line,
             deband_line=deband_line,
             filter_state=filter_state_marker

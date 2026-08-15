@@ -65,6 +65,7 @@ TEMP_DIR = TOOLS_DIR / "ssimu2_bench_temp"
 
 # FFVship paths
 FFVSHIP_NVIDIA_EXE = TOOLS_DIR / "FFVship" / "FFVship_nvidia" / "FFVship.exe"
+FFVSHIP_AMD_EXE = TOOLS_DIR / "FFVship" / "FFVship_amd" / "FFVship.exe"
 FFVSHIP_VULKAN_EXE = TOOLS_DIR / "FFVship" / "FFVship_Vulkan" / "FFVship.exe"
 
 # Updated path: Both scripts are in the tools folder
@@ -95,6 +96,92 @@ try:
 except ImportError:
     print("Error: vstools not found.", file=sys.stderr)
     sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
+# GPU VENDOR DETECTION -> BENCHMARK PLAN
+# ---------------------------------------------------------------------------
+#
+# Each vship/FFVship build only runs on the hardware it was compiled for, so
+# benchmarking every backend on every machine just burns minutes on candidates
+# that are guaranteed to fail:
+#
+#   nvidia build  -> NVIDIA only
+#   amd build     -> AMD only
+#   vulkan build  -> NVIDIA / AMD / Intel, discrete or integrated
+#
+# tools/gpu_vendor.py reads the dedicated adapter's PCI vendor ID via DXGI.
+# When it cannot identify a vendor we fall back to testing EVERYTHING, so an
+# unrecognised or exotic setup degrades to the old exhaustive behaviour rather
+# than silently skipping the backend that would have won.
+
+if str(TOOLS_DIR) not in sys.path:
+    sys.path.insert(0, str(TOOLS_DIR))
+
+try:
+    from gpu_vendor import gpu_vendor as _detect_gpu_vendor, list_gpus as _list_gpus
+except Exception as _gpu_import_error:  # pragma: no cover - portable-package safety net
+    print(f"[GPU] gpu_vendor.py unavailable ({_gpu_import_error}); "
+          f"all GPU backends will be tested.", file=sys.stderr)
+    _detect_gpu_vendor = None
+    _list_gpus = None
+
+
+def detect_gpu_vendor():
+    """Return "nvidia" / "amd" / "intel", or None when detection fails."""
+    if _detect_gpu_vendor is None:
+        return None
+    try:
+        vendor = _detect_gpu_vendor()
+    except Exception as e:
+        print(f"[GPU] Vendor detection failed ({e}); all GPU backends will be tested.", file=sys.stderr)
+        return None
+
+    if _list_gpus is not None:
+        try:
+            for name_vendor, name, vram in _list_gpus():
+                print(f"[GPU] Found: {name} ({name_vendor or 'unknown vendor'}, "
+                      f"{vram / 2**30:.2f} GiB dedicated)", file=sys.stderr)
+        except Exception:
+            pass
+
+    if vendor:
+        print(f"[GPU] Dedicated GPU vendor: {vendor}", file=sys.stderr)
+    else:
+        print("[GPU] Could not identify a dedicated GPU; all GPU backends will be tested.", file=sys.stderr)
+    return vendor
+
+
+# variant -> (vs-hip DLL, FFVship exe). Order matters only for readability;
+# the winner is chosen purely on measured fps.
+GPU_BACKENDS = {
+    "nvidia": ("libvship_NVIDIA.dll", FFVSHIP_NVIDIA_EXE),
+    "amd": ("libvship_AMD.dll", FFVSHIP_AMD_EXE),
+    "vulkan": ("libvship_VULKAN.dll", FFVSHIP_VULKAN_EXE),
+}
+
+# Which variants are worth benchmarking for a given detected vendor. Intel has
+# no dedicated vship build, so Vulkan is its only GPU path.
+VENDOR_PLANS = {
+    "nvidia": ("nvidia", "vulkan"),
+    "amd": ("amd", "vulkan"),
+    "intel": ("vulkan",),
+}
+
+# Used when nothing GPU-side survives, so the fallback config names a build the
+# machine can actually load instead of always defaulting to NVIDIA.
+FALLBACK_VARIANTS = {"nvidia": "nvidia", "amd": "amd", "intel": "vulkan"}
+
+
+def plan_gpu_variants(vendor):
+    """Variants to benchmark for this vendor; everything when vendor is unknown."""
+    if vendor in VENDOR_PLANS:
+        return VENDOR_PLANS[vendor]
+    return tuple(GPU_BACKENDS)  # nvidia, amd, vulkan
+
+
+def fallback_variant(vendor):
+    return FALLBACK_VARIANTS.get(vendor, "nvidia")
 
 
 FILTER_SETTING_KEYS = ("downscale", "denoise", "deband")
@@ -228,15 +315,25 @@ def set_bat_value(bat_path, key, value):
     return False
 
 
+GPU_VARIANTS = ("nvidia", "amd", "vulkan")
+
+
 def format_bat_ssimu2_tool(tool, variant=None):
     tool = (tool or "").strip().lower().replace("_", "-")
     variant = (variant or "").strip().lower()
     if tool == "vs-hip":
-        return f"vs-hip {variant if variant in ('nvidia', 'vulkan') else 'nvidia'}"
-    if tool in ("ffvship", "ffvship-nvidia", "ffvship-vulkan"):
+        return f"vs-hip {variant if variant in GPU_VARIANTS else 'nvidia'}"
+    if tool in ("ffvship", "ffvship-nvidia", "ffvship-amd", "ffvship-vulkan"):
         if not variant:
-            variant = "vulkan" if "vulkan" in tool else "nvidia"
-        return f"ffvship {variant if variant in ('nvidia', 'vulkan') else 'nvidia'}"
+            # Recover the variant from the tool name when it was not passed
+            # separately (e.g. re-reading an older config).
+            for known in GPU_VARIANTS:
+                if known in tool:
+                    variant = known
+                    break
+            else:
+                variant = "nvidia"
+        return f"ffvship {variant if variant in GPU_VARIANTS else 'nvidia'}"
     if tool == "vs-zip":
         return "vs-zip"
     return tool.replace("-", " ")
@@ -1278,6 +1375,9 @@ def run_full_suite(target_fork="5fish", use_filters=False):
 
     Returns the winning config dict, or None if all benchmarks failed."""
     vszip_workers = None
+    # Detected before the try block so the failure paths below can still write a
+    # fallback config naming a build this machine is able to load.
+    vendor = detect_gpu_vendor()
     try:
         cleanup_temp_files()
 
@@ -1295,39 +1395,41 @@ def run_full_suite(target_fork="5fish", use_filters=False):
 
         results = []
 
-        # 1. Test vs-hip NVIDIA
-        fps_vsnv, s_vsnv, time_vsnv = run_gpu_suite("libvship_NVIDIA.dll", encoded_file, "nvidia")
-        if fps_vsnv > 0:
-            print(f"   [vs-hip-nvidia] FPS: {fps_vsnv:.2f} | Streams: {s_vsnv} | Time: {time_vsnv:.2f}s", file=sys.stderr)
-            results.append({"tool": "vs-hip", "variant": "nvidia", "fps": fps_vsnv, "workers": 1, "streams": s_vsnv, "time": time_vsnv})
-        else:
-            print("   [vs-hip-nvidia] Not compatible or failed.", file=sys.stderr)
+        # Only benchmark the GPU backends this machine's hardware can run.
+        # An undetectable vendor plans every variant, matching the old behaviour.
+        planned = plan_gpu_variants(vendor)
+        skipped = [v for v in GPU_BACKENDS if v not in planned]
+        print(f"\n[GPU] Benchmarking GPU backends: {', '.join(planned)}", file=sys.stderr)
+        if skipped:
+            print(f"[GPU] Skipping (incompatible with a {vendor} GPU): "
+                  f"{', '.join(skipped)}", file=sys.stderr)
 
-        # 2. Test vs-hip VULKAN
-        fps_vsvk, s_vsvk, time_vsvk = run_gpu_suite("libvship_VULKAN.dll", encoded_file, "vulkan")
-        if fps_vsvk > 0:
-            print(f"   [vs-hip-vulkan] FPS: {fps_vsvk:.2f} | Streams: {s_vsvk} | Time: {time_vsvk:.2f}s", file=sys.stderr)
-            results.append({"tool": "vs-hip", "variant": "vulkan", "fps": fps_vsvk, "workers": 1, "streams": s_vsvk, "time": time_vsvk})
-        else:
-            print("   [vs-hip-vulkan] Not compatible or failed.", file=sys.stderr)
+        # 1. vs-hip (in-process VapourSynth plugin)
+        for variant in planned:
+            dll_name = GPU_BACKENDS[variant][0]
+            fps, streams, elapsed = run_gpu_suite(dll_name, encoded_file, variant)
+            if fps > 0:
+                print(f"   [vs-hip-{variant}] FPS: {fps:.2f} | Streams: {streams} | Time: {elapsed:.2f}s", file=sys.stderr)
+                results.append({"tool": "vs-hip", "variant": variant, "fps": fps,
+                                "workers": 1, "streams": streams, "time": elapsed})
+            else:
+                print(f"   [vs-hip-{variant}] Not compatible or failed.", file=sys.stderr)
 
         # Remove DLLs to keep environment clean
         for f in VS_PLUGINS_DIR.glob("libvship*.dll"):
             force_remove(f)
 
-        # 3. Test FFVship NVIDIA
-        fps_ffnv, s_ffnv, time_ffnv = run_ffvship_suite(FFVSHIP_NVIDIA_EXE, "nvidia", encoded_file)
-        if fps_ffnv > 0:
-            print(f"   [FFVship-nvidia] FPS: {fps_ffnv:.2f} | Streams: {s_ffnv} | Time: {time_ffnv:.2f}s", file=sys.stderr)
-            results.append({"tool": "ffvship_nvidia", "variant": "nvidia", "fps": fps_ffnv, "workers": s_ffnv, "streams": s_ffnv, "time": time_ffnv})
+        # 2. FFVship (standalone exe)
+        for variant in planned:
+            exe_path = GPU_BACKENDS[variant][1]
+            fps, streams, elapsed = run_ffvship_suite(exe_path, variant, encoded_file)
+            if fps > 0:
+                print(f"   [FFVship-{variant}] FPS: {fps:.2f} | Streams: {streams} | Time: {elapsed:.2f}s", file=sys.stderr)
+                results.append({"tool": f"ffvship_{variant}", "variant": variant, "fps": fps,
+                                "workers": streams, "streams": streams, "time": elapsed})
 
-        # 4. Test FFVship VULKAN
-        fps_ffvk, s_ffvk, time_ffvk = run_ffvship_suite(FFVSHIP_VULKAN_EXE, "vulkan", encoded_file)
-        if fps_ffvk > 0:
-            print(f"   [FFVship-vulkan] FPS: {fps_ffvk:.2f} | Streams: {s_ffvk} | Time: {time_ffvk:.2f}s", file=sys.stderr)
-            results.append({"tool": "ffvship_vulkan", "variant": "vulkan", "fps": fps_ffvk, "workers": s_ffvk, "streams": s_ffvk, "time": time_ffvk})
-
-        # 5. Test vs-zip
+        # 3. vs-zip - always benchmarked, whatever the GPU situation, since it
+        # is the CPU fallback that has to work when every GPU backend fails.
         fps_zip, w_zip, time_zip = benchmark_cpu_vszip(encoded_file, use_filters=use_filters)
         if fps_zip > 0:
             print(f"   [vs-zip]        FPS: {fps_zip:.2f} | Workers: {w_zip} | Time: {time_zip:.2f}s", file=sys.stderr)
@@ -1339,7 +1441,8 @@ def run_full_suite(target_fork="5fish", use_filters=False):
 
         if not results:
             print("All benchmarks failed. Defaulting to vs-hip config so filtered runs do not select FFVship.", file=sys.stderr)
-            write_ssimu2_config(tool="vs-hip", filter_tool="vs-hip", workercount=1, variant="nvidia", streams=1)
+            write_ssimu2_config(tool="vs-hip", filter_tool="vs-hip", workercount=1,
+                                variant=fallback_variant(vendor), streams=1)
             return None
 
         winner = max(results, key=lambda x: x['fps'])
@@ -1356,7 +1459,7 @@ def run_full_suite(target_fork="5fish", use_filters=False):
         elif filter_candidates:
             filter_winner = max(filter_candidates, key=lambda x: x['fps'])
         else:
-            filter_winner = {'tool': 'vs-hip', 'variant': 'nvidia', 'streams': 1}
+            filter_winner = {'tool': 'vs-hip', 'variant': fallback_variant(vendor), 'streams': 1}
         filter_tool = filter_winner['tool']
 
         # POST-WINNER SETUP
@@ -1396,7 +1499,8 @@ def run_full_suite(target_fork="5fish", use_filters=False):
 
     except Exception as e:
         print(f"Fatal error: {e}", file=sys.stderr)
-        write_ssimu2_config(tool="vs-hip", filter_tool="vs-hip", workercount=1, variant="nvidia", streams=1)
+        write_ssimu2_config(tool="vs-hip", filter_tool="vs-hip", workercount=1,
+                            variant=fallback_variant(vendor), streams=1)
         return None
     finally:
         cleanup_temp_files()

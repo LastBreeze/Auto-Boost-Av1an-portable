@@ -130,6 +130,53 @@ nothing to act on and is ignored (with a warning) for LQTC encodes.
 Output goes to video-output\\<name>-afterzone.mkv.  The original
 video-output\\<name>-output.mkv is never touched, so you can compare them.
 
+Writing the zones file
+----------------------
+With no video-input\\<name>.txt to read, AfterZone offers to write one: it
+measures the finished encode, takes the median of the 1 second rolling average
+as the typical bitrate, and turns every region that sustains a percentage above
+that into a zone line.  Each line repeats the parameters its range was already
+encoded with, so the file does nothing until it is edited -- which is why the
+run ends by offering to edit it:
+
+    add +3 to the CRF on every line and --tf-strength 2 to every line's settings
+    customize those two levels, i.e. type in the CRF step and the --tf-strength
+
+Those two numbers are the ones worth choosing per film.  --tf-strength is 0-4:
+1 is the encoder default and what the lines already carry, 2 is usually enough
+for the high bitrate scenes this targets, and 3 is destructive enough that it
+only belongs on extremely grainy, difficult flashbacks.
+
+Batch runs
+----------
+Every input in video-input with a working folder is processed in turn, so a
+folder of episodes is one run.  When more than one of them still needs a zones
+file written, the questions for that -- how the ranges are picked and the boost
+above -- are asked once for all of them if you want, and every zones file is
+then written the same way without stopping to ask again.
+
+A file that already has its zones file is never part of that.  It goes straight
+to its plan and the prompt that starts the encode, which is the whole point of
+the second run, so nothing is allowed in between:
+
+    1 - Encode: re-encode the chunks in the plan above
+    2 - Start over: measure again and replace the zones file
+    3 - Exit without changing anything
+
+Encode is answered once for the run, not once per file.  The plan for each file
+is still printed as it is reached, but a folder of episodes is approved with one
+keypress and then left to finish.
+
+The ranges are picked either as a percentage of each file's own typical bitrate
+(so every episode is measured against itself) or as one bitrate in kbps for all
+of them, which zones every scene averaging that or more.  A file with no scene
+that expensive falls back to the percentage, so the batch never leaves a file
+without a zones file.
+
+Only writing zones files is shared.  Re-encoding is still planned and confirmed
+one file at a time, because that is per-encode and it is the only irreversible
+thing here.
+
 Interrupted runs
 ----------------
 As soon as the encoder's state files are about to be rewritten, AfterZone drops
@@ -262,6 +309,36 @@ CONDOR_QUANTIZER_KEYS = {
 # bitrate (the median of the 1 second rolling average). The user can change it
 # interactively, so this is only where the search starts.
 BITRATE_ZONE_THRESHOLD = 1.25
+
+# The zones file is written as a no-op -- every line repeats the parameters its
+# range was already encoded with -- so it does nothing until it is edited. These
+# are the one-keypress edit offered at the end of generation: raise every line's
+# quantizer, which is what actually spends fewer bits there, and set
+# --tf-strength (default 1, range 0-4 in every fork shipped here) on every line.
+ZONE_BOOST_CRF_STEP = 3
+ZONE_BOOST_TF_FLAG = "--tf-strength"
+ZONE_BOOST_TF_STRENGTH = "2"
+ZONE_BOOST_EXTRA_PARAMS = [ZONE_BOOST_TF_FLAG, ZONE_BOOST_TF_STRENGTH]
+
+# Both numbers above can be typed in instead, because they are the two that
+# actually depend on the content: how far the CRF can move before the zone stops
+# looking like the rest of the film, and how hard the temporal filter may push on
+# a scene that is expensive because of grain rather than because of motion.
+# --tf-strength is 0-4 in every fork shipped here.
+TF_STRENGTH_MIN = 0
+TF_STRENGTH_MAX = 4
+
+# The flag a zone line carries its quantizer in. svt-av1 (both encoders here)
+# uses --crf, but a zone line is passed to the encoder verbatim and the other
+# encoders av1an drives spell it differently, so the boost finds it either way.
+# The value is a plain number in all of them, which is why one bump covers them.
+ZONE_QUANTIZER_FLAGS = ("--crf", "--cq-level", "--qp", "--quantizer", "-q")
+
+# Written into the zones file when the boost is applied, so the header does not
+# keep claiming the lines are unchanged, and so a second boost does not repeat
+# the note. It is a comment, so parse_zones_file ignores it.
+ZONE_BOOST_MARKER = ("# AfterZone applied its CRF / --tf-strength boost to the "
+                     "lines below.")
 
 # Exit code AfterZone.bat reads to skip its own "press any key". Zone generation
 # ends on an interactive prompt of its own, and two pauses back to back reads as
@@ -417,8 +494,13 @@ def ask(prompt, valid):
         print(f"{YELLOW}Please enter one of: {', '.join(valid)}{RESET}")
 
 
-def ask_percentage(prompt):
-    """Read a percentage above 100. Blank input means 'give up'."""
+def ask_percentage(prompt, blank_hint="press Enter to give up"):
+    """Read a percentage above 100. Blank input means 'give up'.
+
+    `blank_hint` is only the wording of the error message: what a blank line
+    means is the caller's business (giving up in the per-file prompts, keeping
+    the default in the batch one), and the two read very differently.
+    """
     while True:
         try:
             raw = input(prompt).strip()
@@ -430,8 +512,8 @@ def ask_percentage(prompt):
         try:
             value = float(raw.rstrip("%").strip())
         except ValueError:
-            print(f"{YELLOW}Enter a number above 100 (for example 115), or press "
-                  f"Enter to give up.{RESET}")
+            print(f"{YELLOW}Enter a number above 100 (for example 115), or "
+                  f"{blank_hint}.{RESET}")
             continue
         if value <= 100:
             print(f"{YELLOW}The value has to be above 100. At 100% the threshold is "
@@ -798,8 +880,17 @@ class Zone:
         return chunk_start < self.end and chunk_end > self.start
 
 
-def parse_zones_file(path, total_frames):
-    """Parse `start end encoder [reset] params` lines. Blank / #-comments skipped."""
+def parse_zones_file(path, total_frames, quiet=False):
+    """Parse `start end encoder [reset] params` lines. Blank / #-comments skipped.
+
+    `quiet` drops the per-line complaints, for the callers that parse a file only
+    to price it: those run over every file in the run, ahead of the pass that
+    reads each one properly, and the same warning twice reads as two problems.
+    """
+    def warn(message):
+        if not quiet:
+            print(message)
+
     zones = []
     with open(path, "r", encoding="utf-8", errors="replace") as handle:
         for line_number, raw in enumerate(handle, 1):
@@ -811,15 +902,15 @@ def parse_zones_file(path, total_frames):
             except ValueError:
                 tokens = line.split()
             if len(tokens) < 3:
-                print(f"{YELLOW}[AfterZone] Line {line_number}: need at least "
-                      f"'start end encoder', skipping: {line}{RESET}")
+                warn(f"{YELLOW}[AfterZone] Line {line_number}: need at least "
+                     f"'start end encoder', skipping: {line}{RESET}")
                 continue
             try:
                 start = int(tokens[0])
                 end = int(tokens[1])
             except ValueError:
-                print(f"{YELLOW}[AfterZone] Line {line_number}: frame numbers are not "
-                      f"integers, skipping: {line}{RESET}")
+                warn(f"{YELLOW}[AfterZone] Line {line_number}: frame numbers are "
+                     f"not integers, skipping: {line}{RESET}")
                 continue
 
             encoder = tokens[2]
@@ -831,18 +922,19 @@ def parse_zones_file(path, total_frames):
             if end < 0:
                 end = total_frames
             if start >= total_frames:
-                print(f"{YELLOW}[AfterZone] Line {line_number}: starts at frame {start} "
-                      f"but the video is only {total_frames} frames, skipping.{RESET}")
+                warn(f"{YELLOW}[AfterZone] Line {line_number}: starts at frame "
+                     f"{start} but the video is only {total_frames} frames, "
+                     f"skipping.{RESET}")
                 continue
             start = max(0, start)
             end = min(end, total_frames)
             if end <= start:
-                print(f"{YELLOW}[AfterZone] Line {line_number}: empty range "
-                      f"({start}-{end}), skipping.{RESET}")
+                warn(f"{YELLOW}[AfterZone] Line {line_number}: empty range "
+                     f"({start}-{end}), skipping.{RESET}")
                 continue
             if not rest:
-                print(f"{YELLOW}[AfterZone] Line {line_number}: no encoder parameters, "
-                      f"skipping.{RESET}")
+                warn(f"{YELLOW}[AfterZone] Line {line_number}: no encoder "
+                     f"parameters, skipping.{RESET}")
                 continue
             zones.append(Zone(line_number, start, end, encoder, reset, rest))
     return zones
@@ -2528,6 +2620,309 @@ def write_zones_file(zones_path, spans, chunks, job, encoded, fps, reference,
         handle.write("\n".join(lines))
 
 
+def _bump_number_text(text, step):
+    """`text` + step, written the way it was written. None if it is not a number.
+
+    An integer stays an integer, because a CRF of "31.0" where the line said
+    "28" would read as AfterZone having changed the kind of value rather than
+    the value itself. %g keeps a fractional one short (28.5 -> 31.5).
+    """
+    text = (text or "").strip()
+    try:
+        if re.fullmatch(r"[+-]?\d+", text):
+            return str(int(text) + step)
+        return f"{float(text) + step:g}"
+    except ValueError:
+        return None
+
+
+def describe_boost(step, extra):
+    """'+3 on the CRF and --tf-strength 2', for messages about a boost.
+
+    Both halves are optional: a step of 0 changes only the extra parameters, and
+    an empty `extra` changes only the CRF.
+    """
+    parts = []
+    if step:
+        parts.append(f"{step:+g} on the CRF")
+    if extra:
+        parts.append(" ".join(str(token) for token in extra))
+    return " and ".join(parts) if parts else "no change"
+
+
+def print_tf_strength_notes():
+    """What the --tf-strength numbers actually do, above the prompt for one."""
+    print(f"  {BOLD}--tf-strength{RESET} is the encoder's temporal filter strength "
+          f"({TF_STRENGTH_MIN}-{TF_STRENGTH_MAX}):")
+    print("     1  the default. Every line was already encoded with this, so")
+    print("        leaving it at 1 changes nothing about the filtering.")
+    print("     2  usually enough for the high bitrate scenes AfterZone targets,")
+    print("        and what the one-key boost sets.")
+    print("     3  destructive. Only worth it on extremely grainy, difficult")
+    print("        flashbacks; on anything else it smears detail away.")
+    print("     0 turns the filter off entirely and 4 pushes harder than 3, so")
+    print("     neither is what you want here unless you are experimenting.")
+
+
+def ask_crf_step(default=ZONE_BOOST_CRF_STEP):
+    """How much to ADD to every zone line's CRF. Blank keeps `default`."""
+    while True:
+        try:
+            raw = input(f"CRF to add to every line [{default:+g}]: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            sys.exit(1)
+        if not raw:
+            return default
+        try:
+            value = float(raw.lstrip("+"))
+        except ValueError:
+            print(f"{YELLOW}Enter a number, for example 3 to raise every line's "
+                  f"CRF by 3. Press Enter for {default:+g}.{RESET}")
+            continue
+        if value == int(value):
+            value = int(value)      # keep '3' a 3, so the lines read as they did
+        if value == 0:
+            print(f"{YELLOW}0 leaves every CRF exactly where it is.{RESET}")
+        elif value < 0:
+            print(f"{YELLOW}A negative value LOWERS the CRF, which spends MORE bits "
+                  f"on these ranges and makes the file bigger.{RESET}")
+        return value
+
+
+def ask_tf_strength():
+    """The --tf-strength to put on every line.
+
+    Returns the extra parameters for boost_zone_params: either
+    ['--tf-strength', '<value>'] or [] for 'leave it unchanged', which is what a
+    blank line means -- a line with no --tf-strength on it keeps whatever the
+    encode was started with instead of being pinned to a number.
+    """
+    while True:
+        try:
+            raw = input(f"{ZONE_BOOST_TF_FLAG} for every line "
+                        f"[2, 3, or Enter to leave unchanged]: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            sys.exit(1)
+        if not raw or raw.lower() in ("off", "none", "skip", "no"):
+            return []
+        if not re.fullmatch(r"[+-]?\d+", raw):
+            print(f"{YELLOW}Enter a whole number from {TF_STRENGTH_MIN} to "
+                  f"{TF_STRENGTH_MAX}, or press Enter to leave "
+                  f"{ZONE_BOOST_TF_FLAG} off the lines entirely.{RESET}")
+            continue
+        value = int(raw)
+        if not TF_STRENGTH_MIN <= value <= TF_STRENGTH_MAX:
+            print(f"{YELLOW}{ZONE_BOOST_TF_FLAG} only goes from {TF_STRENGTH_MIN} "
+                  f"to {TF_STRENGTH_MAX}.{RESET}")
+            continue
+        if value >= 3:
+            print(f"{YELLOW}{value} is destructive on anything that is not an "
+                  f"extremely grainy, difficult flashback.{RESET}")
+        return [ZONE_BOOST_TF_FLAG, str(value)]
+
+
+def prompt_custom_boost_levels():
+    """Ask for the CRF step and --tf-strength the boost should write.
+
+    Returns (step, extra) ready to hand to apply_zone_boost, or None when the
+    answers add up to no change at all and there is nothing to apply.
+    """
+    hr()
+    print(f"{BOLD}Customize the automatic CRF and --tf-strength levels{RESET}")
+    hr()
+    print("Every zone line currently repeats the settings its range was already")
+    print("encoded with, so these two values are what actually make those ranges")
+    print("smaller when AfterZone re-encodes them.")
+    print()
+    print(f"  {BOLD}CRF{RESET}: how much to ADD to the CRF on every line. Higher CRF")
+    print(f"       spends fewer bits, so +{ZONE_BOOST_CRF_STEP} (the one-key boost) "
+          f"is a solid trim,")
+    print("       +1 or +2 is gentler, and +5 and up is visible on most content.")
+    print()
+    print_tf_strength_notes()
+    print()
+    step = ask_crf_step()
+    extra = ask_tf_strength()
+    print()
+    if not step and not extra:
+        print(f"{YELLOW}That adds up to no change, so the zones file is left "
+              f"alone.{RESET}")
+        return None
+    print(f"Every zone line will get {describe_boost(step, extra)}.")
+    return step, extra
+
+
+def boost_zone_params(tokens, step=ZONE_BOOST_CRF_STEP,
+                      extra=ZONE_BOOST_EXTRA_PARAMS):
+    """Raise a zone line's quantizer by `step` and set `extra` on it.
+
+    Returns (new_tokens, note), where note describes the quantizer change for
+    the console and is None when the line carries no quantizer to raise (an
+    LQTC line whose --crf was deleted on purpose, so the quality target search
+    runs again -- `extra` is still applied there).
+    """
+    parsed = parse_params(tokens)
+    note = None
+    # step 0 is a legitimate answer to the custom prompt: it means "only set
+    # --tf-strength", so the quantizer is not looked at at all.
+    for entry in (parsed if step else []):
+        if entry[0].lower() in ZONE_QUANTIZER_FLAGS and entry[1] is not None:
+            bumped = _bump_number_text(entry[1], step)
+            if bumped is not None:
+                note = f"{entry[0]} {entry[1]} -> {bumped}"
+                entry[1] = bumped
+            break
+    # merge_params rather than a plain append, so a line that already sets the
+    # flag has its value replaced instead of the encoder seeing it twice.
+    return merge_params(flatten_params(parsed), extra), note
+
+
+def boost_zones_file(path, step=ZONE_BOOST_CRF_STEP, extra=ZONE_BOOST_EXTRA_PARAMS):
+    """Apply boost_zone_params to every zone line in `path`, in place.
+
+    Comments, blank lines and anything that does not parse as a zone line are
+    written back untouched, so the header this file was generated with (and any
+    line the user has already edited by hand) survives.
+
+    Returns (notes, unbumped, skipped): one console note per line that had its
+    quantizer raised, the number of zone lines that had none to raise, and the
+    number of lines that could not be read as zones. None when the file cannot
+    be read or written.
+    """
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as handle:
+            original = handle.read().splitlines()
+    except OSError as exc:
+        print(f"{RED}Could not read {path}: {exc}{RESET}")
+        return None
+
+    out = []
+    notes, unbumped, skipped = [], 0, 0
+    for raw in original:
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            out.append(raw)
+            continue
+        try:
+            tokens = shlex.split(line, posix=False)
+        except ValueError:
+            tokens = line.split()
+        if len(tokens) < 4:
+            out.append(raw)
+            skipped += 1
+            continue
+        try:
+            start = int(tokens[0])
+            end = int(tokens[1])
+        except ValueError:
+            out.append(raw)
+            skipped += 1
+            continue
+
+        head = [str(start), str(end), tokens[2]]
+        rest = tokens[3:]
+        if rest and rest[0].lower() == "reset":
+            head.append(rest[0])
+            rest = rest[1:]
+        params, note = boost_zone_params(rest, step, extra)
+        if note:
+            notes.append(f"frames {start}-{end}: {note}")
+        else:
+            unbumped += 1
+        out.append(" ".join(head + params))
+
+    if ZONE_BOOST_MARKER not in "\n".join(out):
+        # Say what was done in the file itself: the header above claims each
+        # line repeats what the range was already encoded with, which stops
+        # being true the moment this runs.
+        insert_at = next((index for index, text in enumerate(out)
+                          if text.strip() and not text.strip().startswith("#")), 0)
+        # Back up over the "# frames 100-200" comment that belongs to that first
+        # zone line, so the note lands above it rather than between the two.
+        while insert_at > 0 and out[insert_at - 1].strip().startswith("#"):
+            insert_at -= 1
+        out[insert_at:insert_at] = [
+            ZONE_BOOST_MARKER,
+            f"# Every line below was given {describe_boost(step, extra)},",
+            "# so the ranges are no longer a no-op: they will be re-encoded smaller.",
+            "# Edit any line further if you want, then run AfterZone again.",
+            "#",
+        ]
+
+    try:
+        make_writable(path)
+        with open(path, "w", encoding="utf-8", newline="\r\n") as handle:
+            handle.write("\n".join(out) + "\n")
+    except OSError as exc:
+        print(f"{RED}Could not write {path}: {exc}{RESET}")
+        return None
+    return notes, unbumped, skipped
+
+
+def apply_zone_boost(zones_path, step=ZONE_BOOST_CRF_STEP,
+                     extra=ZONE_BOOST_EXTRA_PARAMS):
+    """The boost menu options: boost every zone line and report what changed."""
+    result = boost_zones_file(zones_path, step, extra)
+    if result is None:
+        return False
+    notes, unbumped, skipped = result
+    if not notes and not unbumped:
+        print(f"{YELLOW}No zone lines were found in {zones_path}, so nothing was "
+              f"changed.{RESET}")
+        return False
+
+    hr()
+    print(f"{GREEN}Updated {zones_path}{RESET}")
+    print(f"  {len(notes) + unbumped} zone line(s) now carry "
+          f"{describe_boost(step, extra)}.")
+    for note in notes:
+        print(f"  {note}")
+    if unbumped and step:
+        # Only reachable per line, not per file: an LQTC line whose --crf was
+        # deleted on purpose still gets everything else the boost writes.
+        print(f"{YELLOW}  {unbumped} line(s) had no CRF to raise, so "
+              + (f"only {' '.join(extra)} was added to them."
+                 if extra else "they were left as they were.") + RESET)
+    if skipped:
+        print(f"{YELLOW}  {skipped} line(s) did not look like zones and were left "
+              f"alone.{RESET}")
+    hr()
+    return True
+
+
+def offer_zone_boost(zones_path):
+    """Offer the boost once a zones file is settled, e.g. after a threshold.
+
+    Applying a threshold rewrites the zones file from scratch, so a boost taken
+    before it would be silently undone. That makes this the last question of the
+    run, which is also why anything other than 1 or 2 leaves the file alone: a
+    mistyped key at the end of a run should not change the zones.
+    """
+    print("Press Enter to finish, or:")
+    print()
+    print(f"  {BOLD}1{RESET}: Add +{ZONE_BOOST_CRF_STEP} to the CRF on every line "
+          f"of the zones file and")
+    print(f"     {' '.join(ZONE_BOOST_EXTRA_PARAMS)} to every line's settings")
+    print(f"  {BOLD}2{RESET}: Customize automatic CRF and --tf-strength levels")
+    print()
+    try:
+        answer = input("> ").strip()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return False
+    print()
+    if answer == "1":
+        return apply_zone_boost(zones_path)
+    if answer == "2":
+        levels = prompt_custom_boost_levels()
+        if levels is None:
+            return False
+        return apply_zone_boost(zones_path, *levels)
+    return False
+
+
 def custom_threshold_prompt(ranked, sizes, frame_scale, file_size, to_kbps,
                             reference, fps, zones_path, apply_threshold):
     """Try bitrate thresholds, see what each would save, and optionally apply one.
@@ -2544,8 +2939,15 @@ def custom_threshold_prompt(ranked, sizes, frame_scale, file_size, to_kbps,
     global _ended_on_prompt
     _ended_on_prompt = True
     while True:
-        print("Press enter to exit. Or press 1 to set a custom bitrate threshold "
-              "for zones")
+        print("Press enter to exit. Or:")
+        print()
+        print(f"  {BOLD}1{RESET}: Set a custom bitrate threshold for zones")
+        print(f"  {BOLD}2{RESET}: Add +{ZONE_BOOST_CRF_STEP} to the CRF on every "
+              f"line of the zones file and "
+              f"{' '.join(ZONE_BOOST_EXTRA_PARAMS)}")
+        print("     to every line's settings")
+        print(f"  {BOLD}3{RESET}: Customize automatic CRF and --tf-strength levels")
+        print()
         try:
             answer = input("> ").strip()
         except (EOFError, KeyboardInterrupt):
@@ -2553,9 +2955,23 @@ def custom_threshold_prompt(ranked, sizes, frame_scale, file_size, to_kbps,
             return
         if not answer:
             return
+        if answer in ("2", "3"):
+            print()
+            # Applying a threshold rewrites the zones file from scratch, which
+            # would undo this, so the boost is the last thing a run does.
+            levels = (ZONE_BOOST_CRF_STEP, ZONE_BOOST_EXTRA_PARAMS)
+            if answer == "3":
+                levels = prompt_custom_boost_levels()
+            if levels is not None:
+                apply_zone_boost(zones_path, *levels)
+            print_zones_ready(zones_path)
+            press_any_key()
+            return
         if answer != "1":
-            print(f"{YELLOW}Press Enter to exit, or 1 to set a custom bitrate "
-                  f"threshold.{RESET}")
+            print(f"{YELLOW}Press Enter to exit, 1 to set a custom bitrate "
+                  f"threshold, 2 to raise every zone's CRF by "
+                  f"{ZONE_BOOST_CRF_STEP}, or 3 to type in your own CRF and "
+                  f"--tf-strength.{RESET}")
             print()
             continue
 
@@ -2598,6 +3014,10 @@ def custom_threshold_prompt(ranked, sizes, frame_scale, file_size, to_kbps,
                 print("Keeping the zones AfterZone wrote. Nothing was changed.")
             else:
                 apply_threshold(picked, kbps)
+            print()
+            # The zones are settled now, so the boost is safe to offer here:
+            # nothing after this rewrites the file out from under it.
+            offer_zone_boost(zones_path)
             # Both paths leave a zones file behind and then end the run, and the
             # .bat will not pause after this one, so say where it is and wait.
             print_zones_ready(zones_path)
@@ -2605,9 +3025,176 @@ def custom_threshold_prompt(ranked, sizes, frame_scale, file_size, to_kbps,
             return
 
 
+class BatchZoneSettings:
+    """One set of answers, applied to every file's zones.txt.
+
+    Generating a zones file asks two questions that have nothing to do with
+    which file is being measured -- the bitrate threshold that picks the ranges,
+    and the CRF / --tf-strength written onto them -- and both are usually
+    answered the same way for a whole batch of episodes. Answering them once and
+    keeping them here means the run is unattended from that point on.
+
+    Only zones-file generation is covered. Whether to re-encode is asked
+    separately, on the run that reads the finished zones files, and each file's
+    plan is printed before anything starts.
+    """
+
+    def __init__(self, generate_missing=True, factor=BITRATE_ZONE_THRESHOLD,
+                 boost=None, kbps=None):
+        self.generate_missing = generate_missing
+        self.factor = factor
+        self.boost = boost              # (crf step, extra params), or None
+        # An absolute bitrate instead of a percentage: every scene averaging
+        # this or more becomes a zone, exactly as the per-file threshold prompt
+        # does. `factor` stays set as the fallback for a file where no scene
+        # reaches it -- a batch of episodes is not guaranteed to have an
+        # expensive one in every episode.
+        self.kbps = kbps
+
+    def describe(self):
+        """The settings as lines to print back for confirmation."""
+        lines = []
+        if self.generate_missing:
+            if self.kbps:
+                lines.append(f"Files with no zones file: zone every scene "
+                             f"averaging {self.kbps:,.0f} kbps or more.")
+                lines.append(f"  If a file has no such scene, "
+                             f"{self.factor * 100:.0f}% of its own typical bitrate "
+                             f"is used instead.")
+            else:
+                lines.append(f"Files with no zones file: generate one at "
+                             f"{self.factor * 100:.0f}% of that file's typical "
+                             f"bitrate.")
+            lines.append("Every generated line gets: "
+                         + (describe_boost(*self.boost) if self.boost
+                            else "nothing, left as a no-op for you to edit."))
+        else:
+            lines.append("Files with no zones file: skipped.")
+        lines.append("Files that already have a zones file: planned and offered "
+                     "for encoding, as usual.")
+        return lines
+
+
+def ask_batch_zone_settings(ready):
+    """Offer one set of zone answers for every file. None means 'ask per file'.
+
+    `ready` is every job that has no zones file yet and a finished encode to
+    measure one from. Files that already have a zones file are not part of this:
+    they go straight to their plan and the prompt that starts the encode, which
+    is what AfterZone is for. With fewer than two of them there is nothing to
+    share and this is never called.
+    """
+    hr()
+    print(f"{BOLD}{len(ready)} of these have no zones file yet{RESET}")
+    hr()
+    for job in ready:
+        print(f"  {os.path.basename(job.source)}")
+    print()
+    print("AfterZone can write one for each of them from the bitrate of its own")
+    print("finished encode, and normally asks how per file: the threshold that")
+    print("picks the ranges, and the CRF / --tf-strength boost that goes onto")
+    print("them. You can answer that once for all of these instead.")
+    print()
+    print(f"  {BOLD}1{RESET} - Answer once, and use those settings for every zones "
+          f"file")
+    print(f"  {BOLD}2{RESET} - Answer the questions for each video file separately")
+    print()
+    if ask("Enter 1 or 2: ", {"1", "2"}) == "2":
+        print()
+        return None
+    print()
+
+    hr()
+    print(f"{BOLD}Settings for every zones file{RESET}")
+    hr()
+    print("Generating a zones file only reads the encode: nothing is deleted or")
+    print("re-encoded while they are written. You still get a plan, and a prompt")
+    print("before anything is re-encoded, on the next run once you have edited")
+    print("them.")
+    print()
+    print(f"  {BOLD}1{RESET} - Generate a zones file for each of these files")
+    print(f"  {BOLD}2{RESET} - Skip them, I will write the zones files myself")
+    print()
+    generate_missing = ask("Enter 1 or 2: ", {"1", "2"}) == "1"
+    print()
+
+    factor = BITRATE_ZONE_THRESHOLD
+    boost = None
+    kbps = None
+    if generate_missing:
+        default_percent = int(BITRATE_ZONE_THRESHOLD * 100)
+        print("Which ranges become zones can be decided two ways, and the same")
+        print("answer is used for every file:")
+        print()
+        print(f"  {BOLD}1{RESET} - A percentage of each file's own typical bitrate")
+        print("      Every file is measured against itself, so episodes encoded at")
+        print("      different sizes each get their own worst regions zoned.")
+        print(f"  {BOLD}2{RESET} - One bitrate in kbps, for all of them")
+        print("      Every scene averaging that or more becomes a zone. Use this")
+        print("      when you know the bitrate you do not want any scene to exceed.")
+        print()
+        if ask("Enter 1 or 2: ", {"1", "2"}) == "2":
+            print()
+            print("Zones are whole scenes here, so nothing gets split: each range")
+            print("re-encodes exactly the scenes it covers. A file with no scene")
+            print(f"that expensive falls back to {default_percent}% of its own "
+                  f"typical bitrate,")
+            print("so no file is left without a zones file.")
+            print()
+            kbps = ask_kbps("Bitrate threshold in kbps (for example 8000): ")
+            print()
+        if kbps is None:
+            print("A region becomes a zone when its bitrate stays this far above the")
+            print("typical bitrate of its own file, so the same percentage suits "
+                  "files")
+            print(f"of different sizes. The default is {default_percent}% "
+                  f"({default_percent - 100}% above typical);")
+            print("higher percentages select only the most expensive scenes.")
+            print()
+            answer = ask_percentage(
+                f"Percentage above 100 [Enter for {default_percent}]: ",
+                blank_hint=f"press Enter for {default_percent}")
+            if answer is not None:
+                factor = answer / 100.0
+            print()
+
+        print("Every generated line repeats the settings its range was already")
+        print("encoded with, so a zones file does nothing until something on its")
+        print("lines changes.")
+        print()
+        print(f"  {BOLD}1{RESET} - Add +{ZONE_BOOST_CRF_STEP} to the CRF on every "
+              f"line and {' '.join(ZONE_BOOST_EXTRA_PARAMS)} to every")
+        print("      line's settings")
+        print(f"  {BOLD}2{RESET} - Customize automatic CRF and --tf-strength levels")
+        print(f"  {BOLD}3{RESET} - Leave the lines as a no-op so I can edit them "
+              f"myself")
+        print()
+        choice = ask("Enter 1, 2 or 3: ", {"1", "2", "3"})
+        print()
+        if choice == "1":
+            boost = (ZONE_BOOST_CRF_STEP, ZONE_BOOST_EXTRA_PARAMS)
+        elif choice == "2":
+            boost = prompt_custom_boost_levels()
+            print()
+
+    settings = BatchZoneSettings(generate_missing, factor, boost, kbps)
+    hr()
+    print(f"{BOLD}These settings will be used for all {len(ready)} file(s){RESET}")
+    for line in settings.describe():
+        print(f"  {line}")
+    hr()
+    print()
+    return settings
+
+
 def generate_zones_file(job, chunks, total_frames, fps, zones_path,
-                        video_output_dir, ffprobe, temp_dir):
-    """Analyse the finished encode and write a zones.txt the user can edit."""
+                        video_output_dir, ffprobe, temp_dir, settings=None):
+    """Analyse the finished encode and write a zones.txt the user can edit.
+
+    With `settings` (a BatchZoneSettings) the threshold and the boost are
+    already decided, so nothing here stops to ask: the run walks the whole batch
+    and leaves one zones file per file behind.
+    """
     encoded = find_encoded_output(video_output_dir, job.stem)
     if not encoded:
         die(f"No finished encode found in video-output for '{job.stem}'.\n"
@@ -2623,17 +3210,31 @@ def generate_zones_file(job, chunks, total_frames, fps, zones_path,
     print("  1. Reads the compressed size of every video frame with ffprobe.")
     print("  2. Smooths those sizes over a 1 second window to get local bitrate.")
     print("  3. Takes the median of that curve as 'the majority of the video'.")
-    print(f"  4. Marks every region that sustains at least "
-          f"{int(BITRATE_ZONE_THRESHOLD * 100)}% of that typical bitrate")
-    print(f"     (i.e. {int((BITRATE_ZONE_THRESHOLD - 1) * 100)}% above the majority "
-          f"of the video). Regions have to be longer than the")
-    print("     smoothing window, so single-frame spikes do not become zones.")
+    start_factor = settings.factor if settings else BITRATE_ZONE_THRESHOLD
+    batch_kbps = settings.kbps if settings else None
+    if batch_kbps:
+        print(f"  4. Marks every scene averaging {batch_kbps:,.0f} kbps or more, "
+              f"which is the")
+        print(f"     bitrate you set for every file. If nothing here reaches it, "
+              f"this")
+        print(f"     file falls back to {start_factor * 100:.0f}% of its own "
+              f"typical bitrate.")
+    else:
+        print(f"  4. Marks every region that sustains at least "
+              f"{start_factor * 100:.0f}% of that typical bitrate")
+        print(f"     (i.e. {start_factor * 100 - 100:.0f}% above the majority "
+              f"of the video). Regions have to be longer than the")
+        print("     smoothing window, so single-frame spikes do not become zones.")
     print("  5. Writes those regions out as zone lines for you to edit.")
     if job.is_lqtc:
         print("     Each line starts from this encode's own parameters plus the CRF")
         print("     LQTC's quality target search picked for that scene, so it is a")
         print("     no-op until you change something.")
-    print("  You choose the percentage if the default does not suit the file.")
+    if settings is None:
+        print("  You choose the percentage if the default does not suit the file.")
+    else:
+        print("  The threshold and the boost are the ones you chose for every file,")
+        print("  so this runs through without asking anything else.")
     print()
     print(f"{YELLOW}This reads the whole file and can take several minutes on a "
           f"feature length encode.{RESET}")
@@ -2679,8 +3280,8 @@ def generate_zones_file(job, chunks, total_frames, fps, zones_path,
     # rewritten with the zones shaded once a threshold selects something.
     png_path = os.path.join(os.path.dirname(zones_path), f"{job.stem}-bitrate.png")
     png = write_bitrate_png(png_path, smoothed, fps, reference,
-                            reference * BITRATE_ZONE_THRESHOLD, [], frame_scale,
-                            BITRATE_ZONE_THRESHOLD)
+                            reference * start_factor, [], frame_scale,
+                            start_factor)
     if png:
         print(f"{GREEN}Bitrate plot saved to:{RESET} {png}")
         print("Open it to see the shape of the encode and where the bitrate peaks.")
@@ -2725,9 +3326,47 @@ def generate_zones_file(job, chunks, total_frames, fps, zones_path,
 
     peak_factor = (peak / reference) if reference else 1.0
     best_factor = "unknown"          # computed once, on the first failure
-    factor = BITRATE_ZONE_THRESHOLD
+    factor = start_factor
+    threshold = None
     spans = None
     source_note = ""
+    # Only the kbps answer picks whole scenes; a percentage detects the exact
+    # frames the bitrate stayed high, which splits the chunks at both ends.
+    chunk_aligned = False
+
+    if settings is not None and settings.kbps:
+        # The batch form of the per-file "custom bitrate threshold" prompt: the
+        # same scene-by-scene selection, with the number answered once instead
+        # of once per file.
+        cutoff = (settings.kbps / to_kbps) if to_kbps else 0.0
+        picked = [entry for entry in ranked if entry[0] >= cutoff]
+        if reference and to_kbps:
+            print(f"Zone threshold:  {settings.kbps:,.0f} kbps "
+                  f"({settings.kbps / (reference * to_kbps):.1f}x this file's "
+                  f"typical)")
+        else:
+            print(f"Zone threshold:  {settings.kbps:,.0f} kbps")
+        if picked:
+            region_bytes, region_frames = chunks_encoded_bytes(picked, sizes,
+                                                               frame_scale)
+            print(f"{len(picked)} scene(s) average that or more, {region_frames:,} "
+                  f"frames "
+                  f"({frames_to_timecode(region_frames * frame_scale, fps)}).")
+            print_savings_estimate(region_bytes, file_size, label="these zones")
+            spans = merge_chunk_spans(picked)
+            source_note = f"scenes averaging {settings.kbps:,.0f} kbps or more"
+            chunk_aligned = True
+            threshold = cutoff
+            factor = (settings.kbps / (reference * to_kbps)
+                      if reference and to_kbps else None)
+        else:
+            highest = ranked[0][0] * to_kbps if ranked else 0.0
+            print(f"{YELLOW}No scene in this file averages "
+                  f"{settings.kbps:,.0f} kbps; the most expensive one is "
+                  f"{highest:,.0f} kbps.{RESET}")
+            print(f"Falling back to {factor * 100:.0f}% of this file's own typical "
+                  f"bitrate.")
+            print()
 
     while spans is None:
         threshold = reference * factor
@@ -2750,6 +3389,17 @@ def generate_zones_file(job, chunks, total_frames, fps, zones_path,
             print()
             print(f"{YELLOW}That is over half the video, so this would re-encode "
                   f"most of it.{RESET}")
+            if settings is not None:
+                # One answer covers every file, so there is nobody to ask. The
+                # zones are kept: writing the file costs nothing, and the plan
+                # for it is still printed and confirmed before anything is
+                # re-encoded.
+                print("Keeping these regions: the batch settings answer this once")
+                print("for every file. Raise the percentage and run AfterZone again")
+                print("if that is more of this file than you meant to zone.")
+                spans = found
+                source_note = f"{factor * 100:.0f}% of the typical bitrate"
+                break
             print("A higher percentage would target only the most expensive scenes.")
             print()
             print(f"  {BOLD}1{RESET} - Enter a different percentage")
@@ -2778,6 +3428,17 @@ def generate_zones_file(job, chunks, total_frames, fps, zones_path,
         print()
         print(f"{YELLOW}No region sustains {factor * 100:.0f}% of the typical "
               f"bitrate for longer than {min_len} frames.{RESET}")
+
+        if settings is not None:
+            # The fallback the interactive path offers first, taken without
+            # asking: it always produces a usable file, and a batch that skipped
+            # this episode entirely would be the surprise.
+            print("Using the top 3 highest-bitrate scenes for this file instead.")
+            spans = offer_top_scenes()
+            source_note = "the top 3 highest-bitrate scenes"
+            factor = None          # no threshold was used
+            threshold = None
+            break
 
         if best_factor == "unknown":
             best_factor = strongest_sustained_factor(detect, peak_factor)
@@ -2845,7 +3506,7 @@ def generate_zones_file(job, chunks, total_frames, fps, zones_path,
 
     covered = sum(end - start for start, end in spans)
     write_zones_file(zones_path, spans, chunks, job, encoded, fps, reference,
-                     peak, to_kbps, source_note)
+                     peak, to_kbps, source_note, chunk_aligned=chunk_aligned)
 
     hr()
     print(f"{GREEN}Wrote {zones_path}{RESET}")
@@ -2859,6 +3520,23 @@ def generate_zones_file(job, chunks, total_frames, fps, zones_path,
         print("  The selected zones are shaded on it, so you can check they line up")
         print("  with the scenes you actually care about.")
     hr()
+
+    if settings is not None:
+        # No threshold prompt and no pause: the answers are already in hand, and
+        # the next file is waiting. The boost goes on last for the same reason it
+        # does interactively -- it is the only thing here that edits the lines
+        # rather than rewriting the file.
+        if settings.boost:
+            print()
+            apply_zone_boost(zones_path, *settings.boost)
+        print()
+        print(f"{GREEN}Zones file ready:{RESET} {zones_path}")
+        if not settings.boost:
+            print("  Its lines still repeat what the ranges were encoded with, so")
+            print("  edit them before running AfterZone again.")
+        print()
+        return zones_path
+
     print()
     print(f"{BOLD}Next steps:{RESET}")
     if png:
@@ -3357,6 +4035,109 @@ def print_zone_savings(zones, total_frames, fps, video_output_dir, stem, ffprobe
     print_savings_estimate(zone_bytes, file_size, label="these zones")
     print("How much you actually save depends on the parameters on those lines;")
     print("50% is shown as a reference point, not a prediction.")
+
+
+def measure_file_savings(zones_path, video_output_dir, stem, ffprobe, cache_path,
+                         reduction=0.5):
+    """What one file weighs now and would weigh with its zones at `reduction`.
+
+    Deliberately self-contained: it reads the finished encode and the zones file
+    and nothing else, so the table covering the whole run can be built without
+    loading every encoder's state files. The frame count comes from the encode
+    itself, which is what the per-file estimate falls back to anyway whenever
+    the two agree.
+
+    Returns None when there is nothing to measure -- a missing encode, a failed
+    probe, an unreadable zones file. Never fatal: the re-encode does not depend
+    on any of it.
+    """
+    encoded = find_encoded_output(video_output_dir, stem)
+    if not encoded:
+        return None
+    try:
+        file_size = os.path.getsize(encoded)
+    except OSError:
+        return None
+
+    sizes = load_frame_sizes(cache_path, encoded)
+    if sizes is None:
+        print(f"  Measuring {os.path.basename(encoded)} for the size estimate...")
+        try:
+            sizes = probe_frame_sizes(ffprobe, encoded)
+        except (SystemExit, OSError, ValueError):
+            return None
+        save_frame_sizes(cache_path, encoded, sizes)
+    if not sizes:
+        return None
+
+    try:
+        zones = parse_zones_file(zones_path, len(sizes), quiet=True)
+    except OSError:
+        return None
+    zone_bytes, zone_frames = spans_encoded_bytes(
+        [(zone.start, zone.end) for zone in zones], sizes, 1.0)
+    saved = zone_bytes * reduction
+    return {
+        "zones": len(zones),
+        "zone_frames": zone_frames,
+        "current": file_size,
+        "saved": saved,
+        "after": max(0.0, file_size - saved),
+    }
+
+
+def print_run_size_estimate(jobs, video_input_dir, video_output_dir, ffprobe,
+                            temp_dir, reduction=0.5):
+    """Every file this run would encode, with its size now and after the zones.
+
+    The encode is approved once for the whole run, so the whole run's sizes
+    belong next to that decision. Without this the numbers on screen describe
+    the first file while the keypress commits to all of them.
+
+    Prints nothing for a single file: the estimate above it already says the
+    same thing, in more detail.
+    """
+    rows = []
+    for job in jobs:
+        zones_path = os.path.join(video_input_dir, f"{job.stem}.txt")
+        if not os.path.exists(zones_path):
+            continue
+        if find_marker(temp_dir, job.stem)[1]:
+            # Mid-encode from an earlier run. It is restarted regardless of what
+            # is answered here, so it is not what this keypress decides.
+            continue
+        measured = measure_file_savings(
+            zones_path, video_output_dir, job.stem, ffprobe,
+            frame_size_cache_path(temp_dir, job.stem), reduction)
+        if measured:
+            rows.append((os.path.basename(job.source), measured))
+    if len(rows) < 2:
+        return
+
+    percent = int(round(reduction * 100))
+    width = max([len("file"), len("all files")]
+                + [len(name) for name, _ in rows])
+    print(f"{BOLD}Every file with a zones file, at {percent}% of the zone "
+          f"bitrates{RESET}")
+    print(f"  {'file':<{width}}  {'zones':>5}  {'now':>10}  {'after':>10}  "
+          f"{'saving':>10}")
+    for name, row in rows:
+        print(f"  {name:<{width}}  {row['zones']:>5}  "
+              f"{megabytes(row['current']):>10}  {megabytes(row['after']):>10}  "
+              f"{megabytes(row['saved']):>10}")
+    if len(rows) > 1:
+        print(f"  {'-' * width}  {'-' * 5}  {'-' * 10}  {'-' * 10}  {'-' * 10}")
+        totals = {key: sum(row[key] for _name, row in rows)
+                  for key in ("zones", "current", "after", "saved")}
+        print(f"  {'all files':<{width}}  {totals['zones']:>5}  "
+              f"{megabytes(totals['current']):>10}  "
+              f"{megabytes(totals['after']):>10}  "
+              f"{megabytes(totals['saved']):>10}")
+    print(f"  'after' is what each file would weigh if its zones came back at "
+          f"{percent}% of")
+    print("  the bitrate they hold now. It is a reference point, not a "
+          "prediction:")
+    print("  what you actually get is whatever the parameters on those lines do.")
 
 
 # ---------------------------------------------------------------------------
@@ -5314,6 +6095,17 @@ def print_intro(fork):
     print("A zones.txt that matches the input video's filename is required, placed")
     print("alongside the input file in the video-input folder.")
     print("  example.mkv  ->  video-input\\example.txt")
+    print("There is no need to write one by hand: AfterZone can measure the finished")
+    print("encode and generate it, then raise the CRF and set --tf-strength on every")
+    print("line for you, at the levels it suggests or at ones you type in.")
+    print()
+    print("Every input with a working folder is done in turn, so a folder of episodes")
+    print("is one run. When more than one of them still needs a zones file written,")
+    print("you are asked whether to answer the questions for that per file or once")
+    print("for all of them. A file that already has its zones file is never part of")
+    print("that: it goes straight to its plan and the prompt that starts the")
+    print("encode. That prompt is answered once for the whole run, so a folder of")
+    print("episodes is approved with one keypress and then left to finish.")
     print()
     print("Output is written to video-output as <name>-afterzone.mkv. Your original")
     print("<name>-output.mkv is left alone so you can compare the two.")
@@ -5404,12 +6196,32 @@ def main():
             print(f"  {hash_dir}")
         print()
 
+    # The batch question is about WRITING zones files, so it is only worth
+    # asking for jobs that need one written. A job that already has its zones
+    # file is what AfterZone exists for: it goes straight to its plan and the
+    # y/n that starts the encode, and nothing may come between the two. A job
+    # with a marker is handed back to its encoder without a single question, and
+    # a job with no encode in video-output has nothing to measure.
+    batch = None
+    needs_zones = [job for job in jobs
+                   if not os.path.exists(
+                       os.path.join(video_input_dir, f"{job.stem}.txt"))
+                   and find_encoded_output(video_output_dir, job.stem)
+                   and not find_marker(temp_dir, job.stem)[1]]
+
     if len(jobs) > 1:
         print(f"Found {len(jobs)} finished encode(s) with working folders still "
               f"present:")
         for job in jobs:
-            print(f"  {os.path.basename(job.source)}  ({job.encoder_name})")
+            encoded = find_encoded_output(video_output_dir, job.stem)
+            where = (os.path.join("video-output", os.path.basename(encoded))
+                     if encoded else f"{YELLOW}nothing in video-output{RESET}")
+            print(f"  {os.path.basename(job.source)}  ({job.encoder_name})  ->  "
+                  f"{where}")
         print()
+
+    if len(needs_zones) > 1:
+        batch = ask_batch_zone_settings(needs_zones)
 
     # Only meaningful for av1an. An LQTC encode's worker count is part of the
     # command line it is resumed with, and a Condor one is in its config, so
@@ -5419,8 +6231,12 @@ def main():
         print(f"Encode workers: {workers}  (from {worker_source})")
         print()
     processed = []
+    zones_written = []
+    # Set when the encode is approved. That approval is for the run, not for one
+    # file: a folder of episodes is confirmed once and then left to finish.
+    encode_all = False
 
-    for job in jobs:
+    for index, job in enumerate(jobs):
         hr()
         print(f"{BOLD}{os.path.basename(job.source)}{RESET}")
         hr()
@@ -5474,6 +6290,28 @@ def main():
             print("            They will be encoded too. Zones still apply normally.")
 
         zones_path = os.path.join(video_input_dir, f"{job.stem}.txt")
+        if not os.path.exists(zones_path) and batch is not None:
+            if not batch.generate_missing:
+                print(f"{YELLOW}No zones file at {zones_path}, and the batch "
+                      f"settings say to skip those.{RESET}")
+                continue
+            if not find_encoded_output(video_output_dir, job.stem):
+                # Nothing to measure. Skipped rather than fatal: the rest of the
+                # batch is still worth doing, and this one only needs its encode
+                # put back in video-output.
+                print(f"{YELLOW}No zones file, and no finished encode in "
+                      f"video-output to measure for one. Skipping this "
+                      f"file.{RESET}")
+                continue
+            print(f"No zones file yet: {zones_path}")
+            print("Generating one with the settings chosen for every file.")
+            print()
+            if generate_zones_file(job, chunks, total_frames, fps, zones_path,
+                                   video_output_dir, ffprobe_exe, temp_dir,
+                                   settings=batch):
+                zones_written.append(zones_path)
+            continue
+
         if not os.path.exists(zones_path):
             print(f"{RED}No zones file found: {zones_path}{RESET}")
             print()
@@ -5495,8 +6333,9 @@ def main():
                       f"{os.path.join('video-input', job.stem + '.txt')} "
                       "and run AfterZone again.")
                 continue
-            generate_zones_file(job, chunks, total_frames, fps, zones_path,
-                                video_output_dir, ffprobe_exe, temp_dir)
+            if generate_zones_file(job, chunks, total_frames, fps, zones_path,
+                                   video_output_dir, ffprobe_exe, temp_dir):
+                zones_written.append(zones_path)
             continue
 
         print(f"Zones file: {zones_path}")
@@ -5538,10 +6377,62 @@ def main():
         print_zone_savings(zones, total_frames, fps, video_output_dir, job.stem,
                            ffprobe_exe, frame_size_cache_path(temp_dir, job.stem))
         print()
-        if ask("Proceed and re-encode these chunks? [y/n]: ", {"y", "n"}) != "y":
-            print("Nothing was changed. Exiting.")
-            continue
-        print()
+
+        if encode_all:
+            # Approval was given once, for every file. Asking again per episode
+            # is the thing it was given to avoid, so the plan above is printed
+            # and the encode just starts.
+            print(f"{GREEN}Encoding this one too - you chose to encode every "
+                  f"file.{RESET}")
+            print()
+        else:
+            # Files after this one that will reach this same prompt. Only an
+            # estimate: whether their zones actually overlap a chunk is not
+            # known until each is planned. It is here so 'encode' is understood
+            # to cover them before it is pressed, not after.
+            later = len([other for other in jobs[index + 1:]
+                         if os.path.exists(os.path.join(video_input_dir,
+                                                        f"{other.stem}.txt"))])
+            # One keypress commits to every file, so every file's size is shown
+            # before it is pressed rather than only this one's.
+            print_run_size_estimate(jobs, video_input_dir, video_output_dir,
+                                    ffprobe_exe, temp_dir)
+            print()
+            print(f"  {BOLD}1{RESET} - Encode: re-encode the chunks in the plan "
+                  f"above")
+            if later:
+                print(f"      This also encodes the other {later} file(s) that have "
+                      f"a zones file,")
+                print("      without asking again for each one.")
+            print(f"  {BOLD}2{RESET} - Start over: measure the finished encode again "
+                  f"and replace")
+            print(f"      {os.path.basename(zones_path)} with a freshly generated "
+                  f"zones file.")
+            print("      Nothing is re-encoded, and your current zone lines are "
+                  "overwritten.")
+            print(f"  {BOLD}3{RESET} - Exit without changing anything")
+            print()
+            answer = ask("Enter 1, 2 or 3: ", {"1", "2", "3"})
+            print()
+            if answer == "2":
+                print(f"Replacing {zones_path} with a freshly generated zones file.")
+                print()
+                # Same call the missing-zones branch makes, and it ends on its
+                # own prompt, so this job is done for this run either way. With
+                # batch settings in hand it uses those, exactly as a generated
+                # file would.
+                if generate_zones_file(job, chunks, total_frames, fps, zones_path,
+                                       video_output_dir, ffprobe_exe, temp_dir,
+                                       settings=batch):
+                    zones_written.append(zones_path)
+                continue
+            if answer == "3":
+                print("Nothing was changed.")
+                if later:
+                    print(f"The other {later} file(s) with a zones file were left "
+                          f"alone too.")
+                break
+            encode_all = True
 
         video_params = baseline_video_params(plan)
         encoder_name = job.encoder_name
@@ -5603,6 +6494,15 @@ def main():
               f"{os.path.join(job.hash_dir, 'afterzone-backup')}")
         print("Delete that folder once you are happy with the result.")
         hr()
+
+    if len(zones_written) > 1:
+        print()
+        print(f"{GREEN}{BOLD}{len(zones_written)} zones files written:{RESET}")
+        for path in zones_written:
+            print(f"  {path}")
+        print()
+        print("Review them (each has a -bitrate.png next to it), edit anything you")
+        print("want different, then run AfterZone again to re-encode those ranges.")
 
     if processed:
         print()
