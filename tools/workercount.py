@@ -250,6 +250,16 @@ def build_filtered_vpy(values, source_path, tonemap=False):
     vpy_path = os.path.join(BENCH_TEMP_DIR, "bench_source.vpy")
     cache_path = os.path.join(BENCH_TEMP_DIR, "bench_source.ffindex")
 
+    # The index is keyed to the exact bytes of the sample it was built from, so
+    # a leftover one from an earlier run (the end-of-run rmtree does not happen
+    # if the benchmark is interrupted) makes ffms2.Source fail outright with
+    # "The index does not match the source file" as soon as the sample is recut.
+    # It costs seconds to rebuild, so always start from a fresh one.
+    try:
+        os.remove(cache_path)
+    except OSError:
+        pass
+
     do_downscale = values.get("downscale", "false").lower() == "true"
     target_res = values.get("target_resolution", "1920x1080")
     kernel = values.get("kernel_type", "Hermite")

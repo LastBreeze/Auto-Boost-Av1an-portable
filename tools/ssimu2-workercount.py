@@ -437,6 +437,11 @@ def build_benchmark_source_clip():
     vpy_path = TEMP_DIR / "bench_source.vpy"
     cache_path = TEMP_DIR / "bench_source.ffindex"
 
+    # Same reason as workercount.py: an index left behind by an interrupted run
+    # no longer matches benchmark-sample.mkv once that sample is recut, and
+    # ffms2.Source then fails hard instead of reindexing.
+    cache_path.unlink(missing_ok=True)
+
     do_downscale = values.get("downscale", "false").lower() == "true"
     target_res = values.get("target_resolution", "1920x1080")
     kernel = values.get("kernel_type", "Hermite")
