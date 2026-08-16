@@ -1,12 +1,84 @@
 import os
 import glob
+import locale
 import re
 import subprocess
+import sys
 import tempfile
 import shlex
+from xml.sax.saxutils import escape as xml_escape
 
 # Runs in 'temp', tools are in ../tools
 TOOLS_DIR = os.path.join("..", "tools")
+
+# --- Encoding safety -------------------------------------------------------
+# On Windows the "Language for non-Unicode programs" region setting decides the
+# ANSI codepage (cp932 for Japanese, cp1251 for Russian, ...). Python's text
+# mode follows that codepage, but the tools shipped here print UTF-8 and the
+# .bat files may be saved in either. Decoding UTF-8 bytes as cp932 raises
+# UnicodeDecodeError, which killed the tagging step. Everything below therefore
+# reads bytes and decodes them defensively, so the script behaves identically
+# no matter what the system codepage is.
+
+def _preferred_encodings():
+    """UTF-8 first, then whatever the system claims, then a never-fails fallback."""
+    candidates = ["utf-8-sig", "utf-8"]
+    for enc in (locale.getpreferredencoding(False), sys.getfilesystemencoding()):
+        if enc and enc.lower().replace("_", "-") not in candidates:
+            candidates.append(enc)
+    return candidates
+
+
+def decode_bytes(data):
+    """Decode subprocess/file bytes without ever raising."""
+    if data is None:
+        return ""
+    if isinstance(data, str):
+        return data
+    # Notepad's "Unicode" save produces UTF-16; only the BOM identifies it.
+    if data[:2] in (b"\xff\xfe", b"\xfe\xff"):
+        try:
+            return data.decode("utf-16")
+        except UnicodeDecodeError:
+            pass
+    for enc in _preferred_encodings():
+        try:
+            return data.decode(enc)
+        except (UnicodeDecodeError, LookupError):
+            continue
+    # Plan B: latin-1 maps every byte, replace anything unprintable.
+    return data.decode("latin-1", errors="replace")
+
+
+def read_text_file(path):
+    """Read a text file as UTF-8, falling back to the system codepage."""
+    with open(path, "rb") as f:
+        return decode_bytes(f.read())
+
+
+def run_capture(cmd):
+    """Run a command and return (returncode, stdout, stderr) as decoded text.
+
+    Capturing bytes and decoding here (instead of using text=True) keeps the
+    subprocess reader threads out of the ANSI codepage entirely.
+    """
+    result = subprocess.run(cmd, capture_output=True)
+    return result.returncode, decode_bytes(result.stdout), decode_bytes(result.stderr)
+
+
+def _make_console_lenient():
+    """Stop prints from crashing when the console codepage can't encode a
+    character (e.g. a Japanese filename on a cp1252 console, or a box-drawing
+    character on cp932). Characters that don't fit are substituted, not fatal."""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors="replace")
+        except Exception:
+            pass
+
+
+_make_console_lenient()
+
 UNTAGGED_OPTIONS = {
     "--avx512": 0,
     "--arch": 1,
@@ -69,12 +141,11 @@ def get_script_version():
     version = "Unknown"
     if os.path.exists(script_path):
         try:
-            with open(script_path, "r", encoding="utf-8") as f:
-                content = f.read()
-                # Looks for pattern like: ver_str = "v2.2"
-                match = re.search(r'ver_str\s*=\s*["\'](v[0-9\.]+)["\']', content)
-                if match:
-                    version = match.group(1)
+            content = read_text_file(script_path)
+            # Looks for pattern like: ver_str = "v2.2"
+            match = re.search(r'ver_str\s*=\s*["\'](v[0-9\.]+)["\']', content)
+            if match:
+                version = match.group(1)
         except Exception as e:
             pass
     return version
@@ -87,9 +158,9 @@ def get_svt_av1_version():
         
     try:
         # Run the command and capture output
-        result = subprocess.run([exe_path, "--version"], capture_output=True, text=True, check=True)
-        output = result.stdout.strip() or result.stderr.strip()
-        
+        _, out, err = run_capture([exe_path, "--version"])
+        output = out.strip() or err.strip()
+
         if not output:
             return "SVT-AV1_Unknown"
             
@@ -156,43 +227,45 @@ def parse_av1an_batch(batch_name):
         return settings
 
     try:
-        with open(batch_path, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line.lower().startswith("set"):
-                    continue
-                
-                # Remove 'set ' prefix
-                clean_line = re.sub(r"^set\s+", "", line, flags=re.IGNORECASE).strip()
-                
-                key = None
-                val = None
+        # Read via read_text_file: a .bat re-saved by Notepad on a non-English
+        # system is written in the ANSI codepage, not UTF-8. Decoding must not
+        # throw here, or every setting silently falls back to its default.
+        for line in read_text_file(batch_path).splitlines():
+            line = line.strip()
+            if not line.lower().startswith("set"):
+                continue
 
-                # Check for set "VAR=VAL" syntax (Starts with quote)
-                if clean_line.startswith('"'):
-                    # Find the first equals sign
-                    if "=" in clean_line:
-                        parts = clean_line.split("=", 1)
-                        # Remove leading quote from key
-                        key = parts[0].lstrip('"').strip()
-                        val = parts[1].strip()
-                        # Remove trailing quote from value if it exists (standard batch syntax)
-                        if val.endswith('"'):
-                            val = val[:-1]
-                else:
-                    # Standard set VAR=VAL
-                    if "=" in clean_line:
-                        parts = clean_line.split("=", 1)
-                        key = parts[0].strip()
-                        val = parts[1].strip()
-                        # Handle set VAR="VAL" (explicit quotes in value)
-                        if val.startswith('"') and val.endswith('"'):
-                            val = val[1:-1]
-                
-                if key and key in settings:
-                    settings[key] = val
-                    if key == "CRF":
-                        settings["QUALITY"] = val
+            # Remove 'set ' prefix
+            clean_line = re.sub(r"^set\s+", "", line, flags=re.IGNORECASE).strip()
+
+            key = None
+            val = None
+
+            # Check for set "VAR=VAL" syntax (Starts with quote)
+            if clean_line.startswith('"'):
+                # Find the first equals sign
+                if "=" in clean_line:
+                    parts = clean_line.split("=", 1)
+                    # Remove leading quote from key
+                    key = parts[0].lstrip('"').strip()
+                    val = parts[1].strip()
+                    # Remove trailing quote from value if it exists (standard batch syntax)
+                    if val.endswith('"'):
+                        val = val[:-1]
+            else:
+                # Standard set VAR=VAL
+                if "=" in clean_line:
+                    parts = clean_line.split("=", 1)
+                    key = parts[0].strip()
+                    val = parts[1].strip()
+                    # Handle set VAR="VAL" (explicit quotes in value)
+                    if val.startswith('"') and val.endswith('"'):
+                        val = val[1:-1]
+
+            if key and key in settings:
+                settings[key] = val
+                if key == "CRF":
+                    settings["QUALITY"] = val
 
     except Exception:
         pass
@@ -203,7 +276,10 @@ def get_crf_string(quality):
     return f"--crf {quality}"
 
 def apply_tag_to_file(filepath, encoding_settings):
-    xml_template = f"""<?xml version="1.0"?>
+    # The encoding is declared explicitly so mkvpropedit reads the file as UTF-8
+    # regardless of the system codepage, and &/</> are escaped so a stray
+    # character in the parameters can't produce invalid XML.
+    xml_template = f"""<?xml version="1.0" encoding="UTF-8"?>
 <Tags>
   <Tag>
     <Targets>
@@ -211,7 +287,7 @@ def apply_tag_to_file(filepath, encoding_settings):
     </Targets>
     <Simple>
       <Name>Encoded_Library_Settings</Name>
-      <String>{encoding_settings}</String>
+      <String>{xml_escape(encoding_settings)}</String>
     </Simple>
   </Tag>
 </Tags>
@@ -224,12 +300,12 @@ def apply_tag_to_file(filepath, encoding_settings):
     
     try:
         print(f"Applying tag to: {filepath}")
-        subprocess.run(
-            [mkvpropedit, filepath, "--tags", "track:v1:" + tmp_path],
-            check=True,
-            capture_output=True 
-        )
-        print("Success.")
+        code, out, err = run_capture([mkvpropedit, filepath, "--tags", "track:v1:" + tmp_path])
+        if code != 0:
+            message = (err.strip() or out.strip() or f"exit code {code}").split("\n")[0]
+            print(f"Error tagging {filepath}: {message}")
+        else:
+            print("Success.")
     except Exception as e:
         print(f"Error tagging {filepath}: {e}")
     finally:
@@ -293,4 +369,10 @@ def main():
         print("No output MKV files found to tag.")
 
 if __name__ == "__main__":
-    main()
+    # Plan B of last resort: tagging is cosmetic, so an unexpected failure here
+    # (encoding or otherwise) must never abort the encode. Report it and let the
+    # dispatcher carry on to muxing.
+    try:
+        main()
+    except Exception as e:
+        print(f"Tagging skipped: {type(e).__name__}: {e}")

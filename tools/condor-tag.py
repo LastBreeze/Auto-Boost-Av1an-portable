@@ -1,11 +1,82 @@
 import os
 import glob
+import locale
 import re
 import subprocess
+import sys
 import tempfile
+from xml.sax.saxutils import escape as xml_escape
 
 # Runs in 'temp', tools are in ../tools
 TOOLS_DIR = os.path.join("..", "tools")
+
+# --- Encoding safety -------------------------------------------------------
+# On Windows the "Language for non-Unicode programs" region setting decides the
+# ANSI codepage (cp932 for Japanese, cp1251 for Russian, ...). Python's text
+# mode follows that codepage, but the tools shipped here (condor.exe,
+# SvtAv1EncApp.exe) print UTF-8, and this file itself is UTF-8. Decoding UTF-8
+# bytes as cp932 raises UnicodeDecodeError, which killed the tagging step.
+# Everything below therefore reads bytes and decodes them defensively, so the
+# script behaves identically no matter what the system codepage is.
+
+def _preferred_encodings():
+    """UTF-8 first, then whatever the system claims, then a never-fails fallback."""
+    candidates = ["utf-8-sig", "utf-8"]
+    for enc in (locale.getpreferredencoding(False), sys.getfilesystemencoding()):
+        if enc and enc.lower().replace("_", "-") not in candidates:
+            candidates.append(enc)
+    return candidates
+
+
+def decode_bytes(data):
+    """Decode subprocess/file bytes without ever raising."""
+    if data is None:
+        return ""
+    if isinstance(data, str):
+        return data
+    # Notepad's "Unicode" save produces UTF-16; only the BOM identifies it.
+    if data[:2] in (b"\xff\xfe", b"\xfe\xff"):
+        try:
+            return data.decode("utf-16")
+        except UnicodeDecodeError:
+            pass
+    for enc in _preferred_encodings():
+        try:
+            return data.decode(enc)
+        except (UnicodeDecodeError, LookupError):
+            continue
+    # Plan B: latin-1 maps every byte, replace anything unprintable.
+    return data.decode("latin-1", errors="replace")
+
+
+def read_text_file(path):
+    """Read a text file as UTF-8, falling back to the system codepage."""
+    with open(path, "rb") as f:
+        return decode_bytes(f.read())
+
+
+def run_capture(cmd):
+    """Run a command and return (returncode, stdout, stderr) as decoded text.
+
+    Capturing bytes and decoding here (instead of using text=True) keeps the
+    subprocess reader threads out of the ANSI codepage entirely.
+    """
+    result = subprocess.run(cmd, capture_output=True)
+    return result.returncode, decode_bytes(result.stdout), decode_bytes(result.stderr)
+
+
+def _make_console_lenient():
+    """Stop prints from crashing when the console codepage can't encode a
+    character (e.g. a Japanese filename on a cp1252 console, or a box-drawing
+    character on cp932). Characters that don't fit are substituted, not fatal."""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors="replace")
+        except Exception:
+            pass
+
+
+_make_console_lenient()
 
 # Settings read out of the active condor .bat. These mirror the "set" lines that
 # condor-builder.py writes, so the MKV tag describes the encode truthfully even
@@ -83,28 +154,14 @@ def get_script_version():
     version = "Unknown"
     if os.path.exists(script_path):
         try:
-            with open(script_path, "r", encoding="utf-8") as f:
-                content = f.read()
-                # Looks for pattern like: ver_str = "v2.2"
-                match = re.search(r'ver_str\s*=\s*["\'](v[0-9\.]+)["\']', content)
-                if match:
-                    version = match.group(1)
+            content = read_text_file(script_path)
+            # Looks for pattern like: ver_str = "v2.2"
+            match = re.search(r'ver_str\s*=\s*["\'](v[0-9\.]+)["\']', content)
+            if match:
+                version = match.group(1)
         except Exception:
             pass
     return version
-
-
-def get_condor_version():
-    """Executes condor.exe to get its version string."""
-    exe_path = os.path.join(TOOLS_DIR, "av1an", "condor.exe")
-    if not os.path.exists(exe_path):
-        return "Condor_Unknown"
-    try:
-        result = subprocess.run([exe_path, "--version"], capture_output=True, text=True, check=True)
-        line = (result.stdout.strip() or result.stderr.strip()).split("\n")[0].strip()
-        return line or "Condor_Unknown"
-    except Exception:
-        return "Condor_Unknown"
 
 
 def get_svt_av1_version():
@@ -114,8 +171,8 @@ def get_svt_av1_version():
         return "SVT-AV1_Unknown"
 
     try:
-        result = subprocess.run([exe_path, "--version"], capture_output=True, text=True, check=True)
-        output = result.stdout.strip() or result.stderr.strip()
+        _, out, err = run_capture([exe_path, "--version"])
+        output = out.strip() or err.strip()
         if not output:
             return "SVT-AV1_Unknown"
 
@@ -188,36 +245,38 @@ def parse_condor_batch(batch_name):
     key_lookup = {key.lower(): key for key in BAT_SETTINGS_KEYS}
 
     try:
-        with open(batch_path, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line.lower().startswith("set"):
-                    continue
+        # Read via read_text_file: a .bat re-saved by Notepad on a non-English
+        # system is written in the ANSI codepage, not UTF-8. Decoding must not
+        # throw here, or every setting silently falls back to its default.
+        for line in read_text_file(batch_path).splitlines():
+            line = line.strip()
+            if not line.lower().startswith("set"):
+                continue
 
-                clean_line = re.sub(r"^set\s+", "", line, flags=re.IGNORECASE).strip()
+            clean_line = re.sub(r"^set\s+", "", line, flags=re.IGNORECASE).strip()
 
-                key = None
-                val = None
+            key = None
+            val = None
 
-                # Check for set "VAR=VAL" syntax (Starts with quote)
-                if clean_line.startswith('"'):
-                    if "=" in clean_line:
-                        parts = clean_line.split("=", 1)
-                        key = parts[0].lstrip('"').strip()
-                        val = parts[1].strip()
-                        if val.endswith('"'):
-                            val = val[:-1]
-                else:
-                    # Standard set VAR=VAL
-                    if "=" in clean_line:
-                        parts = clean_line.split("=", 1)
-                        key = parts[0].strip()
-                        val = parts[1].strip()
-                        if val.startswith('"') and val.endswith('"'):
-                            val = val[1:-1]
+            # Check for set "VAR=VAL" syntax (Starts with quote)
+            if clean_line.startswith('"'):
+                if "=" in clean_line:
+                    parts = clean_line.split("=", 1)
+                    key = parts[0].lstrip('"').strip()
+                    val = parts[1].strip()
+                    if val.endswith('"'):
+                        val = val[:-1]
+            else:
+                # Standard set VAR=VAL
+                if "=" in clean_line:
+                    parts = clean_line.split("=", 1)
+                    key = parts[0].strip()
+                    val = parts[1].strip()
+                    if val.startswith('"') and val.endswith('"'):
+                        val = val[1:-1]
 
-                if key and key.lower() in key_lookup:
-                    settings[key_lookup[key.lower()]] = val
+            if key and key.lower() in key_lookup:
+                settings[key_lookup[key.lower()]] = val
 
     except Exception:
         pass
@@ -225,24 +284,41 @@ def parse_condor_batch(batch_name):
     return settings
 
 
-def svt_fork_tag_name(fork):
-    """Fork name as it appears inside the [brackets] of the tag."""
-    fork_key = (fork or "essential").strip().lower()
-    if fork_key in ("svt-av1-essential", "essential"):
-        return "svt-av1-essential"
-    if fork_key in ("svt-av1-hdr", "hdr"):
-        return "svt-av1-hdr"
-    if fork_key in ("5fish", "svt-av1-psy", "psy"):
-        return "svt-av1-psy 5fish"
-    return (fork or "essential").strip() or "svt-av1-essential"
+def build_target_quality_string(config):
+    """The Condor Target Quality settings, written outside the quoted encoder
+    settings because they are Condor's, not SVT-AV1's.
+
+    There is deliberately no --crf: Condor picks a quantizer per scene, so a
+    single CRF in the tag would be a lie. The Target Quality settings that
+    produced those quantizers are recorded instead.
+    """
+    parts = []
+
+    metric = (config.get("METRIC") or "").strip()
+    if metric:
+        parts.append(f"--target-metric {metric}")
+
+    target = (config.get("TARGET") or "").strip()
+    if target:
+        parts.append(f"--target {target}")
+
+    min_q = (config.get("MIN_QUANTIZER") or "").strip()
+    if min_q:
+        parts.append(f"--min-crf {min_q}")
+
+    max_q = (config.get("MAX_QUANTIZER") or "").strip()
+    if max_q:
+        parts.append(f"--max-crf {max_q}")
+
+    profile = (config.get("TARGET_PROFILE") or "").strip()
+    if profile:
+        parts.append(f"--target-profile {profile}")
+
+    return " ".join(parts)
 
 
-def build_settings_string(config):
-    """Rebuild the settings that describe this encode.
-
-    There is deliberately no --crf: Condor's Target Quality picks a quantizer
-    per scene, so a single CRF in the tag would be a lie. The Target Quality
-    settings that produced those quantizers are recorded instead.
+def build_encoder_settings_string(config):
+    """The SVT-AV1 settings, i.e. what goes inside settings: "...".
 
     Worker count, decoder threads and file paths are left out because they are
     machine-specific and say nothing about the resulting video.
@@ -255,31 +331,14 @@ def build_settings_string(config):
     if params:
         parts.append(normalize_fgs_table_path(strip_untagged_options(params)))
 
-    metric = (config.get("METRIC") or "").strip()
-    if metric:
-        parts.append(f"--target-metric {metric}")
-
-    target = (config.get("TARGET") or "").strip()
-    if target:
-        parts.append(f"--target {target}")
-
-    min_q = (config.get("MIN_QUANTIZER") or "").strip()
-    if min_q:
-        parts.append(f"--minimum-quantizer {min_q}")
-
-    max_q = (config.get("MAX_QUANTIZER") or "").strip()
-    if max_q:
-        parts.append(f"--maximum-quantizer {max_q}")
-
-    profile = (config.get("TARGET_PROFILE") or "").strip()
-    if profile:
-        parts.append(f"--target-profile {profile}")
-
     return " ".join(parts)
 
 
 def apply_tag_to_file(filepath, encoding_settings):
-    xml_template = f"""<?xml version="1.0"?>
+    # The encoding is declared explicitly so mkvpropedit reads the file as UTF-8
+    # regardless of the system codepage, and &/</> are escaped so a stray
+    # character in the parameters can't produce invalid XML.
+    xml_template = f"""<?xml version="1.0" encoding="UTF-8"?>
 <Tags>
   <Tag>
     <Targets>
@@ -287,7 +346,7 @@ def apply_tag_to_file(filepath, encoding_settings):
     </Targets>
     <Simple>
       <Name>Encoded_Library_Settings</Name>
-      <String>{encoding_settings}</String>
+      <String>{xml_escape(encoding_settings)}</String>
     </Simple>
   </Tag>
 </Tags>
@@ -300,12 +359,12 @@ def apply_tag_to_file(filepath, encoding_settings):
 
     try:
         print(f"Applying tag to: {filepath}")
-        subprocess.run(
-            [mkvpropedit, filepath, "--tags", "track:v1:" + tmp_path],
-            check=True,
-            capture_output=True
-        )
-        print("Success.")
+        code, out, err = run_capture([mkvpropedit, filepath, "--tags", "track:v1:" + tmp_path])
+        if code != 0:
+            message = (err.strip() or out.strip() or f"exit code {code}").split("\n")[0]
+            print(f"Error tagging {filepath}: {message}")
+        else:
+            print("Success.")
     except Exception as e:
         print(f"Error tagging {filepath}: {e}")
     finally:
@@ -322,17 +381,21 @@ def main():
 
     config = parse_condor_batch(batch_name)
     script_version = get_script_version()
-    condor_version = get_condor_version()
     svt_version = get_svt_av1_version()
-    fork_name = svt_fork_tag_name(config.get("fork"))
 
-    settings_str = build_settings_string(config)
+    target_quality_str = build_target_quality_string(config)
+    settings_str = build_encoder_settings_string(config)
 
-    full_string = (
-        f"Auto-Boost-Av1an {script_version} Condor target quality "
-        f"[{fork_name}] {condor_version} {svt_version} "
-        f'settings: "{settings_str}"'
+    # Condor's Target Quality settings sit unquoted before the encoder version;
+    # only the SVT-AV1 settings belong inside settings: "...".
+    head = " ".join(
+        part for part in (
+            f"Auto-Boost-Av1an {script_version} Condor target quality",
+            target_quality_str,
+            svt_version,
+        ) if part
     )
+    full_string = f'{head} settings: "{settings_str}"'
 
     print("-------------------------------------------------------------------------------")
     print(f"Scanned: {batch_name}.bat")
@@ -352,4 +415,10 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    # Plan B of last resort: tagging is cosmetic, so an unexpected failure here
+    # (encoding or otherwise) must never abort the encode. Report it and let the
+    # dispatcher carry on to muxing.
+    try:
+        main()
+    except Exception as e:
+        print(f"Tagging skipped: {type(e).__name__}: {e}")

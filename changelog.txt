@@ -1,5 +1,10 @@
 Changelog
 
+v3.3.6
+---------------------------------
+• Tagging no longer crashes or falls back to wrong settings when Windows "Language for non-Unicode
+  programs" is set to a non-English language, tool output and bat files are now read as UTF-8.
+
 v3.3.5
 ---------------------------------
 • AfterZone features added: automate adding crf and tf-strength custom levels to zones txt.
