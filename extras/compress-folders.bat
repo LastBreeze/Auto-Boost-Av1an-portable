@@ -5,7 +5,9 @@ cd /d "%~dp0.."
 :MENU
 cls
 echo For Windows 10 and 11, this will compress the VapourSynth and Tools folders
-echo to save about 60 percent of of space.
+echo to save about 60 percent of space. This uses NTFS file system compression,
+echo the compression itself is not transportable between PCs.
+echo There is no downside to this.
 echo.
 echo Press 1 to continue.
 echo Press 2 to exit.

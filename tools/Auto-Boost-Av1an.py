@@ -11,7 +11,7 @@
 # Av1an:             Native Windows Version (in VapourSynth folder OR in PATH)
 # SVT-AV1:           Native Windows Version
 # FFmpeg:            Windows version
-# FFVship:           Native Windows Version (portable FFVship_nvidia/FFVship_Vulkan folders) for SSIMU2 metrics
+# FFVship:           Native Windows Version (portable FFVship_nvidia/FFVship_amd/FFVship_Vulkan folders) for SSIMU2 metrics
 # vs-zip:            Required for XPSNR (Default metric) and SSIMU2 fallback
 
 # Auto-Boost-Essential
@@ -125,6 +125,7 @@ av1an_exe = resolve_tool(r"av1an\av1an.exe", "av1an")
 # Benchmarking writes the selected backend/gpuThreads to tools/workercount-ssimu2.txt.
 tools_dir = Path(__file__).parent.resolve()
 ffvship_nvidia_exe = resolve_tool(r"FFVship\FFVship_nvidia\FFVship.exe", "FFVship.exe")
+ffvship_amd_exe = resolve_tool(r"FFVship\FFVship_amd\FFVship.exe", "FFVship.exe")
 ffvship_vulkan_exe = resolve_tool(r"FFVship\FFVship_Vulkan\FFVship.exe", "FFVship.exe")
 ffvship_config_file = tools_dir / "workercount-ssimu2.txt"
 
@@ -144,7 +145,7 @@ parser.add_argument("-a", "--aggressive", action='store_true', help = "More aggr
 parser.add_argument("-u", "--unshackle", action='store_true', help = "Less restrictive boosting | Default: not active")
 parser.add_argument("--fast-params", help="Custom fast encoding parameters (SVT flags)")
 parser.add_argument("--final-params", help="Custom final encoding parameters (SVT flags passed to Av1an)")
-parser.add_argument("--ssimu2", help = "SSIMU2 mode: auto, gpu, vs-hip, ffvship, ffvship_nvidia, ffvship_vulkan, vs-zip | If omitted, defaults to XPSNR", default=None)
+parser.add_argument("--ssimu2", help = "SSIMU2 mode: auto, gpu, vs-hip, ffvship, ffvship_nvidia, ffvship_amd, ffvship_vulkan, vs-zip | If omitted, defaults to XPSNR", default=None)
 parser.add_argument("--ssimu2-cpu-workers", help = "GPU streams for FFVship or CPU workers for vs-zip | Default: 4", default="4")
 parser.add_argument("--workers", help="Number of Av1an workers | Default: 1", default=None)
 parser.add_argument("--photon-noise", help="Av1an photon noise strength | Default: 0", default="0")
@@ -570,6 +571,8 @@ if args.debug:
     print(f"Av1an Exists: {av1an_exe.exists()}")
     print(f"FFVship NVIDIA Path: {ffvship_nvidia_exe}")
     print(f"FFVship NVIDIA Exists: {ffvship_nvidia_exe.exists()}")
+    print(f"FFVship AMD Path: {ffvship_amd_exe}")
+    print(f"FFVship AMD Exists: {ffvship_amd_exe.exists()}")
     print(f"FFVship Vulkan Path: {ffvship_vulkan_exe}")
     print(f"FFVship Vulkan Exists: {ffvship_vulkan_exe.exists()}")
     print(f"Cropdetect Path: {cropdetect_script}")
@@ -1671,6 +1674,37 @@ def final_pass() -> None:
         console.print(f"[red]Final pass failed:[/red]\n{e}")
         raise SystemExit(1)
 
+# Each vship/FFVship build only runs on the hardware it was compiled for, so a
+# backend name is meaningless without its GPU variant. ssimu2-workercount.py
+# benchmarks all three and may name any of them as the winner.
+#   nvidia -> NVIDIA only     amd -> AMD only     vulkan -> NVIDIA/AMD/Intel
+GPU_VARIANTS = ("nvidia", "amd", "vulkan")
+
+VSHIP_DLLS = {
+    "nvidia": "libvship_NVIDIA.dll",
+    "amd": "libvship_AMD.dll",
+    "vulkan": "libvship_VULKAN.dll",
+}
+
+
+def _split_tool_variant(value: str) -> tuple[str, str | None]:
+    """Split a configured SSIMU2 tool string into (tool, variant).
+
+    Accepts every spelling that reaches this script: the names
+    ssimu2-workercount.py writes to workercount-ssimu2.txt ("ffvship_amd",
+    "vs-hip"), the DLL filenames ("libvship_AMD.dll"), and the spaced form the
+    .bat carries in custom-ssim2-tool ("ffvship amd"). The variant is None when
+    the string names no GPU build, so the caller keeps the one it already has.
+    """
+    value_l = (value or "").strip().lower().replace(" ", "-").replace("_", "-")
+    variant = next((v for v in GPU_VARIANTS if v in value_l), None)
+    if value_l.startswith(("libvship", "vs-hip")):
+        return "vs-hip", variant
+    if value_l.startswith("ffvship"):
+        return "ffvship", variant
+    return value_l, variant
+
+
 def _load_ffvship_config(default_gpu_threads: int) -> tuple[str, int]:
     """
     Reads tools/workercount-ssimu2.txt if present.
@@ -1699,7 +1733,7 @@ def _load_ffvship_config(default_gpu_threads: int) -> tuple[str, int]:
                         pass
                 elif key in ("ffvship_variant", "variant", "backend"):
                     value_l = value.lower()
-                    if value_l in ("nvidia", "vulkan"):
+                    if value_l in GPU_VARIANTS:
                         variant = value_l
     except Exception as e:
         if verbose:
@@ -1709,8 +1743,11 @@ def _load_ffvship_config(default_gpu_threads: int) -> tuple[str, int]:
 
 
 def _get_ffvship_exe(variant: str) -> Path:
-    if variant.lower() == "vulkan":
+    variant_l = (variant or "").lower()
+    if variant_l == "vulkan":
         return ffvship_vulkan_exe
+    if variant_l == "amd":
+        return ffvship_amd_exe
     return ffvship_nvidia_exe
 
 
@@ -1735,19 +1772,10 @@ def _load_ssimu2_config(default_workers: int) -> dict:
             value = value.strip()
             value_l = value.lower()
             if key == "tool":
-                cfg["tool"] = value_l
-                if value_l in ("libvship_nvidia.dll", "libvship-nvidia.dll", "vs-hip-nvidia"):
-                    cfg["tool"] = "vs-hip"
-                    cfg["variant"] = "nvidia"
-                elif value_l in ("libvship_vulkan.dll", "libvship-vulkan.dll", "vs-hip-vulkan"):
-                    cfg["tool"] = "vs-hip"
-                    cfg["variant"] = "vulkan"
-                elif value_l in ("ffvship-nvidia", "ffvship_nvidia") or ("ffvship" in value_l and "nvidia" in value_l):
-                    cfg["tool"] = "ffvship"
-                    cfg["variant"] = "nvidia"
-                elif value_l in ("ffvship-vulkan", "ffvship_vulkan") or ("ffvship" in value_l and "vulkan" in value_l):
-                    cfg["tool"] = "ffvship"
-                    cfg["variant"] = "vulkan"
+                tool, tool_variant = _split_tool_variant(value_l)
+                cfg["tool"] = tool
+                if tool_variant:
+                    cfg["variant"] = tool_variant
             elif key in ("filter-tool", "downscale-tool"):
                 cfg["filter_tool"] = value_l
             elif key == "workercount":
@@ -1762,7 +1790,7 @@ def _load_ssimu2_config(default_workers: int) -> dict:
                 except ValueError:
                     pass
             elif key in ("variant", "backend", "ffvship-variant", "vship-variant"):
-                if value_l in ("nvidia", "vulkan"):
+                if value_l in GPU_VARIANTS:
                     cfg["variant"] = value_l
     except Exception as e:
         if verbose:
@@ -1780,7 +1808,7 @@ def _activate_vship_plugin(variant: str) -> str | None:
     deleting/re-copying the same DLL raises WinError 32. Treat an already-loaded vship
     plugin as success instead of trying to overwrite a locked file.
     """
-    dll_name = "libvship_VULKAN.dll" if variant.lower() == "vulkan" else "libvship_NVIDIA.dll"
+    dll_name = VSHIP_DLLS.get((variant or "").lower(), VSHIP_DLLS["nvidia"])
     base_dir = tools_dir.parent
     src = tools_dir / "vs-hip" / dll_name
     dst_dir = base_dir / "VapourSynth" / "vs-plugins"
@@ -1998,18 +2026,15 @@ def calculate_metric() -> None:
     requested_tool = ssimu2
     if requested_tool in ("auto", "gpu"):
         requested_tool = cfg.get("tool", "auto")
-    if requested_tool in ("libvship_nvidia.dll", "libvship-nvidia.dll", "vs-hip-nvidia"):
-        requested_tool = "vs-hip"
-        cfg["variant"] = "nvidia"
-    elif requested_tool in ("libvship_vulkan.dll", "libvship-vulkan.dll", "vs-hip-vulkan"):
-        requested_tool = "vs-hip"
-        cfg["variant"] = "vulkan"
-    elif requested_tool in ("ffvship_nvidia", "ffvship-nvidia") or ("ffvship" in requested_tool and "nvidia" in requested_tool):
-        requested_tool = "ffvship"
-        cfg["variant"] = "nvidia"
-    elif requested_tool in ("ffvship_vulkan", "ffvship-vulkan") or ("ffvship" in requested_tool and "vulkan" in requested_tool):
-        requested_tool = "ffvship"
-        cfg["variant"] = "vulkan"
+    # Collapse every backend spelling to a bare tool name plus its GPU variant.
+    # An unrecognised variant-qualified name must never survive this step: the
+    # dispatch checks below only match "vs-hip"/"ffvship", so anything else
+    # would silently skip both GPU paths and land in the vs-zip CPU fallback.
+    parsed_tool, parsed_variant = _split_tool_variant(requested_tool)
+    if parsed_tool in ("vs-hip", "ffvship"):
+        requested_tool = parsed_tool
+        if parsed_variant:
+            cfg["variant"] = parsed_variant
 
     if requested_tool == "vs-hip":
         dll_name = _activate_vship_plugin(cfg.get("variant", "nvidia"))

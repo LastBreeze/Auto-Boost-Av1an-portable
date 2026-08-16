@@ -75,6 +75,15 @@ AUTO_BOOST_SCRIPT = TOOLS_DIR / "Auto-Boost-Av1an.py"
 SKIP = 3
 STALL_TIMEOUT = 10.0  # Seconds to wait before killing stalled process
 
+# FFVship watchdog. FFVship talks to the GPU driver directly, so a bad
+# driver/runtime state can leave it alive but permanently silent. Once it is
+# running it reuses STALL_TIMEOUT like every other benchmark; only the startup
+# window is longer, because unlike the in-process vs-hip/vs-zip tests this is a
+# cold-started exe that must create a GPU device (and on a first AMD/Vulkan run,
+# compile shaders) before it prints anything.
+FFVSHIP_INIT_TIMEOUT = 30.0   # No output at all -> assume it never started
+FFVSHIP_MAX_RUNTIME = 300.0   # Hard ceiling regardless of chatter
+
 # vs-zip worker sweet-spot tuning.
 # The vs-zip count is found by measuring REAL SSIMU2 throughput (fps) at
 # several worker counts and keeping the fastest - the only reliable signal on
@@ -807,6 +816,37 @@ src.set_output()
         print(f"Error: Fast pass generation failed. {e}", file=sys.stderr)
         return None
 
+def _kill_proc_tree(proc):
+    """Kill a Popen and anything it spawned. A wedged FFVship can be holding a
+    GPU context, so leaving orphans behind would poison the next stream count."""
+    if proc is None or proc.poll() is not None:
+        return
+    try:
+        parent = psutil.Process(proc.pid)
+        children = parent.children(recursive=True)
+    except Exception:
+        children = []
+        parent = None
+
+    for p in children:
+        try:
+            p.kill()
+        except Exception:
+            pass
+    try:
+        if parent is not None:
+            parent.kill()
+        else:
+            proc.kill()
+    except Exception:
+        pass
+
+    try:
+        proc.wait(timeout=10)
+    except Exception:
+        pass
+
+
 def _print_progress(percent: float, end: bool = False, elapsed: float = 0.0):
     if end:
         sys.stderr.write(f"\r      Progress: 100.0%  (Time: {elapsed:.2f}s)\n")
@@ -1069,27 +1109,90 @@ def benchmark_ffvship(exe_path: Path, encoded_file: Path, gpu_threads: int, vari
     if VERBOSE:
         print(f"   [FFVship CMD] {' '.join(cmd)}", file=sys.stderr)
     
+    def _reader_thread(stdout_pipe, q: queue.Queue):
+        # Iterating the pipe blocks forever when FFVship hangs, so it is done on
+        # a daemon thread and the main loop keeps its own clock.
+        try:
+            for ln in stdout_pipe:
+                q.put(ln)
+        except Exception:
+            pass
+        finally:
+            q.put(None)
+
     fps = 0.0
     start_time = time.time()
+    proc = None
+    timed_out = False
     try:
         proc = subprocess.Popen(
-            cmd, 
-            stdout=subprocess.PIPE, 
-            stderr=subprocess.STDOUT, 
-            text=True, 
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
             errors="replace",
             cwd=str(exe_path.parent)
         )
-        for line in proc.stdout:
+
+        q_lines: queue.Queue = queue.Queue()
+        t = threading.Thread(target=_reader_thread, args=(proc.stdout, q_lines), daemon=True)
+        t.start()
+
+        saw_output = False
+        last_output_time = start_time
+        hard_deadline = start_time + FFVSHIP_MAX_RUNTIME
+
+        while True:
+            now = time.time()
+
+            if now > hard_deadline and proc.poll() is None:
+                print(f"   [FFVship Timeout] Exceeded {FFVSHIP_MAX_RUNTIME:.0f}s. Killing.", file=sys.stderr)
+                timed_out = True
+                break
+
+            if not saw_output:
+                if (now - start_time > FFVSHIP_INIT_TIMEOUT) and proc.poll() is None:
+                    print(f"   [FFVship Timeout] No output after {FFVSHIP_INIT_TIMEOUT:.0f}s. Killing.", file=sys.stderr)
+                    timed_out = True
+                    break
+            elif (now - last_output_time > STALL_TIMEOUT) and proc.poll() is None:
+                print(f"   [FFVship Timeout] Stalled for {STALL_TIMEOUT:.0f}s. Killing.", file=sys.stderr)
+                timed_out = True
+                break
+
+            if proc.poll() is not None and q_lines.empty():
+                break
+
+            try:
+                line = q_lines.get(timeout=0.25)
+            except queue.Empty:
+                continue
+
+            if line is None:
+                break
+
+            saw_output = True
+            last_output_time = time.time()
+
             if VERBOSE:
                 print(f"   [FFVship OUT] {line.strip()}", file=sys.stderr)
             match = re.search(r"at\s+([0-9.]+)\s+fps", line, re.IGNORECASE)
             if match:
                 fps = float(match.group(1))
-        
-        proc.wait(timeout=60)
+
+        if timed_out:
+            _kill_proc_tree(proc)
+            return 0.0, time.time() - start_time
+
+        try:
+            proc.wait(timeout=30)
+        except subprocess.TimeoutExpired:
+            print("   [FFVship Timeout] Output ended but process would not exit. Killing.", file=sys.stderr)
+            _kill_proc_tree(proc)
+            return 0.0, time.time() - start_time
+
         elapsed_time = time.time() - start_time
-        
+
         if not VERBOSE:
             print(f"      Done. (Time: {elapsed_time:.2f}s)", file=sys.stderr)
 
@@ -1112,7 +1215,8 @@ def benchmark_ffvship(exe_path: Path, encoded_file: Path, gpu_threads: int, vari
     except Exception as e:
         elapsed_time = time.time() - start_time
         print(f"   [FFVship Error] {e}", file=sys.stderr)
-        
+        _kill_proc_tree(proc)
+
     return fps, elapsed_time
 
 def run_ffvship_suite(exe_path: Path, variant_name: str, encoded_file: Path):
@@ -1126,10 +1230,16 @@ def run_ffvship_suite(exe_path: Path, variant_name: str, encoded_file: Path):
         if s == 1 and fps <= 0.0:
             print(f"   [FFVship-{variant_name}] Stream=1 failed. Skipping remaining tests.", file=sys.stderr)
             return 0.0, 1, 0.0
-            
-        if fps > 0:
-            results.append((fps, s, elapsed_time))
-            
+
+        if fps <= 0.0:
+            # A higher stream count that dies/hangs (VRAM pressure, wedged GPU
+            # context) will only get worse, so stop instead of paying the
+            # watchdog timeout again for every remaining count.
+            print(f"   [FFVship-{variant_name}] Streams={s} failed. Keeping best of 1-{s - 1}.", file=sys.stderr)
+            break
+
+        results.append((fps, s, elapsed_time))
+
     if not results:
         return 0.0, 1, 0.0
         
