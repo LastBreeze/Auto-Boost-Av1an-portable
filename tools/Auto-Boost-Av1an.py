@@ -57,6 +57,19 @@ def ensure_vs_plugin_path():
 
 ensure_vs_plugin_path()
 
+# Silence the core's plugin-load chatter (API3 deprecation notices, duplicate
+# plugin DLLs). Must run before the first vs.core access, since that is what
+# triggers the autoload that emits them.
+try:
+    import sys as _quiet_sys, os as _quiet_os
+    _quiet_dir = _quiet_os.path.dirname(_quiet_os.path.abspath(__file__))
+    if _quiet_dir not in _quiet_sys.path:
+        _quiet_sys.path.insert(0, _quiet_dir)
+    from vs_quiet import silence_plugin_noise as _silence_plugin_noise
+    _silence_plugin_noise()
+except Exception:
+    pass
+
 from vstools import vs, core, depth, DitherType, clip_async_render
 try:
     from vstools.functions.progress import get_render_progress, FPSColumn
@@ -91,8 +104,11 @@ from contextlib import contextmanager
 import numpy as np
 import concurrent.futures
 from svt_fork_setup import setup_svt_av1_fork
+import tonemap_backend
+import source_filter
+import vpy_template
 
-ver_str = "v3.3.6"
+ver_str = "v3.4.3"
 
 # --- TOOL PATHS HELPER ---
 def resolve_tool(portable_path_str: str, binary_name: str) -> Path:
@@ -160,7 +176,7 @@ parser.add_argument("--debug", action='store_true', help = "Checks the installat
 parser.add_argument("--fork", help="SVT-AV1 fork to copy before encoding: 5fish, essential, hdr, custom | Default: essential", default="essential")
 parser.add_argument("--avx512", action='store_true', help="Deprecated spelling of --arch avx512")
 parser.add_argument("--arch", help="CPU build of the SVT-AV1 fork to use: x86-64-v3, znver2, avx512 | Default: x86-64-v3", default=None)
-parser.add_argument("--tonemap", nargs="?", const="true", default="false", help="Tonemap HDR to SDR (BT.709) via libplacebo inside the VapourSynth script: true/false | Default: false")
+parser.add_argument("--tonemap", nargs="?", const="true", default="false", help="Tonemap HDR to SDR (BT.709) inside the VapourSynth script, via libplacebo or the CPU fallback depending on the GPU: true/false | Default: false")
 
 args = parser.parse_args()
 
@@ -219,6 +235,13 @@ def get_script_setting(settings: dict[str, str], key_name: str, default_value: s
 
 
 script_settings = load_script_settings()
+
+# video-input\template.vpy, when it exists, is the filter chain: the settings.txt
+# crop/downscale/dehalo/denoise/deband keys below stop being read. It is looked
+# up here, before those keys are validated, so a settings.txt that would be
+# refused outright (both dehalo switches on, say) cannot block a run that is
+# never going to use it.
+vpy_template_file = vpy_template.find_template(args.input)
 
 # Load Settings
 s_crop_mode = get_script_setting(script_settings, "crop", "auto")
@@ -352,7 +375,7 @@ if _stale_dehalo_keys:
 # what destroys thin line art, so this stops the run rather than silently
 # picking a winner. Checked here, at settings-parse time, so nothing is encoded
 # before the user hears about it.
-if do_dehalo_bool and do_fine_dehalo_bool:
+if do_dehalo_bool and do_fine_dehalo_bool and vpy_template_file is None:
     print("ERROR: dehalo=True and fine_dehalo=True are mutually exclusive.")
     print("       Set one of them to False in settings.txt.")
     print("       [dehalo] warps edges inward (edge_cleaner); [fine_dehalo] blurs")
@@ -472,7 +495,10 @@ else:
 
 # Files
 vpy_file = tmp_dir / f"{src_file.stem}.vpy"
-cache_file = tmp_dir / f"{src_file.stem}.ffindex"
+# ffms2 unless tools\source-filter-override.txt says otherwise. The two filters
+# name their index differently, so the cache path follows the choice.
+active_source_filter = source_filter.resolve()
+cache_file = source_filter.cache_path(tmp_dir, src_file.stem, active_source_filter)
 # Fast pass is now MKV
 fast_output_file = tmp_dir / f"{src_file.stem}_fastpass.mkv"
 # Final output
@@ -965,9 +991,14 @@ def report_crop_status(mode: str, top: int, bottom: int, left: int, right: int) 
 
 
 def report_filter_status() -> None:
+    # Printed whether or not any filter is on: it decides how every frame in the
+    # chain is decoded, so it belongs with the rest of the .vpy summary.
+    console.print(f"[blue]Source filter:[/blue] {source_filter.describe(active_source_filter)}")
     active_filters = []
     if tonemap_bool:
-        active_filters.append("tonemap: HDR -> SDR (BT.709) via libplacebo")
+        active_filters.append(
+            tonemap_backend.describe_backend(tonemap_backend_name, tonemap_backend_reason)
+        )
     if do_downscale_bool:
         active_filters.append(f"downscale: target_resolution={s_target_res}, kernel_type={s_kernel}")
     if do_dehalo_bool:
@@ -1148,6 +1179,16 @@ def detect_crop_values(source_path: Path) -> tuple[int, int, int, int]:
     return t, b, l, r
 
 # Generate VPY file
+
+# Which tonemap implementation lands in the .vpy. The GPU is only probed when
+# there is something to tonemap, and the probe result is cached for the rest of
+# the run. See tools/tonemap_backend.py: vs-placebo's Tonemap hands back black
+# frames on Intel GPUs, so those fall back to the CPU implementation.
+tonemap_backend_name = tonemap_backend.PLACEBO
+tonemap_backend_reason = ""
+if tonemap_bool:
+    tonemap_backend_name, tonemap_backend_reason = tonemap_backend.resolve_backend(script_settings)
+
 requested_crop_mode = s_crop_mode.strip().lower()
 if not args.autocrop:
     crop_mode = "off"
@@ -1182,24 +1223,102 @@ filter_state_marker = (
     f"denoise={do_denoise_bool}, deband={do_deband_bool}"
 )
 
-rebuild_vpy = not os.path.exists(vpy_file)
-if not rebuild_vpy:
+# video-input\template.vpy short-circuits all of this: the user's script is the
+# filter chain, and only the source path is filled in for this input. Nothing
+# below reads settings.txt in that case - the crop in the template is the crop.
+template_rendered = False
+if vpy_template_file is not None:
+    # --tonemap and --convert-to-YUV420P10 are steps the generated script builds
+    # into the chain, and a template IS the chain, so they have nowhere to go.
+    # Tonemapping stops the run rather than quietly encoding an HDR source as if
+    # it were SDR and wasting the whole encode.
+    if tonemap_bool:
+        _template_name = os.path.basename(vpy_template_file)
+        console.print(f"[red]ERROR: this .bat asks for --tonemap, but {_template_name} is doing[/red]")
+        console.print("[red]       the filtering and a template cannot be tonemapped from outside.[/red]")
+        console.print(f"[red]       Add the tonemap to {_template_name} - it was written with the[/red]")
+        console.print("[red]       lines you need in a comment near the bottom - or delete the[/red]")
+        console.print("[red]       template to go back to the generated script.[/red]")
+        raise SystemExit(1)
+    if convert_yuv420p10:
+        console.print(f"[yellow]--convert-to-YUV420P10 does not apply to "
+                      f"{os.path.basename(vpy_template_file)}; the template's own "
+                      f"finalize_clip() decides the output format.[/yellow]")
+    # Same for --autocrop: detecting a crop per file would mean rewriting a
+    # script the user edits by hand, so the template's std.Crop line wins.
+    if args.autocrop:
+        console.print(f"[yellow]--autocrop does not apply to "
+                      f"{os.path.basename(vpy_template_file)}; the std.Crop line in the "
+                      f"template is the crop.[/yellow]")
+
     try:
-        with open(vpy_file, "r", encoding="utf-8", errors="replace") as _f:
-            _existing_vpy_text = _f.read()
-        if ("do_tonemap = True" in _existing_vpy_text) != tonemap_bool:
-            console.print("[yellow]Existing VapourSynth script tonemap state differs from --tonemap; rebuilding.[/yellow]")
+        _template_text = vpy_template.read_template(vpy_template_file)
+        _template_stamp = vpy_template.render_stamp(_template_text, src_file)
+        _template_crop = vpy_template.read_crop_values(_template_text)
+
+        _template_reused = False
+        if os.path.exists(vpy_file):
+            try:
+                with open(vpy_file, "r", encoding="utf-8", errors="replace") as _f:
+                    _template_reused = vpy_template.is_rendered_stamp(_f.read(), _template_stamp)
+            except OSError:
+                _template_reused = False
+
+        if not _template_reused:
+            _template_script = vpy_template.render(_template_text, src_file,
+                                                   stamp=_template_stamp)
+            vpy_template.write_rendered(vpy_file, _template_script)
+    except vpy_template.TemplateError as e:
+        console.print(f"[red]ERROR: {os.path.basename(vpy_template_file)} cannot be used: {e}[/red]")
+        console.print("[red]       Fix the template, or delete it to go back to the generated script.[/red]")
+        raise SystemExit(1)
+
+    console.print(f"[bold green]Filtering script:[/bold green] {vpy_template_file} "
+                  "[dim](settings.txt filter settings are not used)[/dim]")
+    if _template_crop is None:
+        console.print("[bold green]Crop:[/bold green] no crop line in the template")
+    elif any(_template_crop):
+        console.print(f"[bold green]Crop:[/bold green] from the template "
+                      f"(top={_template_crop[0]}, bottom={_template_crop[1]}, "
+                      f"left={_template_crop[2]}, right={_template_crop[3]})")
+    else:
+        console.print("[bold green]Crop:[/bold green] from the template, nothing cropped")
+    if _template_reused:
+        console.print(f"[dim]Reusing rendered template: {vpy_file}[/dim]")
+    else:
+        console.print(f"[dim]Rendered template to: {vpy_file}[/dim]")
+
+    template_rendered = True
+    rebuild_vpy = False
+else:
+    rebuild_vpy = not os.path.exists(vpy_file)
+    if not rebuild_vpy:
+        try:
+            with open(vpy_file, "r", encoding="utf-8", errors="replace") as _f:
+                _existing_vpy_text = _f.read()
+            if ("do_tonemap = True" in _existing_vpy_text) != tonemap_bool:
+                console.print("[yellow]Existing VapourSynth script tonemap state differs from --tonemap; rebuilding.[/yellow]")
+                rebuild_vpy = True
+            elif tonemap_bool and tonemap_backend.vpy_backend_marker(tonemap_backend_name) not in _existing_vpy_text:
+                # Written for the other tonemap backend, e.g. carried over from a
+                # machine whose GPU could run the libplacebo path.
+                console.print("[yellow]Existing VapourSynth script uses a different tonemap backend; rebuilding.[/yellow]")
+                rebuild_vpy = True
+            elif filter_state_marker not in _existing_vpy_text:
+                console.print("[yellow]Existing VapourSynth script filter state differs from settings.txt; rebuilding.[/yellow]")
+                rebuild_vpy = True
+            elif "_plugin_dir" not in _existing_vpy_text:
+                # Written before the vs-plugins fallback existed; on VapourSynth 78
+                # it would fail to find ffms2.
+                console.print("[yellow]Existing VapourSynth script predates the plugin fallback; rebuilding.[/yellow]")
+                rebuild_vpy = True
+            elif not source_filter.marker_matches(_existing_vpy_text, active_source_filter):
+                # tools\source-filter-override.txt changed since this script was
+                # written; without the rebuild the old source filter would stay.
+                console.print("[yellow]Existing VapourSynth script uses a different source filter; rebuilding.[/yellow]")
+                rebuild_vpy = True
+        except Exception:
             rebuild_vpy = True
-        elif filter_state_marker not in _existing_vpy_text:
-            console.print("[yellow]Existing VapourSynth script filter state differs from settings.txt; rebuilding.[/yellow]")
-            rebuild_vpy = True
-        elif "_plugin_dir" not in _existing_vpy_text:
-            # Written before the vs-plugins fallback existed; on VapourSynth 78
-            # it would fail to find ffms2.
-            console.print("[yellow]Existing VapourSynth script predates the plugin fallback; rebuilding.[/yellow]")
-            rebuild_vpy = True
-    except Exception:
-        rebuild_vpy = True
 
 if rebuild_vpy:
     
@@ -1220,7 +1339,7 @@ if rebuild_vpy:
     deband_line = s_deband_setting if do_deband_bool and s_deband_setting else ""
 
     # Template
-    vpy_template = """
+    vpy_source_template = """
 from vstools import vs, core, initialize_clip, finalize_clip
 try:
     from vsdenoise import DFTTest
@@ -1230,11 +1349,12 @@ core.max_cache_size = 1024
 {filter_state}
 
 # VapourSynth 78 dropped the portable.vs autoload of the package's vs-plugins
-# folder, so ffms2/DFTTest/placebo/vszip are loaded by hand when the core did
-# not pick them up on its own. A no-op on installs that still autoload.
+# folder, so the source filter/DFTTest/placebo/vszip are loaded by hand when the
+# core did not pick them up on its own. A no-op on installs that still autoload.
 import os as _os
 _plugin_dir = r"{plugin_dir}"
-if _plugin_dir and not hasattr(core, "ffms2") and _os.path.isdir(_plugin_dir):
+_have_plugins = hasattr(core, "ffms2") and hasattr(core, "{source_plugin}")
+if _plugin_dir and not _have_plugins and _os.path.isdir(_plugin_dir):
     for _dll in sorted(_os.listdir(_plugin_dir)):
         if _dll.lower().endswith(".dll"):
             try:
@@ -1243,7 +1363,8 @@ if _plugin_dir and not hasattr(core, "ffms2") and _os.path.isdir(_plugin_dir):
                 pass
 
 # Load Source
-src = core.ffms2.Source(source=r"{source}", cachefile=r"{cache}")
+{source_marker}
+src = {source_call}
 
 # Conversion
 if {convert}:
@@ -1252,21 +1373,13 @@ if {convert}:
 # Initialize (Fixes Placebo bitdepth error by ensuring 16-bit)
 src = initialize_clip(src)
 
-# Tonemap HDR -> SDR (libplacebo; libvs_placebo.dll autoloads from the plugins directory)
-do_tonemap = {tonemap}
-if do_tonemap:
-    src = core.fmtc.bitdepth(src, bits=16)
-    src = core.placebo.Tonemap(src, src_csp=1, dst_csp=0, dynamic_peak_detection=1, gamut_mapping=1, tone_mapping_function=1, metadata=0, contrast_recovery=0.0, smoothing_period=20.0, percentile=100.0)
-    # Tonemap returns RGB or 4:4:4 output; SVT-AV1 only supports 4:2:0, so convert
-    # back to YUV420P16 here. finalize_clip then produces the same 10-bit
-    # YUV420P10 output as the non-tonemap pipeline.
-    if src.format.color_family == vs.RGB:
-        src = src.resize.Bicubic(format=vs.YUV420P16, matrix_s="709")
-    elif src.format.id != vs.YUV420P16:
-        src = src.resize.Bicubic(format=vs.YUV420P16)
-    src = src.std.SetFrameProps(_Matrix=1, _Transfer=1, _Primaries=1)
+{tonemap_block}
 
-# DEHALO (settings.txt [dehalo]; always runs before denoise)
+# DENOISE (settings.txt [denoise]). Runs first: the dehalos below work off the
+# denoised clip, so they are not sharpening grain back up.
+{denoise_line}
+
+# DEHALO (settings.txt [dehalo]; always runs after denoise)
 do_dehalo = {dehalo}
 if do_dehalo:
     from vsdehalo import edge_cleaner
@@ -1291,7 +1404,7 @@ if do_dehalo:
         edgemask=dehalo_edgemask,
     )
 
-# FINE_DEHALO (settings.txt [fine_dehalo]; the alternative to [dehalo], also before denoise)
+# FINE_DEHALO (settings.txt [fine_dehalo]; the alternative to [dehalo], also after denoise)
 do_fine_dehalo = {fine_dehalo}
 if do_fine_dehalo:
     from vsdehalo import fine_dehalo as _fine_dehalo
@@ -1339,8 +1452,8 @@ if do_fine_dehalo:
         contra={fd_contra},
     )
 
-# Optional settings.txt denoise/deband hooks
-{denoise_line}
+# DEBAND (settings.txt [deband]). Last of the four, so it grades the picture
+# the encoder is actually handed.
 {deband_line}
 
 # 1. CROP
@@ -1403,9 +1516,10 @@ final.set_output(0)
 
     # Write Windows VPY (Absolute paths okay here for local python)
     with open(vpy_file, 'w') as file:
-        file.write(vpy_template.format(
-            source=src_file,
-            cache=cache_file,
+        file.write(vpy_source_template.format(
+            source_call=source_filter.source_call(active_source_filter, src_file, cache_file),
+            source_marker=source_filter.marker(active_source_filter),
+            source_plugin=source_filter.PLUGIN_ATTR[active_source_filter],
             plugin_dir=vs_plugin_dir(),
             ct=crop_top,
             cb=crop_bottom,
@@ -1415,7 +1529,7 @@ final.set_output(0)
             target_res=s_target_res,
             kernel=s_kernel,
             convert=convert_yuv420p10,
-            tonemap=str(tonemap_bool),
+            tonemap_block=tonemap_backend.vpy_tonemap_block(tonemap_backend_name, tonemap_bool),
             dehalo=str(do_dehalo_bool),
             dh_strength=dehalo_strength,
             dh_rmode=dehalo_rmode,
@@ -1436,12 +1550,50 @@ final.set_output(0)
             deband_line=deband_line,
             filter_state=filter_state_marker
         ))
-else:
+elif not template_rendered:
     existing_crop_values = parse_crop_values_from_vpy(vpy_file)
     if existing_crop_values is None:
         existing_crop_values = (0, 0, 0, 0)
     report_crop_status(crop_mode, *existing_crop_values)
     report_filter_status()
+
+
+def load_vpy_clip(script_path) -> vs.VideoNode:
+    """Run a .vpy in this process and hand back the clip it produced.
+
+    A generated script always calls its clip "src", with "final" for the
+    finalized version, but video-input\\template.vpy is written by hand and
+    neither name is guaranteed: the template is rendered verbatim apart from the
+    source path, and the one thing every .vpy must do is set output 0. So the
+    names are tried first, which covers the generated script and every template
+    that keeps its shape, and output 0 is the fallback. template-preview.py
+    reads the output node for the same reason.
+
+    The namespace is a single dict used as both globals and locals, which is how
+    a module runs. Two dicts give class-body scoping instead, where a function
+    defined in the script cannot see the script's own top-level names - so a
+    template with a helper in it dies here with a NameError that VSPipe, and
+    therefore av1an, never raises.
+    """
+    script_path = Path(script_path)
+
+    # Outputs live on the core and this runs several times per encode, so a
+    # stale output 0 from an earlier call must not stand in for a missing one.
+    vs.clear_outputs()
+
+    namespace: dict = {"__name__": "__vpy__", "__file__": str(script_path)}
+    source = script_path.read_text(encoding="utf-8", errors="replace")
+    exec(compile(source, str(script_path), "exec"), namespace, namespace)
+
+    clip = namespace.get("final") or namespace.get("src")
+    if clip is None:
+        output = vs.get_outputs().get(0)
+        clip = getattr(output, "clip", output)
+    if not isinstance(clip, vs.VideoNode):
+        raise RuntimeError(
+            f"{script_path.name} produced no video clip: it defines neither "
+            f"'final' nor 'src', and sets nothing on output 0.")
+    return clip
 
 
 def get_file_info(vfile: Path, mode: str) -> tuple[list[int], bool, int, int, int, int, int]:
@@ -1452,20 +1604,26 @@ def get_file_info(vfile: Path, mode: str) -> tuple[list[int], bool, int, int, in
 
     if kf_file.exists() and mode == "src" and (stage != 0 or resume):
         with open(kf_file, "r") as file:
-            print("Loading cached scene information...")
             lines = file.readlines()
+        # A run that died while this file was being written leaves a short or
+        # garbled cache behind. Without this guard every later --resume dies
+        # with an IndexError instead of just recalculating the scene info.
+        try:
+            if len(lines) < 6:
+                raise ValueError(f"only {len(lines)} line(s)")
+            print("Loading cached scene information...")
             return [int(line.strip()) for line in lines[1:-3]], lines[0].strip() == "True", int(lines[-5].strip()) , int(lines[-4].strip()) , int(lines[-3].strip()), int(lines[-2].strip()), int(lines[-1].strip())
+        except (ValueError, IndexError) as e:
+            console.print(f"[yellow]Ignoring corrupt scene cache {kf_file.name} ({e}); recalculating.[/yellow]")
     
     # Setup VPY environment to get src info from Windows VPY
-    vpy_vars = {}
-    exec(open(vpy_file).read(), globals(), vpy_vars)
-    
     if mode == "src":
-        # Prefer "final" (10-bit) if available, otherwise "src"
-        src = vpy_vars.get("final", vpy_vars["src"])
+        src = load_vpy_clip(vpy_file)
     else:
-        # For encoded file (MKV/IVF), we use FFMS2
-        src = core.ffms2.Source(source=vfile, cache=False)
+        # For an encoded file (MKV/IVF) the clip is opened directly rather than
+        # through the .vpy, with the same source filter the .vpy uses so the
+        # frame counts on both sides of a comparison come from the same decoder.
+        src = source_filter.open_source(core, active_source_filter, vfile)
 
     nframe = len(src)
     if mode == "len":
@@ -1552,10 +1710,8 @@ def fast_pass() -> None:
     if needs_crf:
         # Load VPY to check for HR content (High Resolution)
         try:
-            vpy_vars = {}
-            exec(open(vpy_file).read(), globals(), vpy_vars)
-            # Use 'final' if available to get correct resolution if downscaled
-            src = vpy_vars.get("final", vpy_vars["src"])
+            # 'final' is preferred so a downscale in the chain is reflected here.
+            src = load_vpy_clip(vpy_file)
             hr = src.width * src.height > 1920 * 1080
         except Exception as e:
             if verbose: console.print(f"[yellow]Warning: Could not determine resolution from VPY, defaulting hr=False. Error: {e}[/yellow]")
@@ -1936,18 +2092,16 @@ def _load_ffvship_scores(json_path: Path) -> list[float]:
 
 def calculate_metric() -> None:
     # Use Windows VPY for source information and XPSNR / vs-zip paths.
-    vpy_vars = {}
-    exec(open(vpy_file).read(), globals(), vpy_vars)
-    # Use 'final' (10-bit) if available, falling back to 'src'
-    # This prevents "XPSNR only supports 8 or 10 bit clips" if src is 16-bit
-    source_clip = vpy_vars.get("final", vpy_vars["src"])
+    # 'final' (10-bit) is preferred over 'src', which prevents
+    # "XPSNR only supports 8 or 10 bit clips" when src is 16-bit.
+    source_clip = load_vpy_clip(vpy_file)
     
     # Read Fast Pass MKV
     try:
         if not fast_output_file.exists():
              console.print("[red]Fast pass output file not found. Did the fast pass fail?[/red]")
              raise SystemExit(1)
-        encoded_clip = core.ffms2.Source(source=fast_output_file, cache=False)
+        encoded_clip = source_filter.open_source(core, active_source_filter, fast_output_file)
     except Exception as e:
         console.print(f"[red]Error indexing fast pass file: {e}[/red]")
         raise SystemExit(1)

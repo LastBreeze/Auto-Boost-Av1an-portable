@@ -1,9 +1,31 @@
 Changelog
 
-v3.3.6
+v3.4.3
+---------------------------------
+• Bugfix for auto crop
+• Explicit settings location for onnx ai models used for rescale
+
+v3.4.2
+---------------------------------
+• VapourSynth updated to R79
+• vsjetpack updated to v2.2.2
+• GUI option added to bat-builder
+• Updated svt-av1 5fish to v2.3.260819
+
+v3.4.1
+---------------------------------
+• template.vpy can now rescale anime. It is written with three ready-made rescale sections, all commented
+  out: DirectML (any GPU), NVIDIA and AMD. Create template.vpy using bat-builder advanced tools.
+• template.vpy now owns cropping: edit the std.Crop line in it and check the result with
+  template-preview.bat. While the file exists, settings.txt crop and auto crop in your .bat files do nothing.
+
+v3.4
 ---------------------------------
 • Tagging no longer crashes or falls back to wrong settings when Windows "Language for non-Unicode
   programs" is set to a non-English language, tool output and bat files are now read as UTF-8.
+• Added workaround for Intel ARC to do HDR to SDR tonemapping.
+• New advanced tools option: write template.vpy to video-input. This saves your settings.txt filters
+  as a plain VapourSynth script you can edit, so you can use filters settings.txt has no setting for.
 
 v3.3.5
 ---------------------------------

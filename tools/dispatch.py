@@ -1,3 +1,15 @@
+# Plugin-load chatter from VapourSynth children (API3 deprecation notices,
+# duplicate plugin DLLs) is dropped back out of any output relayed below.
+try:
+    import sys as _quiet_sys, os as _quiet_os
+    _quiet_dir = _quiet_os.path.dirname(_quiet_os.path.abspath(__file__))
+    if _quiet_dir not in _quiet_sys.path:
+        _quiet_sys.path.insert(0, _quiet_dir)
+    from vs_quiet import is_plugin_noise as _is_plugin_noise
+except Exception:
+    def _is_plugin_noise(line):
+        return False
+
 import sys
 import subprocess
 import os
@@ -11,8 +23,21 @@ import collections
 import urllib.parse
 import urllib.request
 import unicodedata
-from wakepy import keep
-from svt_fork_setup import setup_svt_av1_fork, setup_zsmooth_plugin
+
+try:
+    from wakepy import keep
+except Exception:  # pragma: no cover - wakepy ships with the package
+    import contextlib
+
+    class _KeepFallback:
+        @staticmethod
+        def running():
+            return contextlib.nullcontext()
+
+    keep = _KeepFallback()
+
+from svt_fork_setup import setup_svt_av1_fork
+import source_filter
 
 BLUE = "\033[94m"
 RED = "\033[91m"
@@ -285,16 +310,17 @@ def stream_subprocess_lines(proc, on_line):
             if not raw:
                 continue
             line = ANSI_ESCAPE_RE.sub("", raw.decode("utf-8", "replace")).strip()
-            if line:
+            if line and not _is_plugin_noise(line):
                 on_line(line)
     if buf:
         line = ANSI_ESCAPE_RE.sub("", buf.decode("utf-8", "replace")).strip()
-        if line:
+        if line and not _is_plugin_noise(line):
             on_line(line)
 
 
 def print_captured_tail(label, lines):
     """Show the tail of a quiet subprocess's output after a failure."""
+    lines = [line for line in lines if not _is_plugin_noise(line)]
     if not lines:
         return
     print(f"{RED}[Dispatch] {label} (last {len(lines)} output lines):{RESET}")
@@ -1005,6 +1031,7 @@ def pause_for_long_paths(long_paths):
 
 def warn_and_pause_if_paths_too_long(input_files, video_output_dir, temp_dir):
     long_paths = []
+    index_suffix = source_filter.index_suffix(source_filter.resolve())
     for input_path in input_files:
         filename = os.path.basename(input_path)
         basename = os.path.splitext(filename)[0]
@@ -1018,7 +1045,7 @@ def warn_and_pause_if_paths_too_long(input_files, video_output_dir, temp_dir):
             os.path.join(video_input_dir, f"{basename}-av1.mkv"),
             backend_artifact_dir,
             os.path.join(backend_artifact_dir, f"{basename}.vpy"),
-            os.path.join(backend_artifact_dir, f"{basename}.ffindex"),
+            os.path.join(backend_artifact_dir, f"{basename}{index_suffix}"),
             os.path.join(backend_artifact_dir, f"{basename}-av1.mkv"),
         ]
         for path in paths_to_check:
@@ -1481,8 +1508,13 @@ def main():
             print(f"\033[94m[Dispatch] Using optimized SSIMU2 worker/stream count from bat: {custom_ssimu2}\033[0m")
 
     setup_svt_av1_fork(tools_dir, selected_fork, arch=arch, verbose=verbose_mode)
-    # Must run before any .vpy is generated: dehalo=True calls into zsmooth.
-    setup_zsmooth_plugin(tools_dir, arch=arch, verbose=verbose_mode)
+
+    # Auto-Boost-Av1an.py builds the .vpy and reads the same override file; this
+    # is only so the choice is visible up front rather than buried in its output.
+    source_filter_override = source_filter.read_override()
+    if source_filter_override:
+        print(f"{BLUE}[Dispatch] Source filter override active: "
+              f"{source_filter.describe(source_filter_override)}{RESET}")
 
     # --- Worker Safety Check ---
     strip_lp_3 = False
@@ -1542,15 +1574,22 @@ def main():
             json_file = f"{basename}_scenedetect.json"
             json_abspath = os.path.join(temp_dir, json_file)
             
-            if os.path.exists(json_abspath):
+            scenes_override = source_filter.read_override()
+            scenes_are_current = (os.path.exists(json_abspath)
+                                  and source_filter.scenes_marker_matches(json_abspath, scenes_override))
+            if scenes_are_current:
                 print(f"[Dispatch] Skipping scene detection (JSON exists in temp): {json_file}")
             else:
+                if os.path.exists(json_abspath):
+                    # Scene frame numbers only line up with the .vpy while both
+                    # decode the source the same way.
+                    print("[Dispatch] Source filter changed since these scenes were detected; re-running scene detection.")
                 print("[Dispatch] Running Scene Detection...")
                 cmd_scene = [
                     sys.executable,
                     scene_detect_script,
                     "-i", input_abspath_origin,
-                    "-o", json_file 
+                    "-o", json_file
                 ]
                 scene_started_at = time.monotonic()
                 try:
@@ -1561,6 +1600,7 @@ def main():
                             raise subprocess.CalledProcessError(scene_rc, cmd_scene)
                     else:
                         subprocess.check_call(cmd_scene, cwd=temp_dir, env=scene_detection_env())
+                    source_filter.write_scenes_marker(json_abspath, scenes_override)
                 except subprocess.CalledProcessError:
                     print("[Dispatch] Scene detection failed.")
                 finally:
@@ -1579,7 +1619,9 @@ def main():
             if tonemap_this_file:
                 # Tonemapped output is SDR BT.709.
                 current_color_flags = bt709_flags
-                print(f"{BLUE}[Dispatch] HDR source detected; tonemapping HDR to SDR (BT.709) via libplacebo.{RESET}")
+                # Auto-Boost-Av1an.py picks libplacebo or the CPU fallback when it
+                # builds the .vpy and logs which one it settled on.
+                print(f"{BLUE}[Dispatch] HDR source detected; tonemapping HDR to SDR (BT.709).{RESET}")
             elif is_hdr_source and is_hdr_fork(selected_fork):
                 # Auto detect: build SVT-AV1-HDR color settings from MediaInfo.
                 hdr_flags = build_hdr_color_flags(color_metadata)
@@ -1605,6 +1647,15 @@ def main():
                     print("[Dispatch] MediaInfo confirmed full BT.601 source.")
 
             # 3. Encoding
+            # A resume folder whose chunks were cut from a different scene list -
+            # a re-detection after the source filter changed, say - would keep
+            # encoding the old frame ranges against the .vpy that
+            # Auto-Boost-Av1an.py builds in the backend artifact folder.
+            for discarded in source_filter.discard_stale_av1an_resume_state(
+                    os.path.join(video_input_dir, basename), f"{basename}.vpy", json_abspath):
+                print(f"[Dispatch] Discarded av1an resume state that was built from an older "
+                      f"scene list: {os.path.basename(discarded)}")
+
             final_cmd = [
                 sys.executable,
                 av1an_script,

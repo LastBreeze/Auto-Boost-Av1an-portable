@@ -13,6 +13,52 @@ import re
 import json
 import statistics
 from pathlib import Path
+# VapourSynth 78 dropped the portable.vs marker that used to autoload the
+# package's VapourSynth\vs-plugins folder. The libvship DLL now goes
+# into the interpreter's own plugin folder, VapourSynth\Lib\site-packages\
+# vapoursynth\plugins, which R79 autoloads. VAPOURSYNTH_EXTRA_PLUGIN_PATH is
+# still pointed at that same folder as a belt-and-braces measure: without a
+# working plugin path the DLL that run_gpu_suite() copies is never loaded,
+# core.vship does not exist, and every vs-hip benchmark reports "Not
+# compatible or failed".
+# This has to run before vapoursynth/vstools pull in a core, and the benchmark
+# subprocesses spawned below inherit the variable.
+PLUGIN_ENV_VAR = "VAPOURSYNTH_EXTRA_PLUGIN_PATH"
+
+
+def ensure_vs_plugin_path():
+    root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    found = os.path.join(
+        root_dir, "VapourSynth", "Lib", "site-packages", "vapoursynth", "plugins"
+    )
+    if not os.path.isdir(found):
+        return ""
+
+    existing = [part for part in os.environ.get(PLUGIN_ENV_VAR, "").split(os.pathsep) if part]
+    if not existing:
+        # Set a single path: valid whether the core reads one path or a list.
+        os.environ[PLUGIN_ENV_VAR] = found
+    elif not any(os.path.normcase(part) == os.path.normcase(found) for part in existing):
+        os.environ[PLUGIN_ENV_VAR] = os.pathsep.join(existing + [found])
+
+    return found
+
+
+ensure_vs_plugin_path()
+
+# Silence the core's plugin-load chatter (API3 deprecation notices, duplicate
+# plugin DLLs). Must run before the first vs.core access, since that is what
+# triggers the autoload that emits them.
+try:
+    import sys as _quiet_sys, os as _quiet_os
+    _quiet_dir = _quiet_os.path.dirname(_quiet_os.path.abspath(__file__))
+    if _quiet_dir not in _quiet_sys.path:
+        _quiet_sys.path.insert(0, _quiet_dir)
+    from vs_quiet import silence_plugin_noise as _silence_plugin_noise
+    _silence_plugin_noise()
+except Exception:
+    pass
+
 import vapoursynth as vs
 
 DISPLAY_USERNAME = "av1enjoyer"
@@ -74,15 +120,10 @@ AUTO_BOOST_SCRIPT = TOOLS_DIR / "Auto-Boost-Av1an.py"
 # Benchmark Settings
 SKIP = 3
 STALL_TIMEOUT = 10.0  # Seconds to wait before killing stalled process
-
-# FFVship watchdog. FFVship talks to the GPU driver directly, so a bad
-# driver/runtime state can leave it alive but permanently silent. Once it is
-# running it reuses STALL_TIMEOUT like every other benchmark; only the startup
-# window is longer, because unlike the in-process vs-hip/vs-zip tests this is a
-# cold-started exe that must create a GPU device (and on a first AMD/Vulkan run,
-# compile shaders) before it prints anything.
-FFVSHIP_INIT_TIMEOUT = 30.0   # No output at all -> assume it never started
-FFVSHIP_MAX_RUNTIME = 300.0   # Hard ceiling regardless of chatter
+# FFVship indexes both clips before it prints anything, so it gets a longer
+# grace period than the vs-hip runs before "no start" is declared.
+FFVSHIP_INIT_TIMEOUT = 60.0  # Seconds to wait for FFVship's first output
+FFVSHIP_MAX_RUNTIME = 300.0  # Hard ceiling for a single FFVship run
 
 # vs-zip worker sweet-spot tuning.
 # The vs-zip count is found by measuring REAL SSIMU2 throughput (fps) at
@@ -97,7 +138,8 @@ VSZIP_RAM_ABORT_MIN_MB = 2048   # system RAM crosses 90% used or free RAM drops
 CPU_WARMUP_SECONDS = 3.0        # Ignore vs-zip spin-up before sampling CPU usage
 
 # GPU / Plugin Paths
-VS_PLUGINS_DIR = BASE_DIR / "VapourSynth" / "vs-plugins"
+VS_PLUGINS_DIR = (BASE_DIR / "VapourSynth" / "Lib" / "site-packages"
+                  / "vapoursynth" / "plugins")
 VS_HIP_SOURCE_DIR = TOOLS_DIR / "vs-hip"
 
 try:
@@ -420,6 +462,38 @@ class _CpuSampler(threading.Thread):
         return statistics.median(self.samples)
 
 
+def load_vpy_clip(script_path):
+    """Run a .vpy in this process and hand back the clip it produced.
+
+    The namespace is a single dict used as both globals and locals, which is how
+    a module runs. Two dicts give class-body scoping instead, where a function
+    defined in the script cannot see the script's own top-level names, so a
+    script with a helper in it dies with a NameError that VSPipe never raises.
+
+    "final" and "src" are what the generated script calls its clips; output 0 is
+    the fallback, since setting it is the one thing every .vpy has to do.
+    """
+    script_path = Path(script_path)
+
+    # Outputs live on the core, so a stale output 0 from an earlier call must
+    # not stand in for a missing one.
+    vs.clear_outputs()
+
+    namespace = {"__name__": "__vpy__", "__file__": str(script_path)}
+    source = script_path.read_text(encoding="utf-8", errors="replace")
+    exec(compile(source, str(script_path), "exec"), namespace, namespace)
+
+    clip = namespace.get("final") or namespace.get("src")
+    if clip is None:
+        output = vs.get_outputs().get(0)
+        clip = getattr(output, "clip", output)
+    if not isinstance(clip, vs.VideoNode):
+        raise RuntimeError(
+            f"{script_path.name} produced no video clip: it defines neither "
+            f"'final' nor 'src', and sets nothing on output 0.")
+    return clip
+
+
 def build_benchmark_source_clip():
     """Return (clip, description) for the vs-zip benchmark source.
 
@@ -527,11 +601,7 @@ final.set_output(0)
             kernel=kernel,
         ), encoding="utf-8")
 
-        vpy_vars = {}
-        exec(compile(vpy_path.read_text(encoding="utf-8"), str(vpy_path), "exec"), globals(), vpy_vars)
-        clip = vpy_vars.get("final", vpy_vars.get("src"))
-        if clip is None:
-            raise RuntimeError("script produced no clip")
+        clip = load_vpy_clip(vpy_path)
         return clip, "filtered source (settings.txt filters applied, crop off)"
     except Exception as e:
         print(f"   Warning: filtered benchmark source failed ({e}); using raw sample.", file=sys.stderr)
@@ -821,37 +891,6 @@ src.set_output()
         print(f"Error: Fast pass generation failed. {e}", file=sys.stderr)
         return None
 
-def _kill_proc_tree(proc):
-    """Kill a Popen and anything it spawned. A wedged FFVship can be holding a
-    GPU context, so leaving orphans behind would poison the next stream count."""
-    if proc is None or proc.poll() is not None:
-        return
-    try:
-        parent = psutil.Process(proc.pid)
-        children = parent.children(recursive=True)
-    except Exception:
-        children = []
-        parent = None
-
-    for p in children:
-        try:
-            p.kill()
-        except Exception:
-            pass
-    try:
-        if parent is not None:
-            parent.kill()
-        else:
-            proc.kill()
-    except Exception:
-        pass
-
-    try:
-        proc.wait(timeout=10)
-    except Exception:
-        pass
-
-
 def _print_progress(percent: float, end: bool = False, elapsed: float = 0.0):
     if end:
         sys.stderr.write(f"\r      Progress: 100.0%  (Time: {elapsed:.2f}s)\n")
@@ -863,6 +902,9 @@ def _print_progress(percent: float, end: bool = False, elapsed: float = 0.0):
 
 def benchmark_gpu_candidate(dll_name: str, encoded_file: Path, num_streams: int):
     print(f"   Benchmarking vs-hip GPU ({dll_name} | Streams: {num_streams})...", file=sys.stderr)
+
+    dst_dll = VS_PLUGINS_DIR / dll_name
+    src_dll = VS_HIP_SOURCE_DIR / dll_name
 
     bench_script = f"""
 import sys
@@ -877,6 +919,21 @@ except Exception:
 core = vs.core
 SKIP = {SKIP}
 DURATION = 10.0
+
+if not hasattr(core, "vship"):
+    # The DLL should have autoloaded out of the interpreter's plugins folder via
+    # VAPOURSYNTH_EXTRA_PLUGIN_PATH. Load it by path when it did not, so a
+    # missing/renamed autoload folder cannot silently disable every GPU backend.
+    for _cand in (r"{dst_dll}", r"{src_dll}"):
+        try:
+            core.std.LoadPlugin(_cand)
+            break
+        except Exception:
+            continue
+
+if not hasattr(core, "vship"):
+    sys.stderr.write("VSHIP_ERROR:core.vship unavailable after loading {dll_name}\\n")
+    sys.exit(5)
 
 def emit_progress(p):
     try:
@@ -966,6 +1023,7 @@ except Exception as e:
 
     fps = 0.0
     elapsed_time = 0.0
+    vship_errors = []
     saw_progress = False
     last_percent = 0.0
     stall_start_time = time.time()
@@ -991,9 +1049,12 @@ except Exception as e:
             t = threading.Thread(target=_reader_thread, args=(proc.stdout, q_lines), daemon=True)
             t.start()
             
-            # Read stderr purely for verbose logging
+            # Read stderr for verbose logging, and keep the reason a run failed
+            # so it can be reported even when VERBOSE is off.
             def _stderr_reader():
                 for err_line in proc.stderr:
+                    if err_line.startswith("VSHIP_ERROR:"):
+                        vship_errors.append(err_line.strip()[len("VSHIP_ERROR:"):])
                     if VERBOSE:
                         sys.stderr.write(f"[vs-hip stderr] {err_line.strip()}\n")
             
@@ -1061,6 +1122,9 @@ except Exception as e:
         sys.stderr.write("\n")
         return 0.0, 0.0
 
+    if fps <= 0 and vship_errors and not VERBOSE:
+        print(f"      Reason: {vship_errors[0]}", file=sys.stderr)
+
     return (fps, elapsed_time) if fps > 0 else (0.0, 0.0)
 
 def run_gpu_suite(dll_name, encoded_file, variant_name):
@@ -1097,11 +1161,57 @@ def run_gpu_suite(dll_name, encoded_file, variant_name):
     return best[0], best[1], best[2]
 
 
+def _kill_process_tree(proc):
+    """Kill a benchmark process and anything it spawned, so a wedged GPU run
+    cannot keep holding the device after we have given up on it."""
+    if proc is None:
+        return
+    try:
+        parent = psutil.Process(proc.pid)
+        for child in parent.children(recursive=True):
+            try:
+                child.kill()
+            except Exception:
+                pass
+    except Exception:
+        pass
+    try:
+        proc.kill()
+    except Exception:
+        pass
+    try:
+        proc.wait(timeout=5)
+    except Exception:
+        pass
+
+
+def _ffvship_reader(pipe, q: queue.Queue):
+    """Feed raw chunks of FFVship output into a queue.
+
+    FFVship redraws its progress with carriage returns, so iterating the pipe
+    line by line blocks until the process exits - which is exactly the hang
+    this reader avoids. Chunked reads surface activity as it happens, letting
+    the caller tell "still working" apart from "wedged"."""
+    try:
+        fd = pipe.fileno()
+        while True:
+            chunk = os.read(fd, 4096)
+            if not chunk:
+                break
+            q.put(chunk)
+    except Exception:
+        pass
+    finally:
+        q.put(None)
+
+
 def benchmark_ffvship(exe_path: Path, encoded_file: Path, gpu_threads: int, variant_name: str):
     print(f"   Benchmarking GPU (FFVship {variant_name.capitalize()} | Streams: {gpu_threads})...", file=sys.stderr)
-    
+
     json_path = TEMP_DIR / f"ffvship_{gpu_threads}.json"
-    
+    # A leftover file from an earlier run must never be read back as a result.
+    force_remove(json_path)
+
     cmd = [
         str(exe_path),
         "--source", str(SAMPLE_FILE),
@@ -1110,96 +1220,118 @@ def benchmark_ffvship(exe_path: Path, encoded_file: Path, gpu_threads: int, vari
         "-g", str(gpu_threads),
         "--json", str(json_path)
     ]
-    
+
     if VERBOSE:
         print(f"   [FFVship CMD] {' '.join(cmd)}", file=sys.stderr)
-    
-    def _reader_thread(stdout_pipe, q: queue.Queue):
-        # Iterating the pipe blocks forever when FFVship hangs, so it is done on
-        # a daemon thread and the main loop keeps its own clock.
-        try:
-            for ln in stdout_pipe:
-                q.put(ln)
-        except Exception:
-            pass
-        finally:
-            q.put(None)
 
     fps = 0.0
     start_time = time.time()
+    elapsed_time = 0.0
     proc = None
-    timed_out = False
+
+    def _consume(text, state):
+        nonlocal fps
+        for part in re.split(r"[\r\n]", text):
+            line = part.strip()
+            if not line:
+                continue
+            if VERBOSE:
+                print(f"   [FFVship OUT] {line}", file=sys.stderr)
+            m = re.search(r"at\s+([0-9.]+)\s+fps", line, re.IGNORECASE)
+            if m:
+                try:
+                    fps = float(m.group(1))
+                except ValueError:
+                    pass
+            m = re.search(r"([0-9]+(?:\.[0-9]+)?)\s*%", line)
+            if m:
+                try:
+                    state['percent'] = float(m.group(1))
+                except ValueError:
+                    continue
+                state['showed_progress'] = True
+                if not VERBOSE:
+                    _print_progress(state['percent'], end=False)
+
     try:
         proc = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
-            text=True,
-            errors="replace",
             cwd=str(exe_path.parent)
         )
 
-        q_lines: queue.Queue = queue.Queue()
-        t = threading.Thread(target=_reader_thread, args=(proc.stdout, q_lines), daemon=True)
-        t.start()
+        q_chunks: queue.Queue = queue.Queue()
+        threading.Thread(target=_ffvship_reader, args=(proc.stdout, q_chunks), daemon=True).start()
 
+        state = {'percent': 0.0, 'showed_progress': False}
+        buf = ""
         saw_output = False
-        last_output_time = start_time
-        hard_deadline = start_time + FFVSHIP_MAX_RUNTIME
+        last_activity = start_time
+        init_deadline = start_time + FFVSHIP_INIT_TIMEOUT
+        timed_out = None
 
         while True:
             now = time.time()
 
-            if now > hard_deadline and proc.poll() is None:
-                print(f"   [FFVship Timeout] Exceeded {FFVSHIP_MAX_RUNTIME:.0f}s. Killing.", file=sys.stderr)
-                timed_out = True
+            # Never started: no byte of output at all within the init window.
+            if (not saw_output) and (now > init_deadline) and (proc.poll() is None):
+                timed_out = " [Timeout: No start]"
                 break
 
-            if not saw_output:
-                if (now - start_time > FFVSHIP_INIT_TIMEOUT) and proc.poll() is None:
-                    print(f"   [FFVship Timeout] No output after {FFVSHIP_INIT_TIMEOUT:.0f}s. Killing.", file=sys.stderr)
-                    timed_out = True
-                    break
-            elif (now - last_output_time > STALL_TIMEOUT) and proc.poll() is None:
-                print(f"   [FFVship Timeout] Stalled for {STALL_TIMEOUT:.0f}s. Killing.", file=sys.stderr)
-                timed_out = True
+            # Started, then went quiet - same rule the vs-hip suite uses.
+            if saw_output and (now - last_activity > STALL_TIMEOUT) and (proc.poll() is None):
+                timed_out = f" [Timeout: Stalled at {state['percent']:.1f}%]"
                 break
 
-            if proc.poll() is not None and q_lines.empty():
+            # Backstop for a run that keeps chattering but never finishes.
+            if (now - start_time > FFVSHIP_MAX_RUNTIME) and (proc.poll() is None):
+                timed_out = f" [Timeout: Exceeded {FFVSHIP_MAX_RUNTIME:.0f}s]"
+                break
+
+            if proc.poll() is not None and q_chunks.empty():
                 break
 
             try:
-                line = q_lines.get(timeout=0.25)
+                item = q_chunks.get(timeout=0.1)
             except queue.Empty:
                 continue
 
-            if line is None:
+            if item is None:
                 break
 
             saw_output = True
-            last_output_time = time.time()
+            last_activity = time.time()
+            buf += item.decode("utf-8", errors="replace")
 
-            if VERBOSE:
-                print(f"   [FFVship OUT] {line.strip()}", file=sys.stderr)
-            match = re.search(r"at\s+([0-9.]+)\s+fps", line, re.IGNORECASE)
-            if match:
-                fps = float(match.group(1))
+            # Keep the trailing fragment: it may be a half-written line.
+            split_at = max(buf.rfind("\r"), buf.rfind("\n"))
+            if split_at >= 0:
+                _consume(buf[:split_at + 1], state)
+                buf = buf[split_at + 1:]
+
+        if buf:
+            _consume(buf, state)
 
         if timed_out:
-            _kill_proc_tree(proc)
+            sys.stderr.write(timed_out + "\n")
+            _kill_process_tree(proc)
             return 0.0, time.time() - start_time
 
         try:
             proc.wait(timeout=30)
         except subprocess.TimeoutExpired:
-            print("   [FFVship Timeout] Output ended but process would not exit. Killing.", file=sys.stderr)
-            _kill_proc_tree(proc)
+            sys.stderr.write(" [Timeout: Process would not exit]\n")
+            _kill_process_tree(proc)
             return 0.0, time.time() - start_time
 
         elapsed_time = time.time() - start_time
 
         if not VERBOSE:
-            print(f"      Done. (Time: {elapsed_time:.2f}s)", file=sys.stderr)
+            if state['showed_progress']:
+                _print_progress(100.0, end=True, elapsed=elapsed_time)
+            else:
+                print(f"      Done. (Time: {elapsed_time:.2f}s)", file=sys.stderr)
 
         # Parse the JSON file directly 
         if json_path.exists():
@@ -1220,7 +1352,8 @@ def benchmark_ffvship(exe_path: Path, encoded_file: Path, gpu_threads: int, vari
     except Exception as e:
         elapsed_time = time.time() - start_time
         print(f"   [FFVship Error] {e}", file=sys.stderr)
-        _kill_proc_tree(proc)
+        _kill_process_tree(proc)
+        return 0.0, elapsed_time
 
     return fps, elapsed_time
 
@@ -1235,16 +1368,10 @@ def run_ffvship_suite(exe_path: Path, variant_name: str, encoded_file: Path):
         if s == 1 and fps <= 0.0:
             print(f"   [FFVship-{variant_name}] Stream=1 failed. Skipping remaining tests.", file=sys.stderr)
             return 0.0, 1, 0.0
-
-        if fps <= 0.0:
-            # A higher stream count that dies/hangs (VRAM pressure, wedged GPU
-            # context) will only get worse, so stop instead of paying the
-            # watchdog timeout again for every remaining count.
-            print(f"   [FFVship-{variant_name}] Streams={s} failed. Keeping best of 1-{s - 1}.", file=sys.stderr)
-            break
-
-        results.append((fps, s, elapsed_time))
-
+            
+        if fps > 0:
+            results.append((fps, s, elapsed_time))
+            
     if not results:
         return 0.0, 1, 0.0
         

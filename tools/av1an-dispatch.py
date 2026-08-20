@@ -1,3 +1,15 @@
+# Plugin-load chatter from VapourSynth children (API3 deprecation notices,
+# duplicate plugin DLLs) is dropped back out of any output relayed below.
+try:
+    import sys as _quiet_sys, os as _quiet_os
+    _quiet_dir = _quiet_os.path.dirname(_quiet_os.path.abspath(__file__))
+    if _quiet_dir not in _quiet_sys.path:
+        _quiet_sys.path.insert(0, _quiet_dir)
+    from vs_quiet import is_plugin_noise as _is_plugin_noise
+except Exception:
+    def _is_plugin_noise(line):
+        return False
+
 import sys
 import subprocess
 import os
@@ -11,8 +23,23 @@ import time
 import urllib.parse
 import urllib.request
 from pathlib import Path
-from wakepy import keep
-from svt_fork_setup import setup_svt_av1_fork, setup_zsmooth_plugin
+
+try:
+    from wakepy import keep
+except Exception:  # pragma: no cover - wakepy ships with the package
+    import contextlib
+
+    class _KeepFallback:
+        @staticmethod
+        def running():
+            return contextlib.nullcontext()
+
+    keep = _KeepFallback()
+
+from svt_fork_setup import setup_svt_av1_fork
+import tonemap_backend
+import source_filter
+import vpy_template
 
 BLUE = "\033[94m"
 RED = "\033[91m"
@@ -511,7 +538,8 @@ def read_ntfy_config(settings, root_dir, tools_dir):
             return {}, None
     ntfy_path = resolve_configured_path(ntfy_path_setting, root_dir, tools_dir)
     if not os.path.exists(ntfy_path):
-        return {}, ntfy_path
+        # Notifications are optional; a missing ntfy.txt should be silent.
+        return {}, None
 
     config = {}
     try:
@@ -594,6 +622,7 @@ def pause_for_long_paths(long_paths):
 
 def warn_and_pause_if_paths_too_long(input_files, video_output_dir, temp_dir):
     long_paths = []
+    index_suffix = source_filter.index_suffix(source_filter.resolve())
     for input_path in input_files:
         filename = os.path.basename(input_path)
         basename = os.path.splitext(filename)[0]
@@ -603,14 +632,14 @@ def warn_and_pause_if_paths_too_long(input_files, video_output_dir, temp_dir):
             input_path,
             os.path.join(video_output_dir, basename + "-output.mkv"),
             os.path.join(temp_dir, f"{basename}.vpy"),
-            os.path.join(temp_dir, f"{basename}.ffindex"),
+            os.path.join(temp_dir, f"{basename}{index_suffix}"),
             os.path.join(temp_dir, f"{basename}_scenedetect.json"),
             os.path.join(temp_dir, f"{basename}_scenedetect.zoned.json"),
             os.path.join(temp_dir, f"{basename}-output.mkv"),
             os.path.join(video_input_dir, f"{basename}-av1.mkv"),
             backend_artifact_dir,
             os.path.join(backend_artifact_dir, f"{basename}.vpy"),
-            os.path.join(backend_artifact_dir, f"{basename}.ffindex"),
+            os.path.join(backend_artifact_dir, f"{basename}{index_suffix}"),
             os.path.join(backend_artifact_dir, f"{basename}-av1.mkv"),
         ]
         for path in paths_to_check:
@@ -1063,7 +1092,7 @@ def detect_crop_values(source_path, tools_dir):
                 line = raw_line.strip()
                 if line.startswith("PROGRESS:"):
                     print(f"[Dispatch] Cropdetect ({mode_label}): {line.split(':', 1)[1]}%", end="\r")
-                elif line:
+                elif line and not _is_plugin_noise(line):
                     print(f"[Dispatch] Cropdetect ({mode_label}): {line}")
             print(" " * 80, end="\r")
             return proc.wait() == 0
@@ -1112,11 +1141,107 @@ def detect_crop_values(source_path, tools_dir):
     return top, bottom, left, right
 
 
-def build_vapoursynth_script(source_path, temp_dir, tools_dir, settings, autocrop, convert_yuv420p10=False, tonemap=False):
-    """Build the per-input .vpy script used as av1an input."""
+def warn_template_flags(template_file, convert_yuv420p10, tonemap, autocrop):
+    """Refuse or flag the .bat switches a template cannot honour.
+
+    --tonemap and --convert-to-YUV420P10 are steps the generated script builds
+    into the filter chain. A template IS the filter chain, so they have nowhere
+    to go. Tonemapping stops the run: an HDR source encoded as though it were
+    SDR looks washed out and grey, and finding that out at the end wastes the
+    whole encode. The conversion only warns, since finalize_clip() in the
+    template already lands on 10-bit 4:2:0 for ordinary sources.
+
+    --autocrop only warns as well: the template's own std.Crop line is the crop,
+    and detecting one per file would mean rewriting a script the user edits by
+    hand.
+    """
+    name = os.path.basename(template_file)
+    if tonemap:
+        print(f"{RED}[Dispatch] ERROR: this .bat asks for --tonemap, but {name} is doing the{RESET}")
+        print(f"{RED}[Dispatch]        filtering and a template cannot be tonemapped from outside.{RESET}")
+        print(f"{RED}[Dispatch]        Add the tonemap to {name} - it was written with the lines{RESET}")
+        print(f"{RED}[Dispatch]        you need in a comment near the bottom - or delete the{RESET}")
+        print(f"{RED}[Dispatch]        template to go back to the generated script.{RESET}")
+        sys.exit(1)
+    if convert_yuv420p10:
+        print(f"[Dispatch] Warning: --convert-to-YUV420P10 does not apply to {name}; the "
+              f"template's own finalize_clip() decides the output format.")
+    if autocrop:
+        print(f"[Dispatch] Warning: --autocrop does not apply to {name}; the std.Crop "
+              f"line in the template is the crop.")
+
+
+def build_script_from_template(template_file, source_path, temp_dir, settings,
+                               autocrop, convert_yuv420p10=False, tonemap=False):
+    """Render video-input\\template.vpy into this input's .vpy instead of generating one.
+
+    The source path is the only thing filled in; everything the user wrote is
+    passed through, which is the whole point of the file. No settings.txt filter
+    key is consulted, crop included - the template is the filter chain now - so
+    there is no crop/dehalo/denoise/deband status from settings.txt to report.
+    """
     basename = Path(source_path).stem
     vpy_file = os.path.join(temp_dir, f"{basename}.vpy")
-    cache_file = os.path.join(temp_dir, f"{basename}.ffindex")
+
+    warn_template_flags(template_file, convert_yuv420p10, tonemap, autocrop)
+
+    try:
+        template_text = vpy_template.read_template(template_file)
+        stamp = vpy_template.render_stamp(template_text, source_path)
+        crop_values = vpy_template.read_crop_values(template_text)
+
+        reused = False
+        if os.path.exists(vpy_file):
+            try:
+                with open(vpy_file, "r", encoding="utf-8", errors="replace") as f:
+                    reused = vpy_template.is_rendered_stamp(f.read(), stamp)
+            except OSError:
+                reused = False
+
+        if not reused:
+            script_text = vpy_template.render(template_text, source_path, stamp=stamp)
+            vpy_template.write_rendered(vpy_file, script_text)
+    except vpy_template.TemplateError as e:
+        print(f"{RED}[Dispatch] ERROR: {os.path.basename(template_file)} cannot be used: {e}{RESET}")
+        print(f"{RED}[Dispatch]        Fix the template, or delete it to go back to the "
+              f"generated script.{RESET}")
+        sys.exit(1)
+
+    print(f"{BLUE}[Dispatch] Filtering script: {template_file} "
+          f"(settings.txt filter settings are not used){RESET}")
+    if crop_values is None:
+        print(f"{BLUE}[Dispatch] Crop: no crop line in the template{RESET}")
+    elif any(crop_values):
+        print(f"{BLUE}[Dispatch] Crop: from the template (top={crop_values[0]}, "
+              f"bottom={crop_values[1]}, left={crop_values[2]}, right={crop_values[3]}){RESET}")
+    else:
+        print(f"{BLUE}[Dispatch] Crop: from the template, nothing cropped{RESET}")
+    if reused:
+        print(f"[Dispatch] Reusing rendered template: {vpy_file}")
+    else:
+        print(f"[Dispatch] Rendered template to: {vpy_file}")
+    return vpy_file
+
+
+def build_vapoursynth_script(source_path, temp_dir, tools_dir, settings, autocrop, convert_yuv420p10=False, tonemap=False):
+    """Build the per-input .vpy script used as av1an input.
+
+    A video-input\\template.vpy takes over the whole filter chain when it exists;
+    without one this generates the script from settings.txt exactly as before.
+    """
+    template_file = vpy_template.find_template(source_path)
+    if template_file:
+        return build_script_from_template(template_file, source_path, temp_dir,
+                                          settings, autocrop,
+                                          convert_yuv420p10=convert_yuv420p10,
+                                          tonemap=tonemap)
+
+    basename = Path(source_path).stem
+    vpy_file = os.path.join(temp_dir, f"{basename}.vpy")
+    # ffms2 unless tools\source-filter-override.txt says otherwise. Each filter
+    # names its index differently, so the cache path follows the choice.
+    active_source_filter = source_filter.resolve()
+    cache_file = source_filter.cache_path(temp_dir, basename, active_source_filter)
 
     s_crop_mode = get_script_setting(settings, "crop", "auto")
     s_crop_top = get_script_setting(settings, "top", "0")
@@ -1136,6 +1261,14 @@ def build_vapoursynth_script(source_path, temp_dir, tools_dir, settings, autocro
     denoise_setting = get_script_setting(settings, "denoise_setting", "")
     do_deband = setting_is_true(settings, "deband", "False")
     deband_setting = get_script_setting(settings, "deband_setting", "")
+
+    # Which tonemap implementation lands in the .vpy. The GPU is only probed
+    # when there is something to tonemap, and the probe result is cached for the
+    # rest of the run.
+    tonemap_backend_name = tonemap_backend.PLACEBO
+    tonemap_backend_reason = ""
+    if tonemap:
+        tonemap_backend_name, tonemap_backend_reason = tonemap_backend.resolve_backend(settings)
 
     requested_crop_mode = s_crop_mode.strip().lower()
     if not autocrop:
@@ -1166,6 +1299,11 @@ def build_vapoursynth_script(source_path, temp_dir, tools_dir, settings, autocro
             elif ("do_tonemap = True" in existing_vpy_text) != bool(tonemap):
                 print(f"[Dispatch] Existing VapourSynth script tonemap state differs; rebuilding: {vpy_file}")
                 rebuild_vpy = True
+            elif tonemap and tonemap_backend.vpy_backend_marker(tonemap_backend_name) not in existing_vpy_text:
+                # Written for the other tonemap backend, e.g. carried over from a
+                # machine whose GPU could run the libplacebo path.
+                print(f"[Dispatch] Existing VapourSynth script uses a different tonemap backend; rebuilding: {vpy_file}")
+                rebuild_vpy = True
             elif filter_state_marker not in existing_vpy_text:
                 print(f"[Dispatch] Existing VapourSynth script filter state differs; rebuilding: {vpy_file}")
                 rebuild_vpy = True
@@ -1173,6 +1311,11 @@ def build_vapoursynth_script(source_path, temp_dir, tools_dir, settings, autocro
                 # Written before the vs-plugins fallback existed; on VapourSynth
                 # 78 it would fail to find ffms2.
                 print(f"[Dispatch] Existing VapourSynth script predates the plugin fallback; rebuilding: {vpy_file}")
+                rebuild_vpy = True
+            elif not source_filter.marker_matches(existing_vpy_text, active_source_filter):
+                # tools\source-filter-override.txt changed since this script was
+                # written; without the rebuild the old source filter would stay.
+                print(f"[Dispatch] Existing VapourSynth script uses a different source filter; rebuilding: {vpy_file}")
                 rebuild_vpy = True
         except Exception as e:
             print(f"[Dispatch] Warning: Could not inspect existing VapourSynth script ({e}); rebuilding: {vpy_file}")
@@ -1196,7 +1339,7 @@ def build_vapoursynth_script(source_path, temp_dir, tools_dir, settings, autocro
         dehalo_args = dehalo_values or DEHALO_DEFAULTS
         fine_dehalo_args = fine_dehalo_values or FINE_DEHALO_DEFAULTS
 
-        vpy_template = """
+        vpy_source_template = """
 from vstools import vs, core, initialize_clip, finalize_clip
 try:
     from vsdenoise import DFTTest
@@ -1206,11 +1349,12 @@ core.max_cache_size = 1024
 {filter_state}
 
 # VapourSynth 78 dropped the portable.vs autoload of the package's vs-plugins
-# folder, so ffms2/DFTTest/placebo/vszip are loaded by hand when the core did
-# not pick them up on its own. A no-op on installs that still autoload.
+# folder, so the source filter/DFTTest/placebo/vszip are loaded by hand when the
+# core did not pick them up on its own. A no-op on installs that still autoload.
 import os as _os
 _plugin_dir = r"{plugin_dir}"
-if _plugin_dir and not hasattr(core, "ffms2") and _os.path.isdir(_plugin_dir):
+_have_plugins = hasattr(core, "ffms2") and hasattr(core, "{source_plugin}")
+if _plugin_dir and not _have_plugins and _os.path.isdir(_plugin_dir):
     for _dll in sorted(_os.listdir(_plugin_dir)):
         if _dll.lower().endswith(".dll"):
             try:
@@ -1219,7 +1363,8 @@ if _plugin_dir and not hasattr(core, "ffms2") and _os.path.isdir(_plugin_dir):
                 pass
 
 # Load Source
-src = core.ffms2.Source(source=r"{source}", cachefile=r"{cache}")
+{source_marker}
+src = {source_call}
 
 # Conversion
 if {convert}:
@@ -1228,21 +1373,13 @@ if {convert}:
 # Initialize (Fixes Placebo bitdepth error by ensuring 16-bit)
 src = initialize_clip(src)
 
-# Tonemap HDR -> SDR (libplacebo; libvs_placebo.dll autoloads from the plugins directory)
-do_tonemap = {tonemap}
-if do_tonemap:
-    src = core.fmtc.bitdepth(src, bits=16)
-    src = core.placebo.Tonemap(src, src_csp=1, dst_csp=0, dynamic_peak_detection=1, gamut_mapping=1, tone_mapping_function=1, metadata=0, contrast_recovery=0.0, smoothing_period=20.0, percentile=100.0)
-    # Tonemap returns RGB or 4:4:4 output; SVT-AV1 only supports 4:2:0, so convert
-    # back to YUV420P16 here. finalize_clip then produces the same 10-bit
-    # YUV420P10 output as the non-tonemap pipeline.
-    if src.format.color_family == vs.RGB:
-        src = src.resize.Bicubic(format=vs.YUV420P16, matrix_s="709")
-    elif src.format.id != vs.YUV420P16:
-        src = src.resize.Bicubic(format=vs.YUV420P16)
-    src = src.std.SetFrameProps(_Matrix=1, _Transfer=1, _Primaries=1)
+{tonemap_block}
 
-# DEHALO (settings.txt [dehalo]; always runs before denoise)
+# DENOISE (settings.txt [denoise]). Runs first: the dehalos below work off the
+# denoised clip, so they are not sharpening grain back up.
+{denoise_line}
+
+# DEHALO (settings.txt [dehalo]; always runs after denoise)
 do_dehalo = {dehalo}
 if do_dehalo:
     from vsdehalo import edge_cleaner
@@ -1267,7 +1404,7 @@ if do_dehalo:
         edgemask=dehalo_edgemask,
     )
 
-# FINE_DEHALO (settings.txt [fine_dehalo]; the alternative to [dehalo], also before denoise)
+# FINE_DEHALO (settings.txt [fine_dehalo]; the alternative to [dehalo], also after denoise)
 do_fine_dehalo = {fine_dehalo}
 if do_fine_dehalo:
     from vsdehalo import fine_dehalo as _fine_dehalo
@@ -1315,8 +1452,8 @@ if do_fine_dehalo:
         contra={fd_contra},
     )
 
-# Optional settings.txt denoise/deband hooks
-{denoise_line}
+# DEBAND (settings.txt [deband]). Last of the four, so it grades the picture
+# the encoder is actually handed.
 {deband_line}
 
 # 1. CROP
@@ -1369,9 +1506,10 @@ final = finalize_clip(src)
 final.set_output(0)
 """
         with open(vpy_file, "w", encoding="utf-8", newline="\n") as f:
-            f.write(vpy_template.format(
-                source=source_path,
-                cache=cache_file,
+            f.write(vpy_source_template.format(
+                source_call=source_filter.source_call(active_source_filter, source_path, cache_file),
+                source_marker=source_filter.marker(active_source_filter),
+                source_plugin=source_filter.PLUGIN_ATTR[active_source_filter],
                 plugin_dir=vs_plugin_dir(),
                 ct=crop_top,
                 cb=crop_bottom,
@@ -1381,7 +1519,7 @@ final.set_output(0)
                 target_res=target_res,
                 kernel=kernel,
                 convert=str(convert_yuv420p10),
-                tonemap=str(bool(tonemap)),
+                tonemap_block=tonemap_backend.vpy_tonemap_block(tonemap_backend_name, tonemap),
                 denoise_line=denoise_line,
                 deband_line=deband_line,
                 dehalo=str(do_dehalo),
@@ -1403,12 +1541,14 @@ final.set_output(0)
                 filter_state=filter_state_marker,
             ))
         if tonemap:
-            print(f"{BLUE}[Dispatch] Filter active: tonemap HDR -> SDR (BT.709) via libplacebo{RESET}")
+            print(f"{BLUE}[Dispatch] Filter active: {tonemap_backend.describe_backend(tonemap_backend_name, tonemap_backend_reason)}{RESET}")
+        print(f"[Dispatch] Source filter: {source_filter.describe(active_source_filter)}")
         print(f"[Dispatch] Built VapourSynth script: {vpy_file}")
     else:
         existing_crop_values = parse_crop_values_from_vpy(vpy_file) or (0, 0, 0, 0)
         report_crop_status(crop_mode, *existing_crop_values)
         report_filter_status(do_downscale, target_res, kernel, do_denoise, denoise_setting, do_deband, deband_setting, do_dehalo, dehalo_values, do_fine_dehalo, fine_dehalo_values)
+        print(f"[Dispatch] Source filter: {source_filter.describe(active_source_filter)}")
         print(f"[Dispatch] Reusing existing VapourSynth script: {vpy_file}")
 
     return vpy_file
@@ -2020,8 +2160,6 @@ def main():
     ntfy_settings = settings
 
     setup_svt_av1_fork(tools_dir, selected_fork, arch=arch, verbose=True)
-    # Must run before any .vpy is generated: dehalo=True calls into zsmooth.
-    setup_zsmooth_plugin(tools_dir, arch=arch, verbose=True)
 
     # --- Gather Input Files ---
     extensions = ("*.mkv", "*.mp4", "*.m2ts")
@@ -2068,18 +2206,26 @@ def main():
             json_file = f"{basename}_scenedetect.json"
             json_abspath = os.path.join(temp_dir, json_file)
             
-            if os.path.exists(json_abspath):
+            scenes_override = source_filter.read_override()
+            scenes_are_current = (os.path.exists(json_abspath)
+                                  and source_filter.scenes_marker_matches(json_abspath, scenes_override))
+            if scenes_are_current:
                 print(f"[Dispatch] Skipping scene detection (JSON exists).")
             else:
+                if os.path.exists(json_abspath):
+                    # Scene frame numbers only line up with the .vpy while both
+                    # decode the source the same way.
+                    print("[Dispatch] Source filter changed since these scenes were detected; re-running scene detection.")
                 print("[Dispatch] Running Scene Detection...")
                 cmd_scene = [
                     sys.executable,
                     scene_detect_script,
                     "-i", input_abspath_origin,
-                    "-o", json_file 
+                    "-o", json_file
                 ]
                 try:
                     subprocess.check_call(cmd_scene, cwd=temp_dir, env=scene_detection_env())
+                    source_filter.write_scenes_marker(json_abspath, scenes_override)
                 except subprocess.CalledProcessError:
                     print("[Dispatch] Scene detection failed. Proceeding anyway.")
 
@@ -2096,7 +2242,7 @@ def main():
             if tonemap_this_file:
                 # Tonemapped output is SDR BT.709.
                 current_color_flags = bt709_flags
-                print(f"{BLUE}[Dispatch] HDR source detected; tonemapping HDR to SDR (BT.709) via libplacebo.{RESET}")
+                print(f"{BLUE}[Dispatch] HDR source detected; tonemapping HDR to SDR (BT.709).{RESET}")
             elif is_hdr_source and is_hdr_fork(selected_fork):
                 # Auto detect: build SVT-AV1-HDR color settings from MediaInfo.
                 hdr_flags = build_hdr_color_flags(color_metadata)
@@ -2152,6 +2298,14 @@ def main():
             except Exception as e:
                 print(f"{RED}[Dispatch] Warning: Could not apply zones file ({e}); encoding without zones.{RESET}")
                 scenes_for_av1an = json_abspath
+
+            # A resume folder whose chunks were cut from a different scene list -
+            # a re-detection after the source filter changed, say - would keep
+            # encoding the old frame ranges against the current .vpy.
+            for discarded in source_filter.discard_stale_av1an_resume_state(
+                    video_input_dir, vpy_abspath, json_abspath):
+                print(f"[Dispatch] Discarded av1an resume state that was built from an older "
+                      f"scene list: {os.path.basename(discarded)}")
 
             # We run Av1an in video_input_dir, so artifacts appear there (and we can resume if needed).
             # We pass an absolute scenes path because the json lives in temp.

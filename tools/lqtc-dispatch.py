@@ -9,6 +9,7 @@ import time
 import urllib.parse
 import urllib.request
 from svt_fork_setup import cpu_supports_avx512
+import source_filter
 
 try:
     from wakepy import keep
@@ -96,6 +97,23 @@ def warn_about_unsupported_filtering(settings):
     print(f"{BLUE}[Dispatch] Note: settings.txt has {', '.join(enabled)} enabled.{RESET}")
     print(f"{BLUE}[Dispatch] Filtering is not currently supported in quality target mode and is ignored.{RESET}")
     print(f"{BLUE}[Dispatch] Cropping is handled automatically by LQTC itself.{RESET}")
+
+
+def warn_about_source_filter_override():
+    """bat-builder's source filter picks the plugin used inside a .vpy.
+
+    LQTC decodes on its own with no VapourSynth in the path, so there is no .vpy
+    and nothing for the override to change. Said out loud rather than ignored,
+    so a user who set it does not sit waiting for a BestSource index that is
+    never going to be built.
+    """
+    override = source_filter.read_override()
+    if not override:
+        return
+    print(f"{BLUE}[Dispatch] Note: tools\\{source_filter.OVERRIDE_FILENAME} selects "
+          f"{override} as the VapourSynth source filter.{RESET}")
+    print(f"{BLUE}[Dispatch] LQTC decodes on its own without VapourSynth, so that setting "
+          f"does not apply here.{RESET}")
 
 
 # --- Encoder selection -------------------------------------------------------
@@ -248,7 +266,8 @@ def read_ntfy_config(settings, root_dir, tools_dir):
             return {}, None
     ntfy_path = resolve_configured_path(ntfy_path_setting, root_dir, tools_dir)
     if not os.path.exists(ntfy_path):
-        return {}, ntfy_path
+        # Notifications are optional; a missing ntfy.txt should be silent.
+        return {}, None
 
     config = {}
     try:
@@ -549,6 +568,7 @@ def main():
     settings = load_script_settings(settings_path)
     ntfy_settings = settings
     warn_about_unsupported_filtering(settings)
+    warn_about_source_filter_override()
 
     lqtc_exe = resolve_lqtc_exe(tools_dir, backend, fork, arch)
 

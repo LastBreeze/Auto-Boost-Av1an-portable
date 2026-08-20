@@ -66,6 +66,16 @@ def ensure_plugin_path():
     return found
 
 
+def index_path_for(source_path):
+    """Where this preview keeps the ffms2 index for its source.
+
+    The generated script hands core.ffms2.Source this exact path as its
+    cachefile, and the pre-index pass in main() writes it, so the two have to
+    agree - hence one function rather than the path spelled out twice.
+    """
+    return TEMP_DIR / f"{Path(source_path).stem}.ffindex"
+
+
 def load_module(module_name, script_path):
     """Import a tools/ script that has a hyphen in its filename."""
     if not os.path.exists(script_path):
@@ -250,7 +260,11 @@ def apply_geometry(clip):
     return clip
 
 
-# DEHALO (settings.txt [dehalo]; always runs before denoise)
+# DENOISE (settings.txt [denoise]). Runs first: the dehalos below work off the
+# denoised clip, so they are not sharpening grain back up.
+{denoise_line}
+
+# DEHALO (settings.txt [dehalo]; always runs after denoise)
 do_dehalo = {dehalo}
 if do_dehalo:
     from vsdehalo import edge_cleaner
@@ -275,7 +289,7 @@ if do_dehalo:
         edgemask=dehalo_edgemask,
     )
 
-# FINE_DEHALO (settings.txt [fine_dehalo]; the alternative to [dehalo], also before denoise)
+# FINE_DEHALO (settings.txt [fine_dehalo]; the alternative to [dehalo], also after denoise)
 do_fine_dehalo = {fine_dehalo}
 if do_fine_dehalo:
     from vsdehalo import fine_dehalo as _fine_dehalo
@@ -323,14 +337,14 @@ if do_fine_dehalo:
         contra={fd_contra},
     )
 
-# Optional settings.txt denoise/deband hooks
-{denoise_line}
+# DEBAND (settings.txt [deband]). Last of the four, so it grades the picture
+# the encoder is actually handed.
 {deband_line}
 
 src = apply_geometry(src)
 
 
-# Outputs. In VSPreview press 1 / 2 / 3 to switch between them.
+# Outputs. In the previewer press 1 / 2 / 3 to switch between them.
 def labelled(clip, text):
     return core.text.Text(clip, text, alignment=7)
 
@@ -355,7 +369,7 @@ def build_preview_script(dispatch, source_path, settings, crop_values):
     """Write the temporary .vpy and return (path, geometry_active)."""
     basename = Path(source_path).stem
     vpy_file = TEMP_DIR / f"{basename}-preview.vpy"
-    cache_file = TEMP_DIR / f"{basename}.ffindex"
+    cache_file = index_path_for(source_path)
 
     crop_mode, crop_top, crop_bottom, crop_left, crop_right = crop_values
 
@@ -509,25 +523,40 @@ def main():
 
     vpy_file, geometry_active = build_preview_script(dispatch, source_path, settings, crop_values)
 
+    # core.ffms2.Source reports no progress, so indexing a long source looks
+    # like a hang with an empty console in front of it. ffmsindex builds the
+    # same index the generated script is pointed at, printing a percentage
+    # while it works; the preview then opens on an index that is already there.
+    # The script always loads with ffms2, whatever the source filter override
+    # says, so there is no BestSource case to skip here.
+    indexed = vspreview_dispatch.index_source(source_path, index_path_for(source_path))
+
+    previewer = vspreview_dispatch.previewer_name()
+
     print()
-    print("[Preview] In VSPreview:")
+    print(f"[Preview] In {previewer}:")
     print("[Preview]   1 = source, 2 = filtered" + (", 3 = source with crop/downscale only" if geometry_active else ""))
     print("[Preview]   Ctrl+mousewheel zooms. Close the window to return here.")
-    print("[Preview] First frame takes a while: ffms2 has to index the source.")
+    if indexed:
+        print("[Preview] The source is indexed already, so the first frame is quick.")
+    else:
+        print("[Preview] First frame takes a while: ffms2 has to index the source.")
     print()
 
     # Stale VSPreview storage missing WindowSettings.zoom_index crashes the
     # launch before the window appears. It repairs storage silently; its own
-    # progress output is housekeeping noise here.
+    # progress output is housekeeping noise here. Under vsview it does nothing:
+    # vsview keeps its own settings and never reads that file.
     with contextlib.redirect_stdout(io.StringIO()):
         vspreview_dispatch.repair_vspreview_storage()
 
     exit_code = 0
     try:
         # Run from the temp folder so VSPreview's own scratch files land there.
-        subprocess.run([sys.executable, "-m", "vspreview", str(vpy_file)], cwd=str(TEMP_DIR), check=True)
+        # Its console output is held back unless it exits non-zero.
+        vspreview_dispatch.run_preview(vpy_file, cwd=TEMP_DIR)
     except subprocess.CalledProcessError as e:
-        print(f"{RED}[Preview] vspreview exited with an error: {e}{RESET}")
+        print(f"{RED}[Preview] {previewer} exited with an error: {e}{RESET}")
         exit_code = e.returncode or 1
     except KeyboardInterrupt:
         pass

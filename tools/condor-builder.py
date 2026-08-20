@@ -10,9 +10,18 @@ ARCH_BY_CHOICE = {"1": "znver2", "2": "x86-64-v3", "3": "avx512"}
 CHOICE_BY_ARCH = {arch: choice for choice, arch in ARCH_BY_CHOICE.items()}
 
 # Metrics Condor measures through the vship plugin (com.lumen.vship). These are
-# the ones that need a GPU backend chosen, because tools\vs-hip ships a separate
-# NVIDIA and Vulkan build and only one of them may be active at a time.
+# the ones that need a GPU backend, because tools\vs-hip ships a separate NVIDIA,
+# AMD and Vulkan build and only one of them may be active at a time. The backend
+# is never asked for here: the generated .bat runs tools\ssimu2-workercount.py -
+# the same benchmark bat-builder.py uses - which measures every backend this
+# machine can actually load and writes the winner to
+# tools\workercount-ssimu2.txt for condor-dispatch.py to read.
 VSHIP_METRICS = ("ssimulacra2", "butteraugli", "cvvdp")
+
+# Written by tools\ssimu2-workercount.py. Only its tool=/variant= lines matter
+# to Condor; the worker counts in it belong to the Auto-Boost metrics pass, and
+# Condor's worker count is asked for in STEP 8 instead.
+SSIMU2_CONFIG_NAME = "workercount-ssimu2.txt"
 
 # Per metric: (default target, low bound, high bound, higher_is_better).
 # The bounds are sanity checks on the scale, not quality advice - a butteraugli
@@ -232,20 +241,13 @@ def build_batch_file(tools_dir, root_dir):
     metric_map = {"1": "ssimulacra2", "2": "cvvdp", "3": "butteraugli"}
     metric = metric_map.get(input("Select [1-3] (Press Enter for 1): ").strip(), "ssimulacra2")
 
-    gpu = "nvidia"
+    # No GPU backend question: these metrics run on the GPU, and which build
+    # (NVIDIA / AMD / Vulkan) is fastest here is measured, not guessed.
     if metric in VSHIP_METRICS:
-        print("\n--------------------------------------------------------")
-        print("GPU Backend for the Metric")
-        print("--------------------------------------------------------")
-        print("This metric is measured on your GPU. Pick the backend that")
-        print("matches your graphics card:\n")
-        print("  1: nvidia  -- NVIDIA only")
-        print("               The fastest option if you have an NVIDIA card.\n")
-        print("  2: vulkan  -- NVIDIA, AMD or Intel")
-        print("               Works on any modern card. Pick this if you are")
-        print("               not on NVIDIA, or if nvidia gives you trouble.\n")
-        if input("Select [1/2] (Press Enter for 1): ").strip() == "2":
-            gpu = "vulkan"
+        print("\nThis metric is measured on your GPU. You are not asked which")
+        print("backend to use - the first run of the generated .bat benchmarks")
+        print("NVIDIA, AMD, Vulkan and the CPU on this machine and remembers the")
+        print(f"winner in tools\\{SSIMU2_CONFIG_NAME}.\n")
 
     # --- 3. Target ---
     default_target, low, high, higher_is_better = METRIC_RANGES[metric]
@@ -569,9 +571,12 @@ def build_batch_file(tools_dir, root_dir):
     script += f'set "TARGET_PROFILE={target_profile}"\n'
     script += ":: TARGET_PROFILE options: fast (11 middle frames, mean), standard (middle 25 percent, RMS),\n"
     script += ":: slow (whole scene, 10th percentile).\n"
-    script += f'set "GPU={gpu}"\n'
+    script += 'set "GPU="\n'
     script += ":: GPU selects which libvship build in tools\\vs-hip is activated for GPU metrics:\n"
-    script += ":: nvidia (NVIDIA only) or vulkan (NVIDIA/AMD/Intel).\n"
+    script += ":: nvidia (NVIDIA only), amd (AMD only) or vulkan (NVIDIA/AMD/Intel).\n"
+    script += ":: Leave it EMPTY to let the dispatcher pick the backend the metric benchmark\n"
+    script += f":: measured as fastest on this machine (tools\\{SSIMU2_CONFIG_NAME}).\n"
+    script += ":: Fill one in only to override that result.\n"
     script += 'set "DECODER=bestsource"\n'
     script += ":: DECODER options: bestsource, vs-ffms2, lsmash, dgdecnv, ffms2.\n"
     script += 'set "CONCAT=mkvmerge"\n'
@@ -595,8 +600,32 @@ def build_batch_file(tools_dir, root_dir):
     script += ":: this variable. Without it Condor exits with \"VSScript API not available\".\n"
     script += "set \"VSSCRIPT_PATH=%~dp0VapourSynth\\VSScript.dll\"\n\n"
 
-    # No worker count benchmark here: WORKERS was chosen in the builder.
+    # No encode worker count benchmark here: WORKERS was chosen in the builder.
+    # The metric backend IS benchmarked, because it depends on the GPU rather
+    # than on anything the user can sensibly answer. This is the same script
+    # bat-builder.py runs; only its tool=/variant= lines are used here.
     step_num = 1
+    if metric in VSHIP_METRICS:
+        script += f":: --- STEP {step_num}: METRIC BACKEND CHECK (GPU) ---\n"
+        script += f"if not exist \"tools\\{SSIMU2_CONFIG_NAME}\" (\n"
+        script += "    echo.\n"
+        script += "    echo -------------------------------------------------------------------------------\n"
+        script += "    echo First Run Detected: Finding the fastest metric backend for this machine...\n"
+        script += "    echo -------------------------------------------------------------------------------\n"
+        script += "    echo Benchmarking NVIDIA, AMD, Vulkan and CPU. This runs once.\n"
+        script += "    \"VapourSynth\\python.exe\" \"tools\\ssimu2-workercount.py\"\n"
+        script += ")\n"
+        script += f":: The dispatcher reads tool=/variant= from tools\\{SSIMU2_CONFIG_NAME} to pick the\n"
+        script += ":: libvship build. Delete that file to benchmark the backends again. The worker\n"
+        script += ":: counts in it are not used here - Condor's worker count is WORKERS above.\n\n"
+        step_num += 1
+
+    # An empty GPU means "use the benchmark result". Passing --gpu with no value
+    # would make the dispatcher swallow the next flag, so the whole option is
+    # left out unless the user filled GPU in.
+    script += "set \"GPU_ARG=\"\n"
+    script += "if defined GPU set \"GPU_ARG=--gpu %GPU%\"\n\n"
+
     if fork != "5fish":
         script += f":: --- STEP {step_num}: RENAMING ---\n"
         script += "echo Starting Renaming Process...\n"
@@ -610,7 +639,7 @@ def build_batch_file(tools_dir, root_dir):
         "\"VapourSynth\\python.exe\" \"tools\\condor-dispatch.py\" %VERBOSE% --fork %fork%"
         " --arch %ARCH% --denoise %DENOISE% --tonemap %tonemap%" + autocrop_flag +
         " --metric %METRIC% --target %TARGET% --min-quantizer %MIN_QUANTIZER%"
-        " --max-quantizer %MAX_QUANTIZER% --target-profile %TARGET_PROFILE% --gpu %GPU%"
+        " --max-quantizer %MAX_QUANTIZER% --target-profile %TARGET_PROFILE% %GPU_ARG%"
         " --decoder %DECODER% --concat %CONCAT% --workers %WORKERS%"
         " --photon-noise %PHOTON_NOISE%"
         " --final-speed %FINAL_SPEED% --final-params \"%condor_params%\"\n\n"

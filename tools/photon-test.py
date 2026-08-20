@@ -398,8 +398,21 @@ def repair_vspreview_storage():
             print(f"[VSPreview] Warning: Could not repair storage {global_storage}: {exc}")
 
 
+def is_package_storage(path):
+    """True for the package's own .vsjet folder.
+
+    A .vsjet folder next to a script is scratch. The one holding ArtCNN's ONNX
+    models - 35 MB, downloaded by hand - is not: it lives in VapourSynth\\.vsjet,
+    with the package root still checked for installs from before the move. A
+    sweep that happens to run from either has to leave it alone.
+    """
+    root_dir = Path(__file__).resolve().parent.parent
+    return Path(path).resolve() in (root_dir / "VapourSynth" / ".vsjet",
+                                    root_dir / ".vsjet")
+
+
 def cleanup_preview(vpy_file, work_dir=None):
-    """Clean up generated VPY files, .vsjet folder, and .ffindex files."""
+    """Clean up generated VPY files, scratch .vsjet folders, and .ffindex files."""
     base_dir = Path(work_dir) if work_dir is not None else Path.cwd()
     if vpy_file:
         vpy_path = Path(vpy_file)
@@ -418,7 +431,7 @@ def cleanup_preview(vpy_file, work_dir=None):
             pass
 
     vsjet_dir = base_dir / ".vsjet"
-    if vsjet_dir.exists():
+    if vsjet_dir.exists() and not is_package_storage(vsjet_dir):
         try:
             shutil.rmtree(vsjet_dir)
         except OSError:
@@ -552,10 +565,29 @@ def launch_vspreview(mkv_files, work_dir, source_clip=None):
     with open(work_dir / vpy_filename, "w", encoding="utf-8") as f:
         f.write(script_content)
 
-    cmd = [sys.executable, "-m", "vspreview", vpy_filename]
+    # Via the vs-jetpack 2 compatibility shim when it is there - see
+    # tools\\vspreview_compat.py. This file keeps its own copy of the launch
+    # line rather than importing vspreview-dispatch.py, the same way it keeps
+    # its own repair_vspreview_storage: it is meant to run standalone.
+    shim = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        "vspreview_compat.py")
+    if os.path.exists(shim):
+        cmd = [sys.executable, shim, vpy_filename]
+    else:
+        cmd = [sys.executable, "-m", "vspreview", vpy_filename]
     rc = 0
     try:
-        subprocess.run(cmd, cwd=work_dir, check=True)
+        # Held back and thrown away when VSPreview exits cleanly: a preview that
+        # opened fine still prints plugin deprecation notices and a couple of
+        # warnings that mean nothing here. On a failure it is printed in full,
+        # because then it is the only account of what went wrong.
+        result = subprocess.run(cmd, cwd=work_dir, stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT, text=True,
+                                encoding="utf-8", errors="replace")
+        if result.returncode != 0:
+            if (result.stdout or "").strip():
+                print(result.stdout.strip())
+            raise subprocess.CalledProcessError(result.returncode, cmd)
     except subprocess.CalledProcessError as exc:
         print(f"Error occurred while running vspreview: {exc}")
         rc = exc.returncode or 1

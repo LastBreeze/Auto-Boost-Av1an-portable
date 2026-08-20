@@ -119,7 +119,7 @@ def cleanup_workspace():
                 except OSError as e:
                     print(f"Error deleting {os.path.basename(file_path)}: {e}")
 
-    # 7. Specific Cleanup for 'video-input' (logs, *.bsindex, *.json, dot folders)
+    # 7. Specific Cleanup for 'video-input' (logs, *.bsindex, *.json, *.csv, dot folders)
     video_input_dir = os.path.join(cwd, 'video-input')
 
     if os.path.exists(video_input_dir) and os.path.isdir(video_input_dir):
@@ -133,8 +133,8 @@ def cleanup_workspace():
             except OSError as e:
                 print(f"Error deleting video-input logs: {e}")
 
-        # B. Delete *.bsindex and *.json inside video-input
-        vi_patterns = ['*.bsindex', '*.json']
+        # B. Delete *.bsindex, *.json and *.csv inside video-input
+        vi_patterns = ['*.bsindex', '*.json', '*.csv']
         for pattern in vi_patterns:
             for file_path in glob.glob(os.path.join(video_input_dir, pattern)):
                 try:

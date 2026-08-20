@@ -9,6 +9,8 @@ import shutil
 import subprocess
 import time
 
+import source_filter
+
 try:
     from wakepy import keep
 except Exception:  # pragma: no cover - wakepy ships with the package
@@ -38,8 +40,21 @@ VSHIP_METRICS = ("ssimulacra2", "butteraugli", "butteraugli-3", "cvvdp")
 
 VSHIP_DLLS = {
     "nvidia": "libvship_NVIDIA.dll",
+    "amd": "libvship_AMD.dll",
     "vulkan": "libvship_VULKAN.dll",
 }
+
+# Written by tools\ssimu2-workercount.py, the benchmark the generated .bat runs
+# on its first use (and the same one bat-builder.py's .bat files run). It
+# measures every vship/FFVship build this machine can load and records the
+# winner as tool=/variant=. Only those two lines are read here: the worker and
+# stream counts in that file belong to the Auto-Boost metrics pass, while
+# Condor's worker count comes from WORKERS in the .bat.
+SSIMU2_CONFIG_NAME = "workercount-ssimu2.txt"
+
+# GPU vendor -> the vship build that runs on it. Intel has no dedicated build,
+# so Vulkan is its only path.
+VENDOR_BACKENDS = {"nvidia": "nvidia", "amd": "amd", "intel": "vulkan"}
 
 
 def _load_av1an_dispatch():
@@ -125,13 +140,94 @@ def resolve_condor_exe(tools_dir):
     sys.exit(1)
 
 
+def read_ssimu2_backend(tools_dir):
+    """The GPU backend the metric benchmark settled on, or None.
+
+    tools\\workercount-ssimu2.txt records the winner as tool= (vs-hip, ffvship_*
+    or vs-zip) plus variant= (nvidia, amd, vulkan or cpu). Condor cares only
+    which GPU build won, since vs-hip and FFVship are two front ends onto the
+    same vship backends. A vs-zip win means the CPU out-ran every GPU backend,
+    which says nothing about which build loads, so that returns None and the
+    caller falls back to vendor detection.
+    """
+    path = os.path.join(tools_dir, SSIMU2_CONFIG_NAME)
+    config = {}
+    try:
+        with open(path, "r", encoding="utf-8", errors="ignore") as f:
+            for raw in f:
+                line = raw.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                config[key.strip().lower().replace("_", "-")] = value.strip()
+    except OSError:
+        return None
+
+    variant = config.get("variant", "").strip().lower()
+    if variant in VSHIP_DLLS:
+        return variant
+
+    # Older configs, or ones written before variant= existed, carry the backend
+    # in the tool name instead (ffvship_nvidia, vs-hip-amd, ...).
+    tool = config.get("tool", "").strip().lower().replace("_", "-")
+    for backend in VSHIP_DLLS:
+        if backend in tool:
+            return backend
+    return None
+
+
+def detect_gpu_backend():
+    """The vship build matching this machine's dedicated GPU, or None."""
+    try:
+        from gpu_vendor import gpu_vendor
+        vendor = gpu_vendor()
+    except Exception:
+        return None
+    return VENDOR_BACKENDS.get(vendor)
+
+
+def resolve_gpu_backend(tools_dir, requested):
+    """Decide which libvship build to activate for the GPU metrics.
+
+    An explicit GPU= in the .bat always wins. Otherwise the benchmark result is
+    used, and if that produced no GPU winner the dedicated GPU's vendor decides.
+    Vulkan is the last resort because it is the one build that runs on NVIDIA,
+    AMD and Intel alike.
+    """
+    requested = (requested or "").strip().lower()
+    if requested in VSHIP_DLLS:
+        print(f"[Dispatch] Metric GPU backend: {requested} (set as GPU in the .bat).")
+        return requested
+    if requested:
+        print(f"{RED}[Dispatch] GPU={requested} in the .bat is not a known backend "
+              f"(nvidia, amd, vulkan). Detecting one instead.{RESET}")
+
+    backend = read_ssimu2_backend(tools_dir)
+    if backend:
+        print(f"[Dispatch] Metric GPU backend: {backend} "
+              f"(fastest in tools\\{SSIMU2_CONFIG_NAME}).")
+        return backend
+
+    backend = detect_gpu_backend()
+    if backend:
+        print(f"[Dispatch] Metric GPU backend: {backend} (detected GPU vendor; "
+              f"the benchmark named no GPU winner).")
+        return backend
+
+    print(f"{RED}[Dispatch] No GPU backend could be determined, so vulkan is being used:{RESET}")
+    print(f"{RED}[Dispatch] it is the one build that runs on NVIDIA, AMD and Intel.{RESET}")
+    print(f"{RED}[Dispatch] Delete tools\\{SSIMU2_CONFIG_NAME} and run the .bat again to{RESET}")
+    print(f"{RED}[Dispatch] re-benchmark, or set GPU= in the .bat by hand.{RESET}")
+    return "vulkan"
+
+
 def activate_vship_plugin(root_dir, tools_dir, gpu):
     """Copy the requested libvship build into VapourSynth\\vs-plugins.
 
     Condor measures ssimulacra2, butteraugli and cvvdp with the vship plugin
     (com.lumen.vship), which this package keeps out of the autoload folder in
-    tools\\vs-hip so the NVIDIA and Vulkan builds cannot both register the same
-    plugin namespace. Only the selected one is copied in.
+    tools\\vs-hip so the NVIDIA, AMD and Vulkan builds cannot register the same
+    plugin namespace at once. Only the selected one is copied in.
     """
     gpu_key = (gpu or "nvidia").strip().lower()
     if gpu_key not in VSHIP_DLLS:
@@ -366,6 +462,24 @@ def config_has_scenes(config_path):
         return False
 
 
+def config_scene_cuts(config_path):
+    """The (start, end) frame ranges saved in an existing condor.json."""
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            config = json.load(f)
+        scenes = config.get("condor", {}).get("scenes") or []
+    except Exception:
+        return []
+    cuts = []
+    for scene in scenes:
+        try:
+            cuts.append((int(scene["start_frame"]), int(scene["end_frame"])))
+        except (KeyError, TypeError, ValueError):
+            continue
+    cuts.sort()
+    return cuts
+
+
 def report_target_quality(metric, target, min_q, max_q, profile):
     print(f"target metric:  {metric}")
     print(f"target score:   {target}")
@@ -389,7 +503,9 @@ def parse_args(args):
         "target_profile": "standard",
         "decoder": "bestsource",
         "concat": "mkvmerge",
-        "gpu": "nvidia",
+        # Empty means "work it out": the benchmark result first, then the
+        # detected GPU vendor. Only a GPU= filled in by hand overrides that.
+        "gpu": "",
         "workers": "",
         "photon_noise": "",
         "final_speed": "4",
@@ -558,7 +674,8 @@ def main():
     ensure_vsscript_path(root_dir)
     condor_exe = resolve_condor_exe(tools_dir)
     if metric in VSHIP_METRICS:
-        activate_vship_plugin(root_dir, tools_dir, options["gpu"])
+        activate_vship_plugin(root_dir, tools_dir,
+                              resolve_gpu_backend(tools_dir, options["gpu"]))
 
     # --- settings.txt ---
     settings_path = os.path.join(root_dir, "settings.txt")
@@ -574,8 +691,14 @@ def main():
     ntfy_settings = settings
 
     ad.setup_svt_av1_fork(tools_dir, options["fork"], arch=options["arch"], verbose=True)
-    # Must run before any .vpy is generated: dehalo=True calls into zsmooth.
-    ad.setup_zsmooth_plugin(tools_dir, arch=options["arch"], verbose=True)
+
+    # The .vpy comes from av1an-dispatch's builder, so the override applies here
+    # too. Condor's own --decoder is separate: it only matters for inputs Condor
+    # opens itself, and Condor is handed the .vpy.
+    source_filter_override = source_filter.read_override()
+    if source_filter_override:
+        print(f"{BLUE}[Dispatch] Source filter override active: "
+              f"{source_filter.describe(source_filter_override)}{RESET}")
 
     # --- Gather Input Files ---
     extensions = ("*.mkv", "*.mp4", "*.m2ts")
@@ -619,9 +742,16 @@ def main():
             json_abspath = os.path.join(temp_dir, json_file)
 
             scene_detection_elapsed = 0.0
-            if os.path.exists(json_abspath):
+            scenes_override = source_filter.read_override()
+            scenes_are_current = (os.path.exists(json_abspath)
+                                  and source_filter.scenes_marker_matches(json_abspath, scenes_override))
+            if scenes_are_current:
                 print("[Dispatch] Skipping scene detection (JSON exists).")
             else:
+                if os.path.exists(json_abspath):
+                    # Scene frame numbers only line up with the .vpy while both
+                    # decode the source the same way.
+                    print("[Dispatch] Source filter changed since these scenes were detected; re-running scene detection.")
                 print("[Dispatch] Running Scene Detection...")
                 cmd_scene = [
                     sys.executable,
@@ -632,6 +762,7 @@ def main():
                 scene_detection_started_at = time.monotonic()
                 try:
                     subprocess.check_call(cmd_scene, cwd=temp_dir, env=ad.scene_detection_env())
+                    source_filter.write_scenes_marker(json_abspath, scenes_override)
                 except subprocess.CalledProcessError:
                     print("[Dispatch] Scene detection failed.")
                 scene_detection_elapsed = time.monotonic() - scene_detection_started_at
@@ -659,7 +790,9 @@ def main():
             if tonemap_this_file:
                 # Tonemapped output is SDR BT.709.
                 current_color_flags = bt709_flags
-                print(f"{BLUE}[Dispatch] HDR source detected; tonemapping HDR to SDR (BT.709) via libplacebo.{RESET}")
+                # build_vapoursynth_script picks libplacebo or the CPU fallback and
+                # logs which one it settled on.
+                print(f"{BLUE}[Dispatch] HDR source detected; tonemapping HDR to SDR (BT.709).{RESET}")
             elif is_hdr_source and ad.is_hdr_fork(options["fork"]):
                 hdr_flags = ad.build_hdr_color_flags(color_metadata)
                 if hdr_flags:
@@ -701,6 +834,25 @@ def main():
             av1_output = os.path.join(temp_dir, f"{basename}-av1.mkv")
             config_path = os.path.join(temp_dir, f"{basename}-condor.json")
             condor_temp_dir = os.path.join(temp_dir, f"{basename}-condor")
+
+            # A saved config whose scenes are not the ones just detected - after a
+            # re-detection under a different source filter, say - would carry on
+            # encoding the old frame ranges, and the finished scene files Condor
+            # resumes from belong to that old list too. Start that encode over
+            # rather than mixing the two.
+            if config_has_scenes(config_path) and config_scene_cuts(config_path) != cuts:
+                try:
+                    os.remove(config_path)
+                    print("[Dispatch] The saved Condor config was built from an older scene list; discarding it.")
+                except OSError as e:
+                    print(f"{RED}[Dispatch] Warning: could not remove the stale Condor config: {e}{RESET}")
+                if os.path.isdir(condor_temp_dir):
+                    try:
+                        shutil.rmtree(condor_temp_dir)
+                        print(f"[Dispatch] Discarded temp\\{basename}-condor, which held scenes "
+                              f"encoded from that older list.")
+                    except OSError as e:
+                        print(f"{RED}[Dispatch] Warning: could not remove {condor_temp_dir}: {e}{RESET}")
 
             # 5. Build the Condor config, then replace its scenes with ours.
             # A config that already has scenes is a run that was interrupted:

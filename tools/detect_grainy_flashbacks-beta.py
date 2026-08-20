@@ -31,6 +31,36 @@ Requirements:
 
 from __future__ import annotations
 
+# --- VapourSynth R79 plugin-path bootstrap ---
+# R72 autoloaded VapourSynth\vs-plugins from the portable.vs marker. R78+ dropped
+# that and reads VAPOURSYNTH_EXTRA_PLUGIN_PATH instead, so without this the
+# plugins kept in vs-plugins (wwxd, fmtconv, ...) are invisible and scripts die
+# with "There is no attribute or namespace named <plugin>".
+# Must run before vapoursynth/vstools pull in a core. Child processes inherit it.
+import os as _bootstrap_os
+
+_PLUGIN_ENV_VAR = "VAPOURSYNTH_EXTRA_PLUGIN_PATH"
+
+
+def _ensure_vs_plugin_path():
+    root_dir = _bootstrap_os.path.dirname(_bootstrap_os.path.dirname(_bootstrap_os.path.abspath(__file__)))
+    found = _bootstrap_os.path.join(root_dir, "VapourSynth", "vs-plugins")
+    if not _bootstrap_os.path.isdir(found):
+        return ""
+
+    existing = [part for part in _bootstrap_os.environ.get(_PLUGIN_ENV_VAR, "").split(_bootstrap_os.pathsep) if part]
+    if not existing:
+        # Set a single path: valid whether the core reads one path or a list.
+        _bootstrap_os.environ[_PLUGIN_ENV_VAR] = found
+    elif not any(_bootstrap_os.path.normcase(part) == _bootstrap_os.path.normcase(found) for part in existing):
+        _bootstrap_os.environ[_PLUGIN_ENV_VAR] = _bootstrap_os.pathsep.join(existing + [found])
+
+    return found
+
+
+_ensure_vs_plugin_path()
+# --- end bootstrap ---
+
 import argparse
 import json
 import math
@@ -45,6 +75,19 @@ from typing import Callable, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import psutil
+# Silence the core's plugin-load chatter (API3 deprecation notices, duplicate
+# plugin DLLs). Must run before the first vs.core access, since that is what
+# triggers the autoload that emits them.
+try:
+    import sys as _quiet_sys, os as _quiet_os
+    _quiet_dir = _quiet_os.path.dirname(_quiet_os.path.abspath(__file__))
+    if _quiet_dir not in _quiet_sys.path:
+        _quiet_sys.path.insert(0, _quiet_dir)
+    from vs_quiet import silence_plugin_noise as _silence_plugin_noise
+    _silence_plugin_noise()
+except Exception:
+    pass
+
 import vapoursynth as vs
 
 core = vs.core

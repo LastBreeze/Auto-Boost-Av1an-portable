@@ -11,6 +11,36 @@ Merged from robust_autocrop.py and autocrop.py.
 
 from __future__ import annotations
 
+# --- VapourSynth R79 plugin-path bootstrap ---
+# R72 autoloaded VapourSynth\vs-plugins from the portable.vs marker. R78+ dropped
+# that and reads VAPOURSYNTH_EXTRA_PLUGIN_PATH instead, so without this the
+# plugins kept in vs-plugins (wwxd, fmtconv, ...) are invisible and scripts die
+# with "There is no attribute or namespace named <plugin>".
+# Must run before vapoursynth/vstools pull in a core. Child processes inherit it.
+import os as _bootstrap_os
+
+_PLUGIN_ENV_VAR = "VAPOURSYNTH_EXTRA_PLUGIN_PATH"
+
+
+def _ensure_vs_plugin_path():
+    root_dir = _bootstrap_os.path.dirname(_bootstrap_os.path.dirname(_bootstrap_os.path.abspath(__file__)))
+    found = _bootstrap_os.path.join(root_dir, "VapourSynth", "vs-plugins")
+    if not _bootstrap_os.path.isdir(found):
+        return ""
+
+    existing = [part for part in _bootstrap_os.environ.get(_PLUGIN_ENV_VAR, "").split(_bootstrap_os.pathsep) if part]
+    if not existing:
+        # Set a single path: valid whether the core reads one path or a list.
+        _bootstrap_os.environ[_PLUGIN_ENV_VAR] = found
+    elif not any(_bootstrap_os.path.normcase(part) == _bootstrap_os.path.normcase(found) for part in existing):
+        _bootstrap_os.environ[_PLUGIN_ENV_VAR] = _bootstrap_os.pathsep.join(existing + [found])
+
+    return found
+
+
+_ensure_vs_plugin_path()
+# --- end bootstrap ---
+
 import argparse
 import csv
 import json

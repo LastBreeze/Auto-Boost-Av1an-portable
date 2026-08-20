@@ -442,6 +442,40 @@ def hr():
     print("-" * 79)
 
 
+def fs_path(path):
+    r"""The form of `path` to hand a file-system call, free of the 260 limit.
+
+    The Windows file APIs reject any path longer than 260 characters, and the
+    names here reach that on their own: a backup is
+
+        temp\<stem>-condor\afterzone-backup\<stem>-condor.json.<stamp>.bak
+
+    which spells a release name -- often 80 characters of one -- out twice.
+    Worse than the failure is the silence: os.path.exists() on an over-long
+    path answers False rather than raising, so a guard written around it reads
+    "not there" and the copy or the move it protects is skipped or overwrites
+    something.
+
+    The \\?\ prefix opts the call out of that limit. It also opts out of path
+    parsing, so the path has to be absolute, backslash-separated and free of
+    . and .. first, which is what abspath() leaves behind.
+
+    For os/shutil/open calls only. A prefixed path must never be written into
+    a config file, a scene list or a command line: av1an, LQTC and ffmpeg do
+    not all understand it, and condor writes its own prefixes (which
+    windows_path_to_local strips back off).
+    """
+    if os.name != "nt":
+        return path
+    text = str(path)
+    if text.startswith("\\\\?\\"):
+        return text
+    absolute = os.path.abspath(text)
+    if absolute.startswith("\\\\"):      # \\server\share -> \\?\UNC\server\share
+        return "\\\\?\\UNC\\" + absolute.lstrip("\\")
+    return "\\\\?\\" + absolute
+
+
 def make_writable(path):
     """Clear the read-only attribute so a file can be rewritten in place.
 
@@ -459,6 +493,7 @@ def make_writable(path):
     loses its zone parameters re-encodes every freed chunk to exactly what it
     already was.
     """
+    path = fs_path(path)
     try:
         if os.path.exists(path) and not os.access(path, os.W_OK):
             os.chmod(path, stat.S_IWRITE | stat.S_IREAD)
@@ -470,7 +505,7 @@ def remove_file(path):
     """os.remove, but not defeated by the read-only attribute. True if it went."""
     make_writable(path)
     try:
-        os.remove(path)
+        os.remove(fs_path(path))
     except OSError:
         return False
     return True
@@ -4151,9 +4186,9 @@ def backup_state_files(job, backup_dir, stamp, names):
     for name in names:
         source = os.path.join(job.hash_dir, name) if os.path.dirname(name) == "" \
             else name
-        if os.path.exists(source):
-            shutil.copy2(source, os.path.join(
-                backup_dir, f"{os.path.basename(source)}.{stamp}.bak"))
+        if os.path.exists(fs_path(source)):
+            shutil.copy2(fs_path(source), fs_path(os.path.join(
+                backup_dir, f"{os.path.basename(source)}.{stamp}.bak")))
             kept.append(os.path.basename(source))
     if kept:
         print(f"[AfterZone] Backed up {', '.join(kept)} to {backup_dir}")
@@ -4192,7 +4227,7 @@ def relocate_chunk_files(job, plan, backup_dir, stamp):
     # Written before anything moves, so an interrupted run can be reconstructed
     # by hand: this says what encode\ was supposed to end up looking like.
     journal_path = os.path.join(backup_dir, f"rename-map.{stamp}.json")
-    with open(journal_path, "w", encoding="utf-8") as handle:
+    with open(fs_path(journal_path), "w", encoding="utf-8") as handle:
         json.dump({
             "encoder": job.kind,
             "chunks_before": plan.original_count,
@@ -4211,11 +4246,11 @@ def relocate_chunk_files(job, plan, backup_dir, stamp):
     for index in replaced:
         name = name_of(index)
         source = os.path.join(encode_dir, name)
-        if os.path.exists(source):
+        if os.path.exists(fs_path(source)):
             destination = os.path.join(backup_dir, name)
-            if os.path.exists(destination):
+            if os.path.exists(fs_path(destination)):
                 remove_file(destination)
-            shutil.move(source, destination)
+            shutil.move(fs_path(source), fs_path(destination))
             moved += 1
         else:
             missing += 1
@@ -4232,9 +4267,9 @@ def relocate_chunk_files(job, plan, backup_dir, stamp):
         source = os.path.join(encode_dir, f"{job.chunk_label(old_index)}.{ext}")
         destination = os.path.join(encode_dir,
                                    f"{job.chunk_label(new_index)}.{ext}")
-        if not os.path.exists(source):
+        if not os.path.exists(fs_path(source)):
             continue                      # never finished in the original encode
-        if os.path.exists(destination):
+        if os.path.exists(fs_path(destination)):
             die(f"encode\\{job.chunk_label(new_index)}.{ext} already exists, so "
                 f"renumbering would overwrite it.\n"
                 f"            Nothing else has been changed: the encode's own "
@@ -4242,7 +4277,7 @@ def relocate_chunk_files(job, plan, backup_dir, stamp):
                 f"            the originals. Restore encode\\ using "
                 f"{journal_path} and the backups in\n"
                 f"            {backup_dir}.")
-        os.replace(source, destination)
+        os.replace(fs_path(source), fs_path(destination))
         renamed += 1
     if renamed:
         print(f"[AfterZone] Renamed {renamed} finished chunk file(s) to keep the "
@@ -4254,7 +4289,7 @@ def relocate_chunk_files(job, plan, backup_dir, stamp):
 def apply_plan(job, plan, done_data):
     """Rewrite chunks.json / done.json and move the replaced chunk files aside."""
     backup_dir = os.path.join(job.hash_dir, "afterzone-backup")
-    os.makedirs(backup_dir, exist_ok=True)
+    os.makedirs(fs_path(backup_dir), exist_ok=True)
 
     stamp = time.strftime("%Y%m%d-%H%M%S")
     backup_state_files(job, backup_dir, stamp, ("chunks.json", "done.json"))
@@ -4275,9 +4310,9 @@ def apply_plan(job, plan, done_data):
              + glob.glob(os.path.join(job.hash_dir, "options.json")))
     for path in stale:
         destination = os.path.join(backup_dir, os.path.basename(path))
-        if os.path.exists(destination):
+        if os.path.exists(fs_path(destination)):
             remove_file(destination)
-        shutil.move(path, destination)
+        shutil.move(fs_path(path), fs_path(destination))
     if stale:
         print(f"[AfterZone] Moved {len(stale)} stale concat file(s) aside so av1an "
               f"rebuilds them.")
@@ -4317,7 +4352,7 @@ def apply_condor_plan(job, plan, state):
         die("condor.json has no scenes to rewrite.")
 
     backup_dir = os.path.join(job.hash_dir, "afterzone-backup")
-    os.makedirs(backup_dir, exist_ok=True)
+    os.makedirs(fs_path(backup_dir), exist_ok=True)
 
     stamp = time.strftime("%Y%m%d-%H%M%S")
     backup_state_files(job, backup_dir, stamp, (job.config_path,))
@@ -4366,9 +4401,9 @@ def apply_condor_plan(job, plan, state):
                                    "options.json"))
     for path in stale:
         destination = os.path.join(backup_dir, os.path.basename(path))
-        if os.path.exists(destination):
+        if os.path.exists(fs_path(destination)):
             remove_file(destination)
-        shutil.move(path, destination)
+        shutil.move(fs_path(path), fs_path(destination))
     if stale:
         print(f"[AfterZone] Moved the cached concatenator command aside so "
               f"condor rebuilds it.")
@@ -4414,7 +4449,7 @@ def apply_lqtc_plan(job, plan, state):
             f"AfterZone again.")
 
     backup_dir = os.path.join(job.hash_dir, "afterzone-backup")
-    os.makedirs(backup_dir, exist_ok=True)
+    os.makedirs(fs_path(backup_dir), exist_ok=True)
 
     stamp = time.strftime("%Y%m%d-%H%M%S")
     backup_state_files(job, backup_dir, stamp,
@@ -4896,11 +4931,12 @@ def repair_lqtc_cmd(job, state, tools_dir):
         print(f"{YELLOW}              {change}{RESET}")
 
     backup_dir = os.path.join(job.hash_dir, "afterzone-backup")
-    os.makedirs(backup_dir, exist_ok=True)
+    os.makedirs(fs_path(backup_dir), exist_ok=True)
     stamp = time.strftime("%Y%m%d-%H%M%S")
     original = os.path.join(job.hash_dir, "cmd.txt")
-    if os.path.exists(original):
-        shutil.copy2(original, os.path.join(backup_dir, f"cmd.txt.{stamp}.bak"))
+    if os.path.exists(fs_path(original)):
+        shutil.copy2(fs_path(original),
+                     fs_path(os.path.join(backup_dir, f"cmd.txt.{stamp}.bak")))
     write_lqtc_cmd(job.hash_dir, argv)
     state["argv"] = list(argv)
     return argv
