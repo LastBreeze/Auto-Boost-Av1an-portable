@@ -181,6 +181,7 @@ The `prefilter\` folder contains scripts for sources that need denoising, deband
 ---
 
 ## 💡 Tips for new users
+If it matters to you, most coding is done by Claude Opus
 
 - **Start with Bat Builder.** It asks plain-English questions and handles all settings for you. You can always hand-edit the generated `.bat` file later in Notepad++.
 - **CRF 30 is the recommended starting point.** Test on a short clip with `extras\create-sample.bat` before committing to a full encode.
