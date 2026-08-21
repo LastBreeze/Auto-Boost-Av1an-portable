@@ -31,7 +31,11 @@ Linux fork: [Auto-Boost-Av1an-Linux](https://github.com/abdalrahmanx9/Auto-Boost
 
 ## 🚀 Quick Start
 
-### Option A — Bat Builder (recommended for new users)
+### Option A — Pre-made batch files (recommended for new users)
+
+Pre-built batch files for common scenarios are included. See the table below, drop your files into `video-input`, and double-click.
+
+### Option B — Bat Builder
 
 1. **Double-click** `bat-builder.bat` in the root folder.
 2. **Answer** five short questions about your content type, encoder fork, quality target, and speed.
@@ -39,10 +43,6 @@ Linux fork: [Auto-Boost-Av1an-Linux](https://github.com/abdalrahmanx9/Auto-Boost
 4. **Drop** your `.mkv`, `.mp4`, or `.m2ts` files into the `video-input` folder.
 5. **Double-click** your generated `.bat` file and wait.
 6. **Finished files** appear in the `video-output` folder.
-
-### Option B — Pre-made batch files
-
-Pre-built batch files for common scenarios are included. See the table below, drop your files into `video-input`, and double-click.
 
 ---
 
