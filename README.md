@@ -4,6 +4,8 @@ A fully automated AV1 encoding workflow for Windows. **One double-click** takes 
 
 Why use it: Unzip the portable folder and everything is ready to use. No installing python or vapoursynth, everything is included and example one-click scripts are provided to get your started on your av1 journey.
 
+What is it: A collection of scripts/tools with an automated workflow to do all the steps for you.
+
 Built on [Av1an](https://github.com/master-of-zen/Av1an), [SVT-AV1-PSY](https://github.com/gianni-rosato/svt-av1-psy), and [VapourSynth](https://www.vapoursynth.com/).
 
 Linux fork: [Auto-Boost-Av1an-Linux](https://github.com/abdalrahmanx9/Auto-Boost-Av1an-Linux)
