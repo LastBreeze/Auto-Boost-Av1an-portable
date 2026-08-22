@@ -12,9 +12,9 @@ FILES_TO_DELETE = [
     '*.json',
     '*.csv',
     '*av1.mkv',
-    '*.temp', 
-    '*.bsindex', 
-    '*.lwi', 
+    '*.temp',
+    '*.bsindex',
+    '*.lwi',
 ]
 # =========================================================
 
@@ -23,7 +23,7 @@ def cleanup_workspace():
     cwd = os.getcwd()
     # Get the directory where this script is located (e.g., tools/)
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    
+
     print(f"Cleaning workspace in: {cwd}")
 
     # 1. Delete files matching the User Configuration list above (Root Directory)
@@ -31,7 +31,7 @@ def cleanup_workspace():
         # Create full path pattern (e.g., C:\Path\*.jpg)
         full_pattern = os.path.join(cwd, pattern)
         files = glob.glob(full_pattern)
-        
+
         for file_path in files:
             try:
                 os.remove(file_path)
@@ -51,18 +51,18 @@ def cleanup_workspace():
     # 3. Delete Temp Folders based on naming convention
     # Looks for folders ending in "-source", "-source_scenedetect.scene-detection.tmp", ".tmp"
     # OR folders that start with a period (e.g., .temp, .cache)
-    
+
     # Iterate over all items in the current directory
     for item in os.listdir(cwd):
         item_path = os.path.join(cwd, item)
-        
+
         if os.path.isdir(item_path):
             # Check for the specific temp folder suffixes or prefix
-            if (item.endswith("-source") or 
-                item.endswith("-source_scenedetect.scene-detection.tmp") or 
+            if (item.endswith("-source") or
+                item.endswith("-source_scenedetect.scene-detection.tmp") or
                 item.endswith(".tmp") or
                 item.startswith(".")):
-                
+
                 try:
                     shutil.rmtree(item_path)
                     print(f"Deleted temp folder: {item}")
@@ -72,7 +72,7 @@ def cleanup_workspace():
     # 4. Delete ssimu2_bench_temp folder
     # Located in the same directory as this script (tools\ssimu2_bench_temp)
     ssimu2_temp_dir = os.path.join(script_dir, 'ssimu2_bench_temp')
-    
+
     if os.path.exists(ssimu2_temp_dir) and os.path.isdir(ssimu2_temp_dir):
         try:
             shutil.rmtree(ssimu2_temp_dir)
@@ -83,15 +83,15 @@ def cleanup_workspace():
     # 5. Delete 'temp' folder with 'fastpass' exception logic
     # This corresponds to the dispatch.py temp directory
     temp_dir = os.path.join(cwd, 'temp')
-    
+
     if os.path.exists(temp_dir) and os.path.isdir(temp_dir):
         # Check for any .mkv files inside
         mkv_files = glob.glob(os.path.join(temp_dir, "*.mkv"))
-        
+
         # Filter files: We only want to preserve the folder if it contains "real" encodes.
         # If a file does NOT have "fastpass" in the name, it is considered important.
         files_to_preserve = [f for f in mkv_files if "fastpass" not in os.path.basename(f).lower()]
-        
+
         # If there are no files to preserve (meaning empty, or only "fastpass" files exist), delete the folder.
         if not files_to_preserve:
             try:
@@ -104,14 +104,14 @@ def cleanup_workspace():
 
     # 6. Delete *.ffindex from 'video-input' and 'filter' directories
     dirs_to_clean_ffindex = ['video-input', 'filter']
-    
+
     for folder_name in dirs_to_clean_ffindex:
         folder_path = os.path.join(cwd, folder_name)
-        
+
         if os.path.exists(folder_path) and os.path.isdir(folder_path):
             ffindex_pattern = os.path.join(folder_path, '*.ffindex')
             files = glob.glob(ffindex_pattern)
-            
+
             for file_path in files:
                 try:
                     os.remove(file_path)

@@ -109,9 +109,30 @@ def check_vfr_mediainfo(source_file):
         pass
     return False
 
-def mux_files():
+def mux_files(only_basename=None):
+    """Mux the encoded video(s) in temp back together with their source tracks.
+
+    Av1an now writes "<name>-av1.mkv" straight into this folder instead of it
+    being moved here once the encode is known to have finished. That is one
+    hand-off fewer, but it also means a run that was interrupted mid-concat can
+    leave a partial file sitting here. So:
+
+      - the dispatcher passes the name it just encoded, and only that file is
+        touched; nothing unrelated gets swept up
+      - an empty file is skipped rather than muxed into a broken output
+      - the intermediate is only deleted once a real output exists
+
+    Called with no argument (by hand, or from the older workflows) it still
+    processes everything in the folder, exactly as before.
+    """
     # We are running in 'temp', so find av1 files here
-    av1_files = glob.glob("*-av1.mkv")
+    if only_basename:
+        av1_files = [f"{only_basename}-av1.mkv"]
+        if not os.path.exists(av1_files[0]):
+            print(f"No '{av1_files[0]}' found in temp to mux.")
+            return
+    else:
+        av1_files = glob.glob("*-av1.mkv")
 
     if not av1_files:
         print("No *-av1.mkv files found in temp to mux.")
@@ -122,10 +143,16 @@ def mux_files():
     for av1_file in av1_files:
         base_name = av1_file.replace("-av1.mkv", "")
 
+        # An empty file is an encode that died before mkvmerge wrote anything.
+        # Muxing it would produce a valid-looking output with no video in it.
+        if os.path.getsize(av1_file) == 0:
+            print(f"[SKIP] {av1_file} is empty; the encode did not finish.")
+            continue
+
         # Check for matching source file
         # Priority 1: Check ../video-input/ (Standard workflow)
         # Priority 2: Check current dir (Fallback)
-        
+
         possible_sources = [
             os.path.join("..", "video-input", f"{base_name}.mkv"),
             os.path.join("..", "video-input", f"{base_name}.mp4"),
@@ -133,7 +160,7 @@ def mux_files():
             f"{base_name}.mkv",
             f"{base_name}-source.mkv"
         ]
-        
+
         source_mkv = None
         for path in possible_sources:
             if os.path.exists(path):
@@ -185,17 +212,24 @@ def mux_files():
             # Cleanup Temp Files
             if os.path.exists(temp_mkv): os.remove(temp_mkv)
             if os.path.exists(timestamp_file): os.remove(timestamp_file)
-            
+
             # --- NEW: Delete the intermediate AV1 file if output exists ---
-            if os.path.exists(final_output):
+            # Only once there is a real file to replace it with: this is the
+            # only copy of the encode, and Av1an no longer keeps another one
+            # next to the source.
+            if os.path.exists(final_output) and os.path.getsize(final_output) > 0:
                 print(f"Deleting intermediate file: {av1_file}")
                 try:
                     os.remove(av1_file)
                 except OSError as e:
                     print(f"[WARN] Failed to delete {av1_file}: {e}")
+            else:
+                print(f"[FAIL] No muxed output for {base_name}; keeping {av1_file}.")
 
         except subprocess.CalledProcessError:
             print(f"\n[FAIL] Could not process {base_name}. Skipping.")
 
 if __name__ == "__main__":
-    mux_files()
+    # Optional argument: mux only this basename, which is how the dispatchers
+    # call it. Without it, every -av1.mkv in the folder is processed as before.
+    mux_files(sys.argv[1] if len(sys.argv) > 1 else None)

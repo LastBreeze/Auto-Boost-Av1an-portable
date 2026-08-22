@@ -29,13 +29,14 @@ frame_count_motion = 8
 # Number of still frames (scenes with little to no motion) to algorithmically select.
 frame_count_still = 5
 # Choose your own frames to export. Does not decrease the number of algorithmically selected frames.
-user_frames = []
+user_frames = [6615]
 # Number of frames to choose randomly. Completely separate from frame_count_bright, frame_count_dark, and save_frames. Will change every time you run the script.
 random_frames = 8
 
 # Save the brightness data in a text file so it doesn't have to be reanalysed next time the script is run. Frames will be reanalysed if show/movie name or episode numbers change.
 # Does not save user_frames or random_frames.
-save_frames = False
+# Needs to stay on for compare.bat's "reuse cached data" prompt to be able to skip the analysis pass.
+save_frames = True
 
 # Print frame info on screenshots.
 frame_info = True
@@ -59,6 +60,8 @@ tmdbID = ""
 remove_after = 0
 # Number of images to upload to slow.pics in parallel. Set to 1 to upload one at a time.
 upload_threads = 4
+# How many times a dropped or rejected image upload is retried before it's given up on.
+upload_attempts = 5
 # Output slow.pics link to discord webhook. Disabled if empty.
 webhook_url = r""
 # Automatically open slow.pics url in default browser
@@ -90,7 +93,7 @@ trim_dict_end = {}
 
 """
 Actively adjusts a clip's fps to a target. Useful for sources which incorrectly convert 23.976fps to 24fps.
-First input can be the filename, group name, or index of the file. 
+First input can be the filename, group name, or index of the file.
 Second input must be a fraction split into a list. Numerator comes first, denominator comes second.
 Second input can also be the string "set". This will make all other files, if unspecified fps, use the set file's fps.
 
@@ -230,7 +233,7 @@ def FrameInfo(clip: vs.VideoNode,
 def dedupe(clip: vs.VideoNode, framelist: list, framecount: int, diff_thr: int, selected_frames: list = [], seed: int = None, motion: bool = False):
     """
     Selects frames from a list as long as they aren't too close together.
-    
+
     :param framelist:     Detailed list of frames that has to be cut down.
     :param framecount:    Number of frames to select.
     :param seed:          Seed for `random.sample()`.
@@ -247,7 +250,7 @@ def dedupe(clip: vs.VideoNode, framelist: list, framecount: int, diff_thr: int, 
     while (len(selected_frames) - initial_length) < framecount and len(framelist) > 0:
         dupe = False
 
-        #get random frame from framelist with removal. if motion, get first frame     
+        #get random frame from framelist with removal. if motion, get first frame
         if motion:
             rand = framelist.pop(0)
         else:
@@ -263,7 +266,7 @@ def dedupe(clip: vs.VideoNode, framelist: list, framecount: int, diff_thr: int, 
             selected_frames.append(rand)
 
     selected_frames.sort()
-    
+
     return selected_frames
 
 def analyze_stats(clip: vs.VideoNode, collect_motion: bool = True, message: str = "Analyzing video"):
@@ -513,7 +516,8 @@ def _get_slowpics_header(content_length: str, content_type: str, sess: Session) 
         "Origin": "https://slow.pics/",
         "Referer": "https://slow.pics/comparison",
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.36",
-        "X-XSRF-TOKEN": sess.cookies.get_dict()["XSRF-TOKEN"]
+        #missing token gets rejected by the server and retried, which beats crashing mid-upload
+        "X-XSRF-TOKEN": sess.cookies.get_dict().get("XSRF-TOKEN", "")
     }
 
 def get_highest_res(files: List[str]) -> int:
@@ -603,10 +607,10 @@ def evaluate_analyze_clip(analyze_clip, files, files_info):
         printwrap("Determining which file to analyze...\n")
         estimated_times = [estimate_analysis_time(file) for file in files]
         first_file = files[estimated_times.index(min(estimated_times))]
-    
+
     return first_file
 
-def init_clip(file: str, files: list, trim_dict: dict, trim_dict_end: dict, change_fps: dict = {}, 
+def init_clip(file: str, files: list, trim_dict: dict, trim_dict_end: dict, change_fps: dict = {},
               analyze_clip: str = None, files_info: list = None, return_file: bool = False):
     """
     Gets trimmed and fps modified clip from video file.
@@ -755,7 +759,7 @@ def get_suffixes(files_info: list, first_display: bool = False):
 
                         if letter != files_info[highest_file].get('file_name')[pos]:
                             last_diff_pos = pos
-                        
+
                     if last_diff_pos + 1 == len(files_info[highest_file].get('file_name')):
                         diff = filename[highest:]
                     else:
@@ -785,7 +789,7 @@ def str_to_number(string: str):
             return float(string)
     except:
         return string
-    
+
 def extend_clip(clip: vs.VideoNode, frames: list):
     """
     If a clip is shorter than the largest frame that needs to be rendered, extend it.
@@ -816,7 +820,7 @@ def run_comparison():
 
     global first_file
     first_file = None
-    #first file is only determined by analyze_clip if it is called 
+    #first file is only determined by analyze_clip if it is called
 
     supported_extensions = ('.mkv', '.m2ts', '.mp4', '.webm', '.ogm', '.mpg', '.vob', '.iso', '.ts', '.mts', '.mov', '.qv', '.yuv',
                             '.flv', '.avi', '.rm', '.rmvb', '.m2v', '.m4v', '.mp2', '.mpeg', '.mpe', '.mpv', '.wmv', '.avc', '.hevc',
@@ -859,7 +863,7 @@ def run_comparison():
     else:
         collection_name = files_info[0].get('file_name')
         collection_name = re.sub(r"\[.*?\]|\(.*?\}|\{.*?\}|\.[^.]+$", "", collection_name).strip()
-    
+
     #if anime title still isn't found, give it collection name
     if anime_title == "":
         anime_title = collection_name
@@ -882,7 +886,7 @@ def run_comparison():
     if (list(change_fps.values())).count("set") > 0:
         if (list(change_fps.values())).count("set") > 1:
             sys.exit('Error: More than one change_fps file using "set".')
-        
+
         #if "set" is found, get the index of its file, get its fps, and set every other unspecified file to that fps
         findex = list(change_fps.keys())[list(change_fps.values()).index("set")]
         del change_fps[findex]
@@ -927,7 +931,7 @@ def run_comparison():
                 filename = filename[0] + colorama.Fore.CYAN + groupname[:v - 1] + colorama.Fore.YELLOW + filename[1]
                 filename = filename.split(groupname[v:])
                 filename = filename[0] + colorama.Fore.CYAN + groupname[v:] + colorama.Fore.YELLOW + filename[1]
-            
+
             #if suffix is filename but group name found, still highlight
             elif files_info[findex].get("release_group") in groupname:
                 filename = files_info[findex].get("file_name").split(files_info[findex].get("release_group"))
@@ -951,10 +955,10 @@ def run_comparison():
                 printwrap(f"     - Trimmed to end at frame {trim_dict_end.get(findex)}", subsequent_indent="       ")
             elif trim_dict_end.get(findex) < 0:
                 printwrap(f"     - Trimmed to end {trim_dict_end.get(findex) * -1} frame(s) early", subsequent_indent="       ")
-            
+
         if change_fps.get(findex) is not None:
             printwrap(f"     - FPS changed to {change_fps.get(findex)[0]}/{change_fps.get(findex)[1]}", subsequent_indent="       ")
-            
+
     print()
 
     #get version of suffixes that will be used in the rest of the file
@@ -964,8 +968,8 @@ def run_comparison():
     if (upscale and single_res > 0):
         sys.exit("Error: Can't use 'upscale' and 'single_res' functions at the same time.")
 
-    
-    
+
+
     frames = []
 
     #add user specified frames to list
@@ -1193,7 +1197,7 @@ def run_comparison():
                 message = suffix
 
             progress.reset(file_gen_progress, description=message, visible=1)
-                
+
             #get matrix of clip, account for black clips added to the beginning due to negative trim
             if trim_dict.get(findex) is not None and trim_dict.get(findex) < 0:
                 matrix = clip.get_frame(trim_dict.get(findex) * -1).props._Matrix
@@ -1215,7 +1219,7 @@ def run_comparison():
             #if frame_info option selected, print frame info to screen
             if frame_info:
                 clip = FrameInfo(clip, title=suffix)
-            
+
             #generate screens
             if ffmpeg:
                 for frame in frames:
@@ -1266,7 +1270,7 @@ def run_comparison():
         png_files = sorted([f for f in screen_dir.iterdir() if f.suffix.lower() == '.png'])
         if png_files:
             total_size_before = sum(f.stat().st_size for f in png_files)
-            
+
             # Detect CPU threads for parallel execution, using half of available
             oxipng_workers = max(1, psutil.cpu_count(logical=True) // 2)
 
@@ -1280,14 +1284,14 @@ def run_comparison():
 
             with get_progress() as progress:
                 task = progress.add_task(f"Optimizing with oxipng ({oxipng_workers} threads)", total=len(png_files))
-                
+
                 with concurrent.futures.ThreadPoolExecutor(max_workers=oxipng_workers) as executor:
                     futures = [executor.submit(optimize_worker, png_file) for png_file in png_files]
                     for _ in concurrent.futures.as_completed(futures):
                         progress.update(task, advance=1)
 
             total_size_after = sum(f.stat().st_size for f in png_files)
-            
+
             def format_size(size_bytes):
                 return f"{size_bytes / (1024 * 1024):.2f}MB"
 
@@ -1322,14 +1326,14 @@ def run_comparison():
 
             if len(all_image_files) < len(frames) * len(files):
                 sys.exit(f'Error: Number of screenshots in "{screen_dirname}" folder does not match expected value.')
-        
+
         for x in range(0, len(frames)):
             #current_comp is list of image files for this frame
             current_comp = [f for f in all_image_files if f.startswith(str(frames[x]) + " - ")]
 
             #add field for comparison name. after every comparison name there needs to be as many image names as there are comped video files
             fields[f'comparisons[{x}].name'] = str(frames[x])
-            
+
             #iterate over the image files for this frame
             for imageName in current_comp:
                 i = current_comp.index(imageName)
@@ -1339,15 +1343,54 @@ def run_comparison():
                 #this would upload the images all at once, but that wouldnt let us get progress
                 #fields[f'comparisons[{x}].images[{i}].file'] = (image.name.split(' - ', 1)[1].replace(".png", ""), image.read_bytes(), 'image/png')
 
+        attempts = max(1, upload_attempts)
+
+        def retry_delay(attempt: int) -> float:
+            #exponential backoff with jitter, so parallel workers don't all retry in lockstep
+            return min(30.0, 2.0 ** attempt) + random.uniform(0, 1)
+
         with Session() as sess:
-            sess.get('https://slow.pics/comparison')
+            #size the connection pool to the number of upload threads, otherwise urllib3 keeps
+            #discarding and rebuilding TLS connections once more than 10 requests are in flight
+            pool_size = max(10, max(1, upload_threads) * 2)
+            adapter = requests.adapters.HTTPAdapter(pool_connections=pool_size, pool_maxsize=pool_size)
+            sess.mount('https://', adapter)
+            sess.mount('http://', adapter)
 
-            files = MultipartEncoder(fields, str(uuid.uuid4()))
+            #the XSRF token comes from this request, so it has to succeed before anything else
+            for attempt in range(attempts):
+                try:
+                    sess.get('https://slow.pics/comparison', timeout=(10, 60))
+                    break
+                except requests.exceptions.RequestException as e:
+                    if attempt == attempts - 1:
+                        print(f"\nError: could not reach slow.pics ({type(e).__name__}: {e}).")
+                        print(f'Screenshots were kept in "{screen_dirname}" so you can retry.')
+                        sys.exit(1)
+                    time.sleep(retry_delay(attempt))
 
-            comp_req = sess.post(
-                'https://slow.pics/upload/comparison', data=files.to_string(),
-                headers=_get_slowpics_header(str(files.len), files.content_type, sess)
-            )
+            if "XSRF-TOKEN" not in sess.cookies.get_dict():
+                print("\nError: slow.pics did not hand out a session token. Please try again later.")
+                sys.exit(1)
+
+            comp_req = None
+            for attempt in range(attempts):
+                #MultipartEncoder is single use, so it has to be rebuilt for every attempt
+                files = MultipartEncoder(fields, str(uuid.uuid4()))
+
+                try:
+                    comp_req = sess.post(
+                        'https://slow.pics/upload/comparison', data=files.to_string(),
+                        headers=_get_slowpics_header(str(files.len), files.content_type, sess),
+                        timeout=(10, 180)
+                    )
+                    break
+                except requests.exceptions.RequestException as e:
+                    if attempt == attempts - 1:
+                        print(f"\nError: slow.pics dropped the connection while creating the comparison ({type(e).__name__}: {e}).")
+                        print(f'Screenshots were kept in "{screen_dirname}" so you can retry.')
+                        sys.exit(1)
+                    time.sleep(retry_delay(attempt))
 
             # Error handling for the API response
             try:
@@ -1355,12 +1398,12 @@ def run_comparison():
             except Exception as e:
                 print(f"Error parsing server response: {e}")
                 print(f"Status code: {comp_req.status_code}")
-                return
+                sys.exit(1)
 
             if comp_response.get("images") is None:
                 print("\nError: Slow.pics failed to initialize the comparison. Please try again later.")
                 print(f"Server Response: {comp_response}")
-                return
+                sys.exit(1)
 
             collection = comp_response["collectionUuid"]
             key = comp_response["key"]
@@ -1372,30 +1415,52 @@ def run_comparison():
                 for image_index, image_id in enumerate(image_section):
                     upload_jobs.append((image_id, all_image_files[base + image_index]))
 
+            failed_uploads: List[str] = []
+
             def upload_image(image_id, image_file):
-                for attempt in range(3):
-                    upload_info = {
+                try:
+                    image_bytes = pathlib.Path(f"{screen_dir}/{image_file}").read_bytes()
+                except OSError as e:
+                    failed_uploads.append(f'{image_file} (could not be read: {e})')
+                    return False
+
+                last_error = "unknown error"
+
+                for attempt in range(attempts):
+                    if attempt:
+                        #back off before retrying, in case of rate limiting or a flaky connection
+                        time.sleep(retry_delay(attempt))
+
+                    upload_info = MultipartEncoder({
                         "collectionUuid": collection,
                         "imageUuid": image_id,
-                        "file": (image_file, pathlib.Path(f"{screen_dir}/{image_file}").read_bytes(), 'image/png'),
+                        "file": (image_file, image_bytes, 'image/png'),
                         'browserId': browserId,
-                    }
-                    upload_info = MultipartEncoder(upload_info, str(uuid.uuid4()))
-                    upload_response = sess.post(
-                        'https://slow.pics/upload/image', data=upload_info.to_string(),
-                        headers=_get_slowpics_header(str(upload_info.len), upload_info.content_type, sess)
-                    )
+                    }, str(uuid.uuid4()))
 
-                    if upload_response.status_code == 200 and upload_response.content.decode() == "OK":
-                        return
+                    try:
+                        upload_response = sess.post(
+                            'https://slow.pics/upload/image', data=upload_info.to_string(),
+                            headers=_get_slowpics_header(str(upload_info.len), upload_info.content_type, sess),
+                            timeout=(10, 180)
+                        )
+                    except Exception as e:
+                        #slow.pics regularly resets connections partway through a big batch.
+                        #that's retryable, so don't let it kill the whole upload
+                        last_error = f"{type(e).__name__}: {e}"
+                        continue
 
-                    #back off a little before retrying, in case of rate limiting
-                    time.sleep(1 + attempt * 2)
+                    if upload_response.status_code == 200 and upload_response.content.decode(errors='replace') == "OK":
+                        return True
 
-                raise Exception(f'Failed to upload "{image_file}" after 3 attempts (status {upload_response.status_code}).')
+                    last_error = f"status {upload_response.status_code}"
+
+                #list append is atomic under the GIL, so no lock needed here
+                failed_uploads.append(f'{image_file} ({last_error})')
+                return False
 
             with get_progress() as progress:
-                upload_progress = progress.add_task("[bright_magenta]Uploading to Slowpoke Pics", total=len(all_image_files))
+                upload_progress = progress.add_task("[bright_magenta]Uploading to Slowpoke Pics", total=len(upload_jobs))
 
                 with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, upload_threads)) as executor:
                     upload_futures = [executor.submit(upload_image, image_id, image_file) for image_id, image_file in upload_jobs]
@@ -1403,6 +1468,15 @@ def run_comparison():
                     for future in concurrent.futures.as_completed(upload_futures):
                         future.result()
                         progress.update(upload_progress, advance=1)
+
+            if failed_uploads:
+                print(f'\nWarning: {len(failed_uploads)} of {len(upload_jobs)} images failed to upload after {attempts} attempts:')
+                for failure in failed_uploads[:10]:
+                    print(f'  {failure}')
+                if len(failed_uploads) > 10:
+                    print(f'  ...and {len(failed_uploads) - 10} more')
+                print('The comparison below still works, but those frames will be missing.')
+                print(f'Screenshots were kept in "{screen_dirname}" so you can retry.')
 
         slowpics_url = f'https://slow.pics/c/{key}'
         print(f'\nSlowpoke Pics url: {slowpics_url}', end='')
@@ -1413,13 +1487,16 @@ def run_comparison():
 
         if webhook_url:
             data = {"content": slowpics_url}
-            if requests.post(webhook_url, data).status_code < 300:
-                print('Posted to webhook.')
-            else:
-                print('Failed to post on webhook!')
+            try:
+                if requests.post(webhook_url, data, timeout=(10, 30)).status_code < 300:
+                    print('Posted to webhook.')
+                else:
+                    print('Failed to post on webhook!')
+            except requests.exceptions.RequestException as e:
+                print(f'Failed to post on webhook! ({type(e).__name__}: {e})')
 
         if url_shortcut:
-            #datetime.datetime.now().strftime("%Y.%m.%d") + " - " + 
+            #datetime.datetime.now().strftime("%Y.%m.%d") + " - " +
             shortcut_path = os.path.join("Comparisons", collection_name + " - " + key + ".url")
 
             if not os.path.exists(os.path.dirname(shortcut_path)):
@@ -1428,9 +1505,14 @@ def run_comparison():
             with open(shortcut_path, "w", encoding='utf-8') as shortcut:
                 shortcut.write(f'[InternetShortcut]\nURL={slowpics_url}')
 
-        if delete_screen_dir and os.path.isdir(screen_dir):
+        #keep the screenshots around if part of the upload failed, so nothing has to be regenerated
+        if delete_screen_dir and not failed_uploads and os.path.isdir(screen_dir):
             shutil.rmtree(screen_dir)
 
         time.sleep(3)
+
+        #non-zero exit tells compare.bat to leave the screenshots alone for a retry
+        if failed_uploads:
+            sys.exit(1)
 
 run_comparison()

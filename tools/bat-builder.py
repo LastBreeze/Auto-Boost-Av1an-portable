@@ -379,6 +379,9 @@ def template_status_label():
     """What the template menu entry shows for the current state."""
     path = vpy_template.template_path()
     if os.path.isfile(path):
+        if vpy_template.lossless_mode_active():
+            return ("video-input\\template.vpy is present and in use, with lossless\n"
+                    "            intermediary mode ON")
         return "video-input\\template.vpy is present and in use"
     return "not written (scripts are generated from settings.txt)"
 
@@ -430,7 +433,7 @@ def confirm_template_overwrite():
     return False
 
 
-def perform_template_write(rescale=None):
+def perform_template_write(rescale=None, num_streams=None, lossless=False):
     """Write video-input\\template.vpy from settings.txt. True when it went out.
 
     The file is the filter chain the dispatchers would have generated, laid out
@@ -440,7 +443,9 @@ def perform_template_write(rescale=None):
 
     rescale is None for the standard template, which has no rescale in it at
     all, or the name of a vpy_template.LIVE_RESCALE_BACKENDS entry, which goes
-    in switched on.
+    in switched on. num_streams and lossless are the follow-up answers from
+    rescale_setup_page(); lossless also writes the marker the dispatchers read
+    and turns on the automatic intermediary the dispatchers build.
     """
     dispatch, reason = load_av1an_dispatch()
     if dispatch is None:
@@ -492,6 +497,8 @@ def perform_template_write(rescale=None):
             crop_values,
             source_filter.resolve(),
             rescale=rescale,
+            num_streams=num_streams,
+            lossless=lossless,
         )
         written = vpy_template.write_template(text)
     except (OSError, ValueError, KeyError) as e:
@@ -501,11 +508,33 @@ def perform_template_write(rescale=None):
 
     preview_copied, preview_message = copy_template_preview_bat()
 
+    # The marker is the whole of the mode: tools\\lossless_mode.py reads it from
+    # inside whichever dispatcher is running and builds the intermediary itself,
+    # so there is nothing for the user to launch. Writing it here, next to the
+    # template it belongs to, keeps the two from disagreeing - and writing a
+    # template without the mode has to clear it, or the dispatchers would go on
+    # building intermediaries for a template that no longer asks for one.
+    lossless_message = ""
+    marker_path = ""
+    if lossless:
+        try:
+            marker_path = vpy_template.write_lossless_marker(rescale, num_streams)
+        except OSError as e:
+            lossless_message = (f"Could not write video-input\\"
+                                f"{vpy_template.LOSSLESS_MARKER_FILENAME}: {e}. Lossless "
+                                f"intermediary mode is NOT on.")
+        else:
+            vpy_template.ensure_lossless_passthrough()
+    else:
+        vpy_template.delete_lossless_marker()
+
     print("\n-------------------------------------------------------------------------------")
     print("Template written.")
     print(f"File: video-input\\{os.path.basename(written)}")
     if preview_copied:
         print(f"File: {preview_message}")
+    if marker_path:
+        print(f"File: video-input\\{vpy_template.LOSSLESS_MARKER_FILENAME}")
     print("-------------------------------------------------------------------------------")
     print("Every .bat you have already generated picks this up - the dispatchers")
     print("look for the file at the start of each input. While it is there,")
@@ -538,6 +567,33 @@ def perform_template_write(rescale=None):
     else:
         print("Rescale: this template was written without one. Come back to this page")
         print("and pick option 2 or 3 if you want a rescale in it.")
+    if num_streams:
+        print("")
+        print(f"Streams: the block sets num_streams = {num_streams}. That is how many frames the")
+        print("GPU works on at once. Lower it to 1 if the rescale crashes or the card")
+        print("runs out of memory.")
+    if lossless:
+        print("")
+        if marker_path:
+            print("Lossless intermediary: ON. The rescale runs once per video instead of")
+            print("once per pass, and your encoding .bat does it for you - there is nothing")
+            print("extra to run.")
+            print("")
+            print("  1. Put your videos in video-input and start your encoding .bat as usual.")
+            print("  2. Before it encodes a video, the dispatcher filters it through this")
+            print(f"     template into temp\\lossless\\<name>{vpy_template.LOSSLESS_SUFFIX}.mkv - around 40 GB for")
+            print("     a 24 minute episode - and then encodes from that file.")
+            print("  3. Only one of those exists at a time. The previous video's is deleted")
+            print("     before the next is built, and the last one goes when the .bat clears")
+            print("     temp at the end of the run.")
+            print("")
+            print(f"Delete video-input\\{vpy_template.LOSSLESS_MARKER_FILENAME} to leave the mode.")
+            print("Everything then goes back to filtering through the template on every pass.")
+        else:
+            print(f"{RED}{lossless_message}{RESET}")
+    elif lossless_message:
+        print("")
+        print(f"{RED}{lossless_message}{RESET}")
     if preview_copied:
         print("")
         print(f"Run video-input\\{TEMPLATE_PREVIEW_BAT} to see what your template does to")
@@ -551,14 +607,221 @@ def perform_template_write(rescale=None):
     return True
 
 
+def rescale_setup_page(rescale):
+    """The page a rescale choice on the template menu leads to.
+
+    Returns (lossless, num_streams, workers), or None to go back to the menu
+    without writing anything.
+
+    Only one of num_streams / workers is ever filled in. They are the two ways
+    of giving a rescale enough work to do, and which one applies falls out of
+    the lossless answer:
+
+      Lossless yes -> one av1an worker reading one file that was filtered once,
+                      so the rescale's own num_streams is the throughput knob.
+      Lossless no  -> every av1an worker filters its own chunk and runs its own
+                      copy of the rescale, so the worker count is the knob and
+                      num_streams stays at the default of 1.
+    """
+    label = vpy_template.LIVE_RESCALE_BACKENDS[rescale][0]
+
+    while True:
+        clear_screen()
+        print("================================================")
+        print("          Lossless Intermediary File            ")
+        print("================================================\n")
+        print(f"Rescale: {label}\n")
+        print("Rescale filtering can be very slow when the video is filtered three")
+        print("times: a fast pass, then visual metrics, then final encode. Or in")
+        print("target quality encoding, an undetermined amount of times until the")
+        print("target quality is found.\n")
+        print("The way around it is to filter the video ONCE into a lossless file and")
+        print("encode from that instead.\n")
+        print(f"{RED}These files are big: roughly 40 GB for a 24 minute 1080p anime episode,")
+        print("and more for a film. Only one lossless file is kept at a time, after a")
+        print("successful encode, the lossless file is removed before the next one is")
+        print(f"made.{RESET}\n")
+        print("  1: Yes -- filter once into a lossless .mkv, then encode from that\n")
+        print("  2: No  -- filter on every pass\n")
+        print("  3: Go back without writing the template\n")
+        choice = input("Select [1/2/3]: ").strip()
+
+        if choice == "1":
+            num_streams = ask_num_streams(rescale)
+            if num_streams is None:
+                continue
+            return True, num_streams, None
+        if choice == "2":
+            workers = ask_rescale_workers(rescale)
+            if workers is None:
+                continue
+            return False, None, workers
+        if choice == "3":
+            return None
+
+
+def ask_number(prompt, warn_above=None, warn_text=()):
+    """Read a whole number of at least 1. None when the answer is unusable.
+
+    Anything above warn_above is read back to the user with warn_text before it
+    is accepted, so a number that is known to crash some machines is never taken
+    silently.
+    """
+    value = input(prompt).strip()
+    try:
+        number = int(value)
+    except ValueError:
+        print(f"\n{RED}\"{value}\" is not a number.{RESET}")
+        os.system('pause')
+        return None
+    if number < 1:
+        print(f"\n{RED}It has to be at least 1.{RESET}")
+        os.system('pause')
+        return None
+    if warn_above and number > warn_above:
+        print("")
+        for line in warn_text:
+            print(f"{RED}{line}{RESET}")
+        print("")
+        if input("Use it anyway? [1 Yes / 2 No] (Press Enter for No): ").strip() != "1":
+            return None
+    return number
+
+
+def ask_num_streams(rescale):
+    """num_streams for the rescale block. None to go back a page."""
+    label = vpy_template.LIVE_RESCALE_BACKENDS[rescale][0]
+
+    while True:
+        clear_screen()
+        print("================================================")
+        print("               Inference Streams                ")
+        print("================================================\n")
+        print(f"Rescale: {label}\n")
+        print("num_streams is how many frames the GPU is asked to work on at once.")
+        print("With a lossless intermediary the encode runs one worker over one file")
+        print("that was already filtered, so this is the setting that keeps the GPU")
+        print("busy while the intermediary is being made.\n")
+        print(f"{RED}Numbers above 3 are not always faster. Past the point where the GPU is")
+        print("already busy, more streams buy nothing and only cost video memory.")
+        if rescale == "NVIDIA":
+            print("In testing, numbers above 3 sometimes crash depending on which Nvidia")
+            print(f"GPU is in the machine.{RESET}\n")
+        else:
+            print("In testing, numbers above 3 sometimes crash depending on which GPU is")
+            print("in the machine. DirectML has not been tested as widely as TensorRT-RTX")
+            print(f"here, so treat 3 as the ceiling on it too.{RESET}\n")
+        print("Each stream keeps its own copy of the model and its own workspace on")
+        print("the GPU, so what fits is decided by video memory more than anything")
+        print("else. On an 8 GB card even 2 can be too many. If the encode dies with")
+        print("no error at all, this is the first thing to lower.\n")
+        print("  1: Use it if anything higher crashes.\n")
+        print("  2: 2 frames\n")
+        print("  3: the recommended starting point.\n")
+        print("  4: Enter a different number\n")
+        print("  5: Go back\n")
+        choice = input("Select [1/2/3/4/5] (Press Enter for 3): ").strip()
+
+        if choice == "":
+            return 3
+        if choice in ("1", "2", "3"):
+            return int(choice)
+        if choice == "4":
+            card = "Nvidia GPUs" if rescale == "NVIDIA" else "GPUs"
+            number = ask_number(
+                "How many streams? ",
+                warn_above=3,
+                warn_text=("That is above the 3 that has been tested. It may be no faster,",
+                           f"and on some {card} it crashes the encode outright."))
+            if number is None:
+                continue
+            return number
+        if choice == "5":
+            return None
+
+
+def ask_rescale_workers(rescale):
+    """Worker count for a rescale that filters on every pass. None to go back."""
+    label = vpy_template.LIVE_RESCALE_BACKENDS[rescale][0]
+
+    while True:
+        clear_screen()
+        print("================================================")
+        print("                 Worker Count                   ")
+        print("================================================\n")
+        print(f"Rescale: {label}\n")
+        print("Without a lossless intermediary, every av1an worker filters its own")
+        print("chunk - so every worker runs its own copy of the rescale on the GPU.")
+        print("The worker count is what decides how many of those there are.\n")
+        engine = "an RTX TensorRT engine" if rescale == "NVIDIA" else "a GPU rescale"
+        print(f"{RED}With {engine}, numbers above 3 could crash depending on your")
+        print("GPU. Each worker holds its own copy of the model and its own share of")
+        print(f"the video memory, and they all run at the same time.{RESET}\n")
+        print("  1: 1 worker  -- slowest, and the one that always works.\n")
+        print("  2: 2 workers\n")
+        print("  3: 3 workers -- the highest that has been tested.\n")
+        print("  4: Custom worker count\n")
+        print("  5: Go back\n")
+        choice = input("Select [1/2/3/4/5]: ").strip()
+
+        if choice in ("1", "2", "3"):
+            return int(choice)
+        if choice == "4":
+            number = ask_number(
+                "How many workers? ",
+                warn_above=3,
+                warn_text=(f"That is above the 3 that has been tested with {engine}.",
+                           "Each worker keeps its own copy of the model in video memory,",
+                           "so this is where a rescale runs the GPU out and takes the",
+                           "encode down with it."))
+            if number is None:
+                continue
+            return number
+        if choice == "5":
+            return None
+
+
+def worker_handoff_page(workers):
+    """Offer the regular builder with the worker count pinned, or an exit.
+
+    Returns ("workflow", workers), which unwinds to main()'s questions with that
+    number remembered. Picking the exit never returns.
+    """
+    while True:
+        clear_screen()
+        print("================================================")
+        print("               Worker Count Set                 ")
+        print("================================================\n")
+        print(f"Worker count chosen: {workers}\n")
+        print("Nothing carries that number yet. A worker count is not something the")
+        print("template holds - the .bat that runs the encode is what carries it.\n")
+        print(f"  1: Build a .bat now, with the worker count pinned to {workers}\n")
+        print("     Takes you to the regular bat-builder questions. The .bat it")
+        print("     writes at the end skips the worker benchmark's answer and uses")
+        print(f"     {workers} instead.\n")
+        print("  2: Exit bat-builder now\n")
+        print(f"{BLUE}Using condor-builder instead? It asks for the worker count as one of its")
+        print(f"own questions - answer {workers} there by hand. This page cannot set it for")
+        print(f"you.{RESET}\n")
+        choice = input("Select [1/2] (Press Enter for 1): ").strip()
+
+        if choice in ("1", ""):
+            return ("workflow", workers)
+        if choice == "2":
+            sys.exit(0)
+
+
 def write_vpy_template():
     """The template.vpy page: write it, with or without a rescale, or delete it.
 
     Option 1 writes the filter chain settings.txt describes and nothing else.
     Options 2 and 3 write that same chain with one rescale block in it, switched
-    on.
+    on, and go through rescale_setup_page() first - a rescale is slow enough
+    that how the encode feeds it is a decision of its own.
 
-    Returns False so the caller stays in the advanced tools menu.
+    Returns False so the caller stays in the advanced tools menu, or
+    ("workflow", workers) to fall through to the regular builder questions with
+    that worker count pinned.
     """
     rescale_by_choice = {"1": None, "2": "DirectML", "3": "NVIDIA"}
 
@@ -576,10 +839,12 @@ def write_vpy_template():
         print(f"Currently: {template_status_label()}\n")
         print("  1: Standard template.vpy\n")
         print("  2: DirectML rescale (Nvidia, AMD, Intel)\n")
-        print("  3: Nvidia TRT Engine Rescale (Nvidia only) PLACEHOLDER, NOT WORKING\n")
+        print("  3: Nvidia TensorRT-RTX rescale (RTX 20-series and newer)\n")
         print("  4: Delete template.vpy (go back to settings.txt auto scripts)\n")
         print("  5: Go back without changing anything\n")
         print("  6: Exit\n")
+        print("Options 2 and 3 ask a few more questions - a rescale runs on the GPU and")
+        print("is slow enough that how the encode feeds it is worth deciding up front.\n")
         print("Notepad++ is suggested for editing the file afterwards.")
         print("LQTC decodes without VapourSynth, so it ignores the template.\n")
         choice = input("Select [1/2/3/4/5/6]: ").strip()
@@ -588,13 +853,29 @@ def write_vpy_template():
             if not confirm_template_overwrite():
                 continue
 
-            perform_template_write(rescale_by_choice[choice])
+            rescale = rescale_by_choice[choice]
+            lossless, num_streams, workers = False, None, None
+            if rescale:
+                answers = rescale_setup_page(rescale)
+                if answers is None:
+                    continue
+                lossless, num_streams, workers = answers
+
+            if not perform_template_write(rescale, num_streams=num_streams,
+                                          lossless=lossless):
+                return False
+            if workers:
+                return worker_handoff_page(workers)
             return False
         if choice == "4":
             removed_template = vpy_template.delete_template()
-            # The launcher goes with it: on its own it would only ever report a
-            # missing template.
+            # The launchers go with it: on their own they would only ever report
+            # a missing template. The lossless marker goes too - without a
+            # template there is nothing for a -lossless file to skip, and a
+            # marker left behind would keep the encoders skipping a template
+            # that is not there.
             removed_preview = delete_template_preview_bat()
+            removed_marker = vpy_template.delete_lossless_marker()
             if removed_template:
                 print("\nRemoved video-input\\template.vpy.")
                 print("The encoders are back to generating their script from settings.txt.")
@@ -603,6 +884,9 @@ def write_vpy_template():
                 print("The encoders already generate their script from settings.txt.")
             if removed_preview:
                 print(f"Removed video-input\\{TEMPLATE_PREVIEW_BAT} as well.")
+            if removed_marker:
+                print("Lossless intermediary mode is off again - the marker went with")
+                print("the template, so the dispatchers stop building intermediaries.")
             os.system('pause')
             return False
         if choice == "5" or choice == "":
@@ -649,7 +933,11 @@ def advanced_tools_menu():
             setup_source_filter()
             continue
         if choice == "5":
-            write_vpy_template()
+            result = write_vpy_template()
+            # A tuple is the rescale page asking for the regular questions with
+            # a worker count already decided; everything else stays on this menu.
+            if isinstance(result, tuple):
+                return result
             continue
         if choice == "6":
             return False
@@ -658,9 +946,8 @@ def advanced_tools_menu():
 
 # --- The generated .bat, from one settings dict -----------------------------
 #
-# Both front ends - the numbered questions in main() and the GUI page - fill in
-# the same dict and hand it to build_script(), so the two cannot drift apart.
-# The keys are the raw answers, not the flags built from them:
+# The numbered questions in main() fill in this dict and hand it to
+# build_script(). The keys are the raw answers, not the flags built from them:
 #
 #   mode              "autoboost" | "av1an"
 #   fork              "5fish" | "essential" | "hdr" | "custom"
@@ -672,18 +959,24 @@ def advanced_tools_menu():
 #   tonemap           "True" | "False"
 #   autocrop          bool
 #   optimize_workers  bool
+#   forced_workers    int, or None. Set only by the rescale page, which pins
+#                     the worker count instead of letting the benchmark pick it
 #   verbose           "--verbose" | "--no-verbose"
 #   denoise           optional; derived from the fork when absent
 
 
 def output_filename_for(cfg):
-    """The .bat name a settings dict produces, so the GUI can preview it."""
+    """The .bat name a settings dict produces."""
     fork = cfg["fork"]
     dist_suffix = f"-d{cfg.get('fidelity', '0')}" if fork == "essential" else ""
     autocrop_suffix = "-autocrop" if cfg.get("autocrop") else ""
     tonemap_suffix = "-tonemap" if cfg.get("tonemap") == "True" else ""
+    # A pinned worker count is in the name because it is the one setting two
+    # otherwise identical .bat files can differ by, and without it the second
+    # one would quietly overwrite the first.
+    worker_suffix = f"-w{cfg['forced_workers']}" if cfg.get("forced_workers") else ""
     return (f"batbuilder-{cfg['mode']}-{fork}{dist_suffix}-crf{cfg['crf']}"
-            f"-p{cfg['speed']}{autocrop_suffix}{tonemap_suffix}.bat")
+            f"-p{cfg['speed']}{autocrop_suffix}{tonemap_suffix}{worker_suffix}.bat")
 
 
 def build_script(cfg):
@@ -742,9 +1035,9 @@ def build_script(cfg):
         fast_params = ""
         final_params = "--lp 3 --photon-noise 200"
     output_filename = output_filename_for(cfg)
-    
+
     script = "@echo off\n"
-    
+
     if mode == "autoboost":
         script += ":: Notepad++ is suggested for editing this file. Never add noise/grain to fast params, this will break metrics.\n"
         script += f'set "FAST_PARAMS={fast_params}"\n'
@@ -783,12 +1076,12 @@ def build_script(cfg):
         script += ":: running .bat in-place without shifting cmd.exe's byte offsets - do not delete them.\n"
         script += ":: To re-run a benchmark, clear the custom value between = and the closing quote.\n"
         script += ":: To disable optimized workers, set optimize-workers=false.\n\n"
-    
+
     script += "del tools\\bat*.txt\n"
     script += "move *.mkv video-input\nmove *.mp4 video-input\nmove *.m2ts video-input\n"
     script += "cls\nsetlocal enableextensions disabledelayedexpansion\n\n"
     script += ":: Set the current working directory\ncd /d \"%~dp0\"\n\n"
-    
+
     script += ":: --- STEP 0A: CREATE BATCH MARKER ---\necho.\ntype NUL > \"tools\\bat-used-%~nx0.txt\"\n\n"
     script += ":: --- STEP 0B: SET TEMP PATH ---\nset \"PATH=%~dp0VapourSynth;%~dp0tools\\av1an;%~dp0tools\\MKVToolNix;%PATH%\"\n\n"
 
@@ -873,6 +1166,22 @@ def build_script(cfg):
         script += "if not defined SSIMU2_TOOL set \"SSIMU2_TOOL=vs-hip\"\n"
         script += "if not defined SSIMU2_WORKERS set \"SSIMU2_WORKERS=1\"\n\n"
 
+    # Last word on the encode worker count, after the benchmark and the config
+    # file have both had theirs. It is set from bat-builder's rescale page, where
+    # the number was chosen for a GPU rather than a CPU, so nothing above may
+    # override it.
+    forced_workers = cfg.get("forced_workers")
+    if forced_workers:
+        script += ":: --- WORKER COUNT OVERRIDE (GPU rescale) ---\n"
+        script += ":: video-input\\template.vpy runs an ArtCNN rescale on the GPU, and every\n"
+        script += ":: av1an worker runs its own copy of it with its own share of the video\n"
+        script += ":: memory. The benchmark above only measures the CPU, so it does not know\n"
+        script += ":: about that - this is the number you picked in bat-builder, and it wins.\n"
+        script += ":: Edit the line to change it. Above 3 can run the GPU out of memory and\n"
+        script += ":: take the encode down with it. Delete the line to go back to the\n"
+        script += ":: benchmark's answer.\n"
+        script += f'set "WORKER_COUNT={forced_workers}"\n\n'
+
     step_num = 2
 
     # Renaming
@@ -889,12 +1198,12 @@ def build_script(cfg):
     else:
         script += f":: --- STEP {step_num}: DISPATCH ---\n"
         script += "echo Starting Av1an Direct Dispatcher...\n"
-    
+
     script += "echo Encoding inputs from: video-input\necho Outputs will go to:   video-output\necho.\n"
-    
+
     if film_grain_note:
         script += film_grain_note
-        
+
     if mode == "autoboost":
         script += f"\"VapourSynth\\python.exe\" \"tools\\dispatch.py\" --fork %fork% --arch %ARCH% --denoise %DENOISE% --tonemap %tonemap% --crf %CRF%{autocrop_flag} --ssimu2 \"%SSIMU2_TOOL%\" %VERBOSE% --ssimu2-cpu-workers %SSIMU2_WORKERS% --resume --fast-speed 8 --final-speed %FINAL_SPEED% --workers %WORKER_COUNT% --fast-params \"%FAST_PARAMS%\" --final-params \"%FINAL_PARAMS%\"\n\n"
     else:
@@ -912,111 +1221,18 @@ def build_script(cfg):
     # Put it in the root folder (one directory up from tools)
     root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     file_path = os.path.join(root_dir, output_filename)
-    
+
     with open(file_path, 'w') as f:
         f.write(script)
     return output_filename, file_path
 
 
-# --- GUI (experimental) -----------------------------------------------------
-#
-# The GUI is tkinter. tkinter is in the standard library, but it is the one
-# part of it that is not pure Python - it is the compiled _tkinter plus the Tcl
-# and Tk runtimes, built against one exact interpreter - and python.org leaves
-# all of it out of the embeddable build. So this package carries its own copy,
-# taken from python.org's tcltk.msi for the version of Python in VapourSynth\:
-#
-#     _tkinter.pyd, tcl86t.dll, tk86t.dll, zlib1.dll   VapourSynth#     Lib\site-packages	kinter\                       the Python half
-#     tcl	cl8.6, tcl	k8.6, tcl	cl8                  the Tcl and Tk libraries
-#
-# about 9 MB, and it travels with the package to any PC it is copied to.
-#
-# has_tkinter() is still checked before the page opens, because those files can
-# go missing - and because replacing VapourSynth\python.exe with a different
-# Python version leaves them in place but unloadable. Either way the answer is
-# the same: this is part of the package, so a package that has lost it should
-# be downloaded again.
-
-def gui_module_dir():
-    return os.path.dirname(os.path.abspath(__file__))
-
-
-def has_tkinter():
-    """Whether the interpreter running this file can open a Tk window.
-
-    tkinter is two halves: the pure Python package, and the compiled _tkinter
-    that binds Tcl and Tk. Looking for the package alone is not enough - it
-    would be found on its own and report yes while the import fails - so the
-    compiled half is imported for real. That is a DLL load and nothing more,
-    and it is the half that goes missing, or stops matching, if the portable
-    Python is ever replaced with a different version.
-    """
-    try:
-        import _tkinter  # noqa: F401  - imported to prove it loads
-    except Exception:
-        return False
-    try:
-        return importlib.util.find_spec("tkinter") is not None
-    except (ImportError, ValueError):
-        return False
-
-
-def gui_build(cfg):
-    """What the GUI's Generate button calls. Same builder the questions use."""
-    if cfg["fork"] in ("5fish", "essential"):
-        save_arch(cfg["arch"])
-    return build_script(cfg)
-
-
-def launch_gui():
-    """Open the one-page GUI. Returns True when the caller should stop.
-
-    False sends the user back to the questions, which is what happens when the
-    Tk files this package ships with are not there any more.
-    """
-    if not has_tkinter():
-        clear_screen()
-        print("================================================")
-        print("            GUI (experimental)                  ")
-        print("================================================\n")
-        print(f"{RED}Tk is missing from this package, so the GUI cannot open.{RESET}\n")
-        print("The GUI is tkinter, and this package carries its own copy of it")
-        print("in the VapourSynth folder: _tkinter.pyd, tcl86t.dll, tk86t.dll,")
-        print("zlib1.dll, Lib\\site-packages\\tkinter and the tcl folder. At least")
-        print("one of those is gone, or VapourSynth\\python.exe has been replaced")
-        print("with a different version of Python, which leaves the files there")
-        print("but unloadable.\n")
-        print("Re-download the package to put it back. Nothing else needs those")
-        print("files - encoding is unaffected, and options 1 and 2 ask the same")
-        print("questions and build exactly the same .bat.\n")
-        os.system('pause')
-        return False
-
-    sys.path.insert(0, gui_module_dir())
-    try:
-        import batbuilder_gui
-    except Exception as e:
-        print(f"\n{RED}Could not load tools\\batbuilder_gui.py: {e}")
-        print(f"Your install may be incomplete - try re-downloading the package.{RESET}")
-        os.system('pause')
-        return False
-
-    try:
-        batbuilder_gui.run(gui_build, output_filename_for,
-                           defaults={"arch": read_saved_arch() or "znver2"})
-    except Exception as e:
-        print(f"\n{RED}The GUI stopped with an error: {e}{RESET}")
-        os.system('pause')
-    return True
-
-
 def main():
     enable_ansi_colors()
 
-    # --gui opens the page straight away, for a shortcut that skips the menu.
-    if "--gui" in sys.argv[1:]:
-        launch_gui()
-        return
+    # Set when the template menu's rescale page hands back here with a worker
+    # count already decided, and pinned into the .bat at the end.
+    forced_workers = None
 
     # --- 1. Pass Type ---
     while True:
@@ -1026,6 +1242,9 @@ def main():
         print("================================================\n")
         print("This tool will create a batch script to encode your videos.")
         print("Just answer the questions below and your script will be ready to run.\n")
+        if forced_workers:
+            print(f"{BLUE}Worker count for this .bat: {forced_workers}, from the rescale page.")
+            print(f"The worker benchmark still runs, but this number is what encodes.{RESET}\n")
         print("--------------------------------------------------------")
         print("STEP 1 OF 5: Choose an Encoding Method")
         print("--------------------------------------------------------")
@@ -1040,21 +1259,20 @@ def main():
         print("     Good if you want faster turnaround.")
         print("     ")
         print("  3: Setup advanced tools\n")
-        print("  0: GUI")
-        print("     The same questions as 1 and 2, on one page, with every")
-        print("     option visible at once. It builds exactly the same .bat.\n")
         print("  NOTE: If your video has a lot of grain, pick Av1an Single Pass. Auto-Boost can")
         print("  mistake the grain for fine detail and try to preserve it, which wastes bitrate")
         print("  and makes your final file much larger than it needs to be.\n")
-        mode_choice = input("Select [1/2/3/0]: ").strip()
-
-        if mode_choice == "0":
-            if launch_gui():
-                return
-            continue
+        mode_choice = input("Select [1/2/3]: ").strip()
 
         if mode_choice == "3":
-            if advanced_tools_menu():
+            result = advanced_tools_menu()
+            # A tuple is the rescale page sending us into these questions with a
+            # worker count already chosen. Checked before the plain truthiness
+            # test below, which a tuple would also pass.
+            if isinstance(result, tuple):
+                forced_workers = result[1]
+                continue
+            if result:
                 return
             continue
 
@@ -1334,6 +1552,7 @@ def main():
         "denoise": denoise_value,
         "autocrop": use_autocrop,
         "optimize_workers": optimize_workers,
+        "forced_workers": forced_workers,
         "verbose": verbose_value,
     }
     output_filename, _path = build_script(cfg)
@@ -1345,6 +1564,16 @@ def main():
     print("Drop your video files into the 'video-input' folder, then double-click")
     print("the .bat file to start encoding. Encoded files will appear in 'video-output'.")
     print("")
+    if forced_workers:
+        print(f"This .bat encodes with {forced_workers} worker(s), set on the rescale page. The line")
+        print("that does it is near the top of the worker section, marked WORKER COUNT")
+        print("OVERRIDE - edit or delete it there to change it.")
+        print("")
+    if vpy_template.lossless_mode_active():
+        print(f"{BLUE}Lossless intermediary mode is on, so this .bat filters each video")
+        print("once into temp\\lossless and encodes from that file. Nothing extra to")
+        print(f"run, and only one of those files is on the drive at a time.{RESET}")
+        print("")
     print("Want to tweak the settings manually? Open the .bat file in Notepad++.")
     print("-------------------------------------------------------------------------------")
     os.system('pause')

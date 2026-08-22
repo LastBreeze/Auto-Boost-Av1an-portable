@@ -145,6 +145,38 @@ class StageTimingMonitor:
         self._sample()
 
 
+# How long to wait before each attempt at muxing. The first is immediate;
+# a file the encoder only just closed is sometimes still held for a moment
+# by antivirus or a slow drive, and a short pause is enough to clear it.
+MUX_RETRY_WAITS = (0, 5, 10)
+
+
+def encode_finished_on_disk(av1_path, stage_path, started_at):
+    """True when the encode really finished, whatever the exit code said.
+
+    Auto-Boost-Av1an.py has been seen returning a non-zero code after it has
+    already printed 'Auto-boost complete!' - a crash while the interpreter
+    tears down VapourSynth, long after every file is safely written.
+    Believing the exit code there throws away a finished encode, so ask the
+    disk instead: a non-empty <name>-av1.mkv that this run produced, plus a
+    stage marker reading 5 ('final encode finished').
+    """
+    try:
+        if os.path.getsize(av1_path) <= 0:
+            return False
+        # A leftover from an earlier run says nothing about this one. The
+        # slack absorbs filesystem timestamp granularity.
+        if os.path.getmtime(av1_path) < started_at - 2:
+            return False
+    except OSError:
+        return False
+    try:
+        with open(stage_path, 'r', encoding='utf-8', errors='replace') as f:
+            return f.read().strip() == '5'
+    except OSError:
+        return False
+
+
 def summarize_auto_boost_stage_timings(started_at, ended_at, transitions, initial_stage=1):
     """Return visual-metric and encoding seconds from Auto-Boost stage transitions.
 
@@ -1036,17 +1068,18 @@ def warn_and_pause_if_paths_too_long(input_files, video_output_dir, temp_dir):
         filename = os.path.basename(input_path)
         basename = os.path.splitext(filename)[0]
         video_input_dir = os.path.dirname(input_path)
-        backend_artifact_dir = os.path.join(video_input_dir, basename)
+        # The encode works entirely inside temp now, so these are the paths that
+        # actually get created.
+        backend_artifact_dir = os.path.join(temp_dir, basename)
         paths_to_check = [
             input_path,
             os.path.join(video_output_dir, basename + "-output.mkv"),
             os.path.join(temp_dir, f"{basename}_scenedetect.json"),
             os.path.join(temp_dir, f"{basename}-output.mkv"),
-            os.path.join(video_input_dir, f"{basename}-av1.mkv"),
+            os.path.join(temp_dir, f"{basename}-av1.mkv"),
             backend_artifact_dir,
             os.path.join(backend_artifact_dir, f"{basename}.vpy"),
             os.path.join(backend_artifact_dir, f"{basename}{index_suffix}"),
-            os.path.join(backend_artifact_dir, f"{basename}-av1.mkv"),
         ]
         for path in paths_to_check:
             display_path = display_path_for_length(path)
@@ -1338,20 +1371,20 @@ def main():
     # Read (and if hand-edited/mis-encoded, repair) the shared worker-count
     # config up front, so every later consumer sees a clean file and value.
     cfg_workers = read_and_repair_workercount_config(tools_dir)
-    
+
     video_input_dir = os.path.join(root_dir, "video-input")
     video_output_dir = os.path.join(root_dir, "video-output")
     temp_dir = os.path.join(root_dir, "temp")
-    
+
     # Scripts
     av1an_script = os.path.join(tools_dir, "Auto-Boost-Av1an.py")
     scene_detect_script = os.path.join(tools_dir, "Progressive-Scene-Detection.py")
     tag_script = os.path.join(tools_dir, "tag.py")
     mux_script = os.path.join(tools_dir, "mux.py")
-    
+
     # Locate MediaInfo
     mediainfo_exe = os.path.join(tools_dir, "MediaInfo_CLI", "MediaInfo.exe")
-    
+
     # --- Ensure Directories Exist ---
     if not os.path.exists(video_input_dir):
         os.makedirs(video_input_dir)
@@ -1421,7 +1454,7 @@ def main():
         print(f"[Dispatch] Warning: settings.txt not found at {settings_src}")
 
     ntfy_settings = load_script_settings(settings_src)
-        
+
     # Extract dispatcher-only options and worker count for logic checks
     worker_count = None
     selected_fork = "essential"
@@ -1531,13 +1564,13 @@ def main():
     # --- Gather Input Files ---
     input_files = gather_input_files(video_input_dir, extensions)
     known_input_files = set(input_files)
-    
+
     if not input_files:
         print(f"[Dispatch] No video files found in {video_input_dir}")
         sys.exit(0)
 
     warn_and_pause_if_paths_too_long(input_files, video_output_dir, temp_dir)
-        
+
     if not simple_mode:
         print(f"[Dispatch] Found {len(input_files)} files to process.")
 
@@ -1550,14 +1583,14 @@ def main():
         input_index += 1
         filename = os.path.basename(input_abspath_origin)
         basename = os.path.splitext(filename)[0]
-        
+
         # Final destination for the encoded file
         final_output_path = os.path.join(video_output_dir, basename + "-output.mkv")
-        
+
         print("\n" + "="*80)
         print(f"Processing: {filename}")
         print("="*80)
-        
+
         if os.path.exists(final_output_path):
             print(f"[Dispatch] Output file already exists: {final_output_path}")
             print("[Dispatch] Skipping...")
@@ -1573,7 +1606,7 @@ def main():
             # 1. Scene Detection
             json_file = f"{basename}_scenedetect.json"
             json_abspath = os.path.join(temp_dir, json_file)
-            
+
             scenes_override = source_filter.read_override()
             scenes_are_current = (os.path.exists(json_abspath)
                                   and source_filter.scenes_marker_matches(json_abspath, scenes_override))
@@ -1605,7 +1638,7 @@ def main():
                     print("[Dispatch] Scene detection failed.")
                 finally:
                     scene_elapsed = time.monotonic() - scene_started_at
-            
+
             # 2. Color Space Detection / HDR handling
             color_metadata = detect_color_metadata(input_abspath_origin, mediainfo_exe)
             is_bt709 = bool(color_metadata and color_metadata["is_bt709"])
@@ -1647,32 +1680,44 @@ def main():
                     print("[Dispatch] MediaInfo confirmed full BT.601 source.")
 
             # 3. Encoding
+            work_dir = os.path.join(temp_dir, basename)
+            av1_file_dst = os.path.join(temp_dir, f"{basename}-av1.mkv")
+
             # A resume folder whose chunks were cut from a different scene list -
             # a re-detection after the source filter changed, say - would keep
             # encoding the old frame ranges against the .vpy that
-            # Auto-Boost-Av1an.py builds in the backend artifact folder.
+            # Auto-Boost-Av1an.py builds in the working folder.
             for discarded in source_filter.discard_stale_av1an_resume_state(
-                    os.path.join(video_input_dir, basename), f"{basename}.vpy", json_abspath):
+                    work_dir, f"{basename}.vpy", json_abspath):
                 print(f"[Dispatch] Discarded av1an resume state that was built from an older "
                       f"scene list: {os.path.basename(discarded)}")
 
+            # Everything this encode produces is written where it is finally
+            # wanted, so nothing is ever moved afterwards:
+            #   temp\<name>\           the working folder - .vpy, fast pass,
+            #                          scenes, stage marker, and Av1an's own
+            #                          .<hash> chunk folder inside it
+            #   temp\<name>-av1.mkv    the encoded video, at temp root, which is
+            #                          where tag.py and mux.py look for it
             final_cmd = [
                 sys.executable,
                 av1an_script,
                 "--fork", selected_fork,
                 "-i", input_abspath_origin,
+                "--temp", work_dir,
+                "-o", av1_file_dst,
                 "--scenes", json_file,
             ]
             final_cmd.extend(["--arch", arch])
             if tonemap_this_file:
                 final_cmd.extend(["--tonemap", "true"])
-            
+
             skip_next = False
             for i, a in enumerate(args):
                 if skip_next:
                     skip_next = False
                     continue
-                if a in ("-i", "--input"):
+                if a in ("-i", "--input", "-o", "--output"):
                     skip_next = True
                     continue
                 if a in ("--fast-params", "--final-params"):
@@ -1692,32 +1737,46 @@ def main():
                         final_cmd.append("")
                 else:
                     final_cmd.append(a)
-            
+
             if not simple_mode:
                 print(f"[Dispatch] Processing {filename}...")
                 print("[Dispatch] Starting Encoding...")
             print(f"svt-av1 fork: {svt_fork_display_name(selected_fork)}")
-            stage_file = os.path.join(video_input_dir, basename, f"{basename}_stage.txt")
+            stage_file = os.path.join(work_dir, f"{basename}_stage.txt")
             stage_monitor = StageTimingMonitor(stage_file)
             resume_requested = "-r" in args or "--resume" in args
             auto_boost_started_at = time.monotonic()
+            encode_began_at = time.time()
             stage_monitor.start()
+            encode_rc = 0
             try:
                 with keep.running():
                     subprocess.check_call(final_cmd, cwd=temp_dir)
-            except subprocess.CalledProcessError:
-                print("[Dispatch] Encoding failed.")
-                send_ntfy_notification(
-                    ntfy_settings,
-                    root_dir,
-                    tools_dir,
-                    "Auto-Boost encode failed",
-                    "An encode failed.",
-                )
-                continue 
+            except subprocess.CalledProcessError as exc:
+                encode_rc = exc.returncode
             finally:
                 auto_boost_ended_at = time.monotonic()
                 stage_monitor.stop()
+
+            # A non-zero exit code is not on its own proof that the encode
+            # failed: the encoder can die on the way out, once the finished
+            # video is already written. Check the disk before throwing away
+            # hours of work.
+            if encode_rc != 0:
+                if encode_finished_on_disk(av1_file_dst, stage_file, encode_began_at):
+                    print(f"[Dispatch] Note: the encoder exited with code {encode_rc} "
+                          f"after finishing. {os.path.basename(av1_file_dst)} is "
+                          f"complete, so the run continues.")
+                else:
+                    print(f"[Dispatch] Encoding failed (exit code {encode_rc}).")
+                    send_ntfy_notification(
+                        ntfy_settings,
+                        root_dir,
+                        tools_dir,
+                        "Auto-Boost encode failed",
+                        "An encode failed.",
+                    )
+                    continue
 
             initial_stage = stage_monitor.initial_stage if resume_requested else 1
             visual_metrics_elapsed, encoding_elapsed = summarize_auto_boost_stage_timings(
@@ -1727,48 +1786,9 @@ def main():
                 initial_stage=initial_stage,
             )
 
-            # 4. Move Av1an Artifacts from video-input to Temp
-            # Artifacts are: {basename}-av1.mkv and {basename} (folder)
-            av1_file_src = os.path.join(video_input_dir, f"{basename}-av1.mkv")
-            av1_folder_src = os.path.join(video_input_dir, basename)
-            
-            av1_file_dst = os.path.join(temp_dir, f"{basename}-av1.mkv")
-            av1_folder_dst = os.path.join(temp_dir, basename)
-            
-            if not simple_mode:
-                print("[Dispatch] Moving encoding artifacts to temp folder...")
-            
-            # Move the folder
-            if os.path.exists(av1_folder_src):
-                if os.path.exists(av1_folder_dst):
-                    try:
-                        shutil.rmtree(av1_folder_dst)
-                    except Exception as e:
-                        print(f"[Dispatch] Warning: Failed to clean destination folder {av1_folder_dst}: {e}")
-                try:
-                    shutil.move(av1_folder_src, av1_folder_dst)
-                    if not simple_mode:
-                        print(f"[Dispatch] Moved folder: {av1_folder_src} -> {av1_folder_dst}")
-                except Exception as e:
-                    print(f"[Dispatch] Error moving folder: {e}")
-            else:
-                print(f"[Dispatch] Warning: Expected temp folder not found at {av1_folder_src}")
-                
-            # Move the file
-            if os.path.exists(av1_file_src):
-                if os.path.exists(av1_file_dst):
-                    try:
-                        os.remove(av1_file_dst)
-                    except Exception as e:
-                        print(f"[Dispatch] Warning: Failed to clean destination file {av1_file_dst}: {e}")
-                try:
-                    shutil.move(av1_file_src, av1_file_dst)
-                    if not simple_mode:
-                        print(f"[Dispatch] Moved file: {av1_file_src} -> {av1_file_dst}")
-                except Exception as e:
-                    print(f"[Dispatch] Error moving encoded file: {e}")
-            else:
-                print(f"[Dispatch] Warning: Expected encoded file not found at {av1_file_src}")
+            # 4. Nothing to move: the encode wrote straight into temp.
+            if not os.path.exists(av1_file_dst):
+                print(f"[Dispatch] Warning: Expected encoded file not found at {av1_file_dst}")
 
             # 5. Tagging
             if not simple_mode:
@@ -1788,24 +1808,41 @@ def main():
             if not simple_mode:
                 print("[Dispatch] Muxing...")
             mux_started_at = time.monotonic()
-            try:
-                if simple_mode:
-                    mux_rc = run_with_mux_progress(
-                        [sys.executable, mux_script], cwd=temp_dir,
-                        description="Muxing")
-                    if mux_rc != 0:
-                        raise subprocess.CalledProcessError(mux_rc, mux_script)
-                else:
-                    subprocess.check_call([sys.executable, mux_script], cwd=temp_dir)
-            except subprocess.CalledProcessError:
+            temp_output_mkv = os.path.join(temp_dir, f"{basename}-output.mkv")
+            # Name the file to mux rather than letting mux.py sweep the folder:
+            # Av1an writes into temp directly now, so an interrupted run can
+            # leave a partial -av1.mkv here that is not ours to touch.
+            mux_cmd = [sys.executable, mux_script, basename]
+            # mux.py exits 0 even when it finds nothing to mux, so the only
+            # honest test is whether <name>-output.mkv is there afterwards.
+            # Give a file that is still settling a second chance, and then a
+            # longer one, before calling the run lost.
+            mux_ok = False
+            for wait in MUX_RETRY_WAITS:
+                if wait:
+                    print(f"[Dispatch] Muxing produced no {basename}-output.mkv. "
+                          f"Waiting {wait} seconds and trying again...")
+                    time.sleep(wait)
+                try:
+                    if simple_mode:
+                        mux_rc = run_with_mux_progress(
+                            mux_cmd, cwd=temp_dir,
+                            description="Muxing")
+                    else:
+                        mux_rc = subprocess.call(mux_cmd, cwd=temp_dir)
+                except OSError as exc:
+                    print(f"[Dispatch] Could not run mux.py: {exc}")
+                    mux_rc = 1
+                if (mux_rc == 0 and os.path.exists(temp_output_mkv)
+                        and os.path.getsize(temp_output_mkv) > 0):
+                    mux_ok = True
+                    break
+            mux_elapsed = time.monotonic() - mux_started_at
+            if not mux_ok:
                 print("[Dispatch] Muxing failed.")
                 continue
-            finally:
-                mux_elapsed = time.monotonic() - mux_started_at
-                
+
             # 7. Move Output
-            temp_output_mkv = os.path.join(temp_dir, f"{basename}-output.mkv")
-            
             output_moved = False
             if os.path.exists(temp_output_mkv):
                 if not simple_mode:
@@ -1834,7 +1871,7 @@ def main():
                 if newly_detected_files:
                     warn_and_pause_if_paths_too_long(newly_detected_files, video_output_dir, temp_dir)
                     input_files.extend(newly_detected_files)
-        
+
         except Exception as e:
             print(f"[Dispatch] Critical Error during processing: {e}")
             send_ntfy_notification(

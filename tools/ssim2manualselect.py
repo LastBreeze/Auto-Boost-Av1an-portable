@@ -7,7 +7,13 @@ BASE_DIR = Path(__file__).parent.parent.resolve()
 TOOLS_DIR = BASE_DIR / "tools"
 CONFIG_FILE = TOOLS_DIR / "workercount-ssimu2.txt"
 SSIMU2_WORKERCOUNT = TOOLS_DIR / "ssimu2-workercount.py"
-VS_PLUGINS_DIR = BASE_DIR / "VapourSynth" / "vs-plugins"
+# R79 autoloads VapourSynth\Lib\site-packages\vapoursynth\plugins, the same
+# folder ssimu2-workercount.py installs the winning libvship build into. The old
+# VapourSynth\vs-plugins folder no longer ships and is never autoloaded.
+VS_PLUGINS_DIR = (BASE_DIR / "VapourSynth" / "Lib" / "site-packages"
+                  / "vapoursynth" / "plugins")
+if not VS_PLUGINS_DIR.is_dir() and (BASE_DIR / "VapourSynth" / "vs-plugins").is_dir():
+    VS_PLUGINS_DIR = BASE_DIR / "VapourSynth" / "vs-plugins"
 VS_HIP_SOURCE_DIR = TOOLS_DIR / "vs-hip"
 
 TOOL_CHOICES = [
@@ -127,7 +133,7 @@ def apply_vship_dll(choice):
     VS_PLUGINS_DIR.mkdir(parents=True, exist_ok=True)
     try:
         shutil.copy2(src, dst)
-        print(f"Copied {dll_name} into VapourSynth\\vs-plugins for {choice['label']}.")
+        print(f"Copied {dll_name} into {VS_PLUGINS_DIR} for {choice['label']}.")
         return True
     except OSError as exc:
         print(f"Warning: could not copy {dll_name}: {exc}")

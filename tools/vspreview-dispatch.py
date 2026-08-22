@@ -250,10 +250,18 @@ def cleanup(vpy_file):
                 pass
 
 def ffmsindex_path():
-    """Absolute path to the bundled ffmsindex.exe, or "" when it is missing."""
+    """Absolute path to the bundled ffmsindex.exe, or "" when it is missing.
+
+    It ships in VapourSynth\\Scripts. It used to sit beside the plugin DLLs in
+    VapourSynth\\vs-plugins, a folder this package no longer has, so the lookup
+    always came back empty and every source was indexed with no progress shown.
+    """
     root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    exe = os.path.join(root_dir, "VapourSynth", "vs-plugins", "ffmsindex.exe")
-    return exe if os.path.exists(exe) else ""
+    for exe in (os.path.join(root_dir, "VapourSynth", "Scripts", "ffmsindex.exe"),
+                os.path.join(root_dir, "VapourSynth", "vs-plugins", "ffmsindex.exe")):
+        if os.path.exists(exe):
+            return exe
+    return ""
 
 
 def index_source(source_path, index_path=None):
@@ -311,7 +319,7 @@ def index_sources(mkv_files):
 
 def create_vpy_script(mkv_files):
     """Generates the .vpy script content based on found MKV files."""
-    
+
     # 1. Header and Style Definition
     lines = [
         "import vapoursynth as vs",
@@ -348,7 +356,7 @@ def create_vpy_script(mkv_files):
         source_call = source_filter.plain_source_call(active_source_filter, mkv_path)
         lines.append(f'clips.append({source_call})')
         lines.append(f'labels.append("{file_label}")')
-        
+
     lines.extend([
         "",
         "def black_color(clip):",
@@ -406,7 +414,7 @@ def create_vpy_script(mkv_files):
         "    clip.set_output(i)",
         ""
     ])
-            
+
     return vpy_filename, "\n".join(lines)
 
 def main():
@@ -430,7 +438,7 @@ def main():
 
     # 3. Generate the .vpy script
     vpy_filename, script_content = create_vpy_script(mkv_files)
-    
+
     print(f"Generating script: {vpy_filename} for {len(mkv_files)} file(s)...")
     with open(vpy_filename, "w", encoding="utf-8") as f:
         f.write(script_content)

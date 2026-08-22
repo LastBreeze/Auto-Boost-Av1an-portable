@@ -32,7 +32,7 @@ package sets VAPOURSYNTH_EXTRA_PLUGIN_PATH before anything runs, so plain
 imports and core.<plugin> calls resolve the same way they do in example.vpy.
 
 bat-builder.py's template page asks which rescale the file should have before it
-writes it: none at all, DirectML (any GPU) or NVIDIA TensorRT. Pick one and the
+writes it: none at all, DirectML (any GPU) or NVIDIA TensorRT-RTX. Pick one and
 block goes out switched on - a descale to the show's native resolution, ArtCNN to
 rebuild it, credit and line masks, and a downscale back - with its imports inside
 the block, so a template written without a rescale never pays for them. What is
@@ -101,6 +101,11 @@ def root_dir():
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
+def tools_dir():
+    """The folder this file lives in."""
+    return os.path.dirname(os.path.abspath(__file__))
+
+
 def video_input_dir():
     return os.path.join(root_dir(), "video-input")
 
@@ -115,6 +120,189 @@ def template_path(base_dir=None):
     return os.path.join(base_dir or video_input_dir(), TEMPLATE_FILENAME)
 
 
+# --------------------------------------------------------------------------
+# Lossless intermediary mode
+# --------------------------------------------------------------------------
+#
+# A rescale is the slowest thing a template can hold, and every pass over the
+# video pays for it again: Auto-Boost filters once for the fast pass and once
+# for the final one, Condor once per probe, and a run resumed from the top
+# starts the chain over. The way out is to filter once into a lossless x264 file
+# and encode AV1 from that instead. tools/lossless_mode.py does exactly that,
+# from inside whichever dispatcher is running - there is no step for the user.
+#
+# What lives here is the switch and the script. bat-builder.py writes
+# video-input\lossless-intermediary.txt when it turns the mode on; the
+# dispatchers read it through lossless_mode.active() and hand the encoder a
+# passthrough script - open the file, hand it over, filter nothing - over the
+# intermediary, in place of the template.
+#
+# find_template() carries the same rule as a backstop, for an intermediary that
+# someone copied into video-input by hand: while the marker is there, an input
+# whose name ends in -lossless gets the passthrough rather than the template, so
+# it cannot be rescaled, denoised and debanded a second time.
+
+LOSSLESS_MARKER_FILENAME = "lossless-intermediary.txt"
+
+# What lossless_mode.py appends to an intermediary's name, and so how every
+# other tool recognises one. Changing it means changing both.
+LOSSLESS_SUFFIX = "-lossless"
+
+# The script the encoders get instead of the template. Kept in tools rather than
+# video-input so it is never mistaken for something to edit.
+LOSSLESS_PASSTHROUGH_FILENAME = "lossless-passthrough.vpy"
+
+LOSSLESS_MARKER_TEXT = """# Lossless intermediary mode is ON.
+#
+# Written by tools\\bat-builder.py. Delete this file to leave the mode - nothing
+# else has to be undone, and the encoders go straight back to filtering every
+# input through video-input\\template.vpy.
+#
+# What it changes: your encoding .bat filters each video through template.vpy
+# ONCE, into a lossless file under temp\\lossless, and encodes from that file
+# instead of filtering again on every pass. There is nothing extra to run - the
+# dispatcher does it. Only one of those files exists at a time: the previous
+# video's is deleted before the next is built, and the last one goes when the
+# .bat clears temp at the end of the run.
+#
+# Read by tools\\lossless_mode.py and tools\\vpy_template.py, which
+# av1an-dispatch.py, Auto-Boost-Av1an.py and condor-dispatch.py all go through.
+
+mode=lossless-intermediary
+rescale={rescale}
+suffix={suffix}
+num_streams={num_streams}
+"""
+
+LOSSLESS_PASSTHROUGH = """# lossless-passthrough.vpy - written by tools/vpy_template.py, not by hand.
+#
+# The encoders run this instead of video-input\\template.vpy while
+# video-input\\lossless-intermediary.txt is present and the input is a
+# {suffix} file. That file already has the template's whole filter chain in it,
+# put there by tools/lossless_mode.py, so all that is left is to open it and
+# hand it over. Filtering it again would rescale, denoise and deband twice.
+#
+# Rewritten whenever it is out of date, so editing it achieves nothing. Delete
+# video-input\\lossless-intermediary.txt to leave the mode instead.
+import vapoursynth as vs
+from vstools import initialize_clip, finalize_clip
+
+core = vs.core
+core.max_cache_size = 1024
+
+{source_line}
+src = initialize_clip(src)
+
+final = finalize_clip(src)
+final.set_output(0)
+"""
+
+
+def lossless_marker_path(base_dir=None):
+    """Absolute path of video-input\\lossless-intermediary.txt, present or not."""
+    return os.path.join(base_dir or video_input_dir(), LOSSLESS_MARKER_FILENAME)
+
+
+def read_lossless_marker(base_dir=None):
+    """The marker's key=value pairs, or None when the mode is off.
+
+    A file with nothing but comments in it still counts as on - the mode is the
+    file existing, and the values are only there to report what it was turned on
+    for.
+    """
+    try:
+        with open(lossless_marker_path(base_dir), "r", encoding="utf-8",
+                  errors="replace") as handle:
+            text = handle.read()
+    except OSError:
+        return None
+
+    values = {}
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        values[key.strip().lower()] = value.strip()
+    return values
+
+
+def lossless_mode_active(base_dir=None):
+    """True while video-input\\lossless-intermediary.txt is there."""
+    return read_lossless_marker(base_dir) is not None
+
+
+def write_lossless_marker(rescale=None, num_streams=None, base_dir=None):
+    """Turn the mode on. Returns the path written.
+
+    CRLF because this is a .txt the user opens in Notepad, like settings.txt.
+    """
+    directory = base_dir or video_input_dir()
+    os.makedirs(directory, exist_ok=True)
+    path = lossless_marker_path(directory)
+    with open(path, "w", encoding="utf-8", newline="\r\n") as handle:
+        handle.write(LOSSLESS_MARKER_TEXT.format(
+            suffix=LOSSLESS_SUFFIX,
+            rescale=rescale or "unknown",
+            num_streams=num_streams if num_streams else ""))
+    return path
+
+
+def delete_lossless_marker(base_dir=None):
+    """Turn the mode off. True if a marker was there."""
+    try:
+        os.remove(lossless_marker_path(base_dir))
+        return True
+    except OSError:
+        return False
+
+
+def is_lossless_intermediary(source_path):
+    """True when this input is one of lossless_mode.py's own intermediaries."""
+    stem = os.path.splitext(os.path.basename(str(source_path)))[0]
+    return stem.lower().endswith(LOSSLESS_SUFFIX.lower())
+
+
+def lossless_mode_applies(source_path):
+    """True when this input must skip the template: the mode is on and it is one."""
+    return (bool(source_path) and lossless_mode_active()
+            and is_lossless_intermediary(source_path))
+
+
+def lossless_passthrough_path():
+    return os.path.join(tools_dir(), LOSSLESS_PASSTHROUGH_FILENAME)
+
+
+def lossless_passthrough_text():
+    """The passthrough script, opened with whichever source filter is selected."""
+    source_line = "src = " + source_filter.plain_source_call(
+        source_filter.resolve(), SOURCE_TOKEN)
+    return LOSSLESS_PASSTHROUGH.format(suffix=LOSSLESS_SUFFIX, source_line=source_line)
+
+
+def ensure_lossless_passthrough():
+    """Write tools\\lossless-passthrough.vpy when it is missing or out of date.
+
+    Returns its path, or None if it is neither there nor writable - the one case
+    where the caller has to fall back to the template.
+    """
+    path = lossless_passthrough_path()
+    wanted = lossless_passthrough_text()
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as handle:
+            if handle.read() == wanted:
+                return path
+    except OSError:
+        pass
+
+    try:
+        with open(path, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(wanted)
+    except OSError:
+        return path if os.path.isfile(path) else None
+    return path
+
+
 def find_template(source_path=None):
     """The template.vpy that applies to this input, or None.
 
@@ -123,6 +311,16 @@ def find_template(source_path=None):
     folder is a fallback for an input encoded from somewhere else. An empty file
     counts as absent, since that is what a half-finished edit looks like.
     """
+    # Lossless intermediary mode: this input already carries the template's
+    # filter chain, so it gets the passthrough rather than being filtered twice.
+    if lossless_mode_applies(source_path):
+        passthrough = ensure_lossless_passthrough()
+        if passthrough:
+            return passthrough
+        print(f"[template] Could not write tools\\{LOSSLESS_PASSTHROUGH_FILENAME}, so "
+              f"{os.path.basename(str(source_path))} falls back to template.vpy and "
+              f"will be filtered a second time.")
+
     candidates = [template_path()]
     if source_path:
         candidates.append(template_path(os.path.dirname(os.path.abspath(str(source_path)))))
@@ -510,22 +708,34 @@ HEADER = """# template.vpy - the filtering script your encodes use.
 {rescale_note}"""
 
 
-def header_text(rescale=None):
+def header_text(rescale=None, num_streams=None, lossless=False):
     """HEADER with the line that describes the rescale this file was written with.
 
     Written at the top rather than left for the reader to work out from the
     body: the rescale is the one part of the file whose presence was a menu
     choice, so the header says which choice was made and what is left to set.
+    The two answers the same page collects - num_streams and whether the encode
+    goes through a lossless intermediary - are reported for the same reason.
     """
     if rescale:
         label = LIVE_RESCALE_BACKENDS[rescale][0]
         note = (f"# The rescale block below is switched ON, running ArtCNN on\n"
                 f"# {label}. Set new_height and the descale\n"
                 f"# kernel for the show you are encoding before you encode with it.\n")
+        if num_streams:
+            note += (f"# num_streams is set to {num_streams} in that block. Lower it to 1 if the\n"
+                     f"# rescale runs the GPU out of memory or crashes part way through.\n")
     else:
         note = ("# There is no rescale block in this file. Write the template again from\n"
                 "# bat-builder.bat > Setup advanced tools and pick one of the rescale\n"
                 "# options if you want one.\n")
+    if lossless:
+        note += ("#\n"
+                 "# Lossless intermediary mode is ON - see video-input\\\\lossless-intermediary.txt.\n"
+                 "# Your encoding .bat runs this file ONCE per video, into a lossless .mkv\n"
+                 "# under temp\\\\lossless, and encodes from that - so the rescale runs once\n"
+                 "# instead of once per pass. It does that on its own; there is nothing\n"
+                 "# extra to run. Delete the .txt to leave the mode.\n")
     return HEADER.format(rescale_note=note)
 
 # Always emitted, even as an all-zero no-op, because it is where a user goes to
@@ -571,7 +781,7 @@ TONEMAP_COMMENT = """# HDR to SDR: the .bat --tonemap flag does not apply to a t
 # purpose: a rescale is wrong for most sources, and the descale kernel and the
 # native height have to be worked out per show before it is right for any of
 # them. All three do the same thing and differ only in the backend= line, which
-# is what decides whether ArtCNN runs on DirectML, TensorRT or MIGraphX.
+# is what decides whether ArtCNN runs on DirectML, TensorRT-RTX or MIGraphX.
 #
 # Each section is self-contained, imports included, so uncommenting exactly one
 # of them is all it takes. Nothing here is imported while they stay commented,
@@ -592,7 +802,8 @@ RESCALE_HEADER = """# ==========================================================
 #
 # Uncomment ONE of the three sections below - whichever matches the backend you
 # have installed. DirectML runs on any Direct3D 12 GPU and needs no vendor
-# download, so it is the one to start with. NVIDIA TensorRT and AMD MIGraphX are
+# download, so it is the one to start with. NVIDIA TensorRT-RTX and AMD MIGraphX
+# are
 # faster and are downloaded from bat-builder.bat > Setup advanced tools > "Write
 # template.vpy based off settings.txt".
 #
@@ -648,8 +859,8 @@ RESCALE_SECTION = """# --- {label} ---
 RESCALE_BACKENDS = (
     ("DirectML Rescale (NVIDIA / AMD / Intel) - no vendor download needed",
      "Backend.ORT_DML(fp16=True)"),
-    ("NVIDIA Rescale (TensorRT) - needs the NVIDIA components downloaded",
-     "Backend.TRT(fp16=True)"),
+    ("NVIDIA Rescale (TensorRT-RTX) - needs the NVIDIA components downloaded",
+     "Backend.TRT_RTX(fp16=True)"),
     ("AMD Rescale (MIGraphX) - needs the AMD components downloaded",
      "Backend.MIGX(fp16=True)"),
 )
@@ -674,7 +885,7 @@ def rescale_lines():
 # --------------------------------------------------------------------------
 #
 # bat-builder's template page asks for the backend before it writes the file -
-# "Standard", DirectML or NVIDIA TensorRT - so the section that goes in is the
+# "Standard", DirectML or NVIDIA TensorRT-RTX - so the section that goes in is
 # one that was asked for, and it goes in switched on. A section that still had
 # to be uncommented afterwards would only be a second chance to get it wrong,
 # and a template written without a rescale has no commented block to read past.
@@ -682,11 +893,33 @@ def rescale_lines():
 # The imports sit inside the block rather than at the top of the file, so a
 # template written without a rescale never pays for vsscale's import chain.
 
-# name -> (what to call it in prose, the vsscale Backend the upscaler runs on)
+# name -> (what to call it in prose, the vsscale Backend class the upscaler
+# runs on). The class rather than a finished call, because the arguments depend
+# on what the template page was told - see live_backend_call() below.
 LIVE_RESCALE_BACKENDS = {
-    "DirectML": ("DirectML (NVIDIA / AMD / Intel)", "Backend.ORT_DML(fp16=True)"),
-    "NVIDIA": ("NVIDIA TensorRT (NVIDIA only)", "Backend.TRT(fp16=True)"),
+    "DirectML": ("DirectML (NVIDIA / AMD / Intel)", "Backend.ORT_DML"),
+    "NVIDIA": ("NVIDIA TensorRT-RTX (RTX 20-series and newer)", "Backend.TRT_RTX"),
 }
+
+# Inference streams, written into the block as a variable rather than as a
+# number inside the Backend call, so there is one obvious place to change it
+# afterwards. Both backends take it: ORT_DML and TRT_RTX inherit num_streams
+# from ORT and TRT respectively.
+LIVE_RESCALE_NUM_STREAMS = """
+# How many frames the GPU is asked to work on at once. Higher is not always
+# faster - past the point where the GPU is already saturated it buys nothing and
+# costs memory - and in testing anything above 3 crashed some cards outright.
+# Drop it to 1 if the rescale is unstable, and leave it there if that fixes it.
+num_streams = {num_streams}
+"""
+
+
+def live_backend_call(name, num_streams=None):
+    """The Backend(...) call the upscaler lines in a live rescale block run on."""
+    backend = LIVE_RESCALE_BACKENDS[name][1]
+    if num_streams:
+        return f"{backend}(fp16=True, num_streams=num_streams)"
+    return f"{backend}(fp16=True)"
 
 LIVE_RESCALE_SECTION = """# ============================================================================
 # Rescale (anime) - ON, running ArtCNN on {label}
@@ -711,7 +944,7 @@ from vskernels import Bilinear, Hermite
 from vsscale import ArtCNN, Backend, Rescale
 
 new_height = 844  # The height the show was actually drawn at. Set this.
-
+{num_streams_block}
 # Only one of these two lines may be uncommented: C4F32 or R8F64.
 upscaler = ArtCNN.C4F32({backend_call})  # C4F32: good quality, faster
 # upscaler = ArtCNN.R8F64({backend_call})  # R8F64: best quality, slower
@@ -730,15 +963,24 @@ src = rs.upscale
 # ============================================================================"""
 
 
-def live_rescale_lines(name):
+def live_rescale_lines(name, num_streams=None):
     """The switched-on rescale block for one backend, as lines.
+
+    num_streams of None leaves the block exactly as it always was, so a template
+    written without an answer to that question is unchanged.
 
     The trailing blank line is part of it: without it the block runs straight
     into whatever settings.txt puts next - a denoise line, usually - which reads
     badly and leaves nothing to mark where the block ended.
     """
-    label, backend_call = LIVE_RESCALE_BACKENDS[name]
-    return [LIVE_RESCALE_SECTION.format(label=label, backend_call=backend_call), ""]
+    label = LIVE_RESCALE_BACKENDS[name][0]
+    block = ""
+    if num_streams:
+        block = LIVE_RESCALE_NUM_STREAMS.format(num_streams=num_streams)
+    return [LIVE_RESCALE_SECTION.format(
+        label=label,
+        backend_call=live_backend_call(name, num_streams),
+        num_streams_block=block), ""]
 
 
 def _is_true(settings, key, default="False"):
@@ -746,7 +988,7 @@ def _is_true(settings, key, default="False"):
 
 
 def build_template_text(settings, dehalo_values, fine_dehalo_values, crop_values,
-                        filter_name, rescale=None):
+                        filter_name, rescale=None, num_streams=None, lossless=False):
     """The full text of template.vpy, from the current settings.txt values.
 
     Only the filters that are switched on are written out, so the file reads like
@@ -754,7 +996,9 @@ def build_template_text(settings, dehalo_values, fine_dehalo_values, crop_values
     left in.
 
     rescale is a key of LIVE_RESCALE_BACKENDS, or None for no rescale block at
-    all - the "Standard template.vpy" the template page offers.
+    all - the "Standard template.vpy" the template page offers. num_streams and
+    lossless are the two follow-up answers that page collects when a rescale was
+    picked; both only change what is written, never how it is written.
     """
     do_dehalo = _is_true(settings, "dehalo")
     do_fine_dehalo = _is_true(settings, "fine_dehalo")
@@ -790,7 +1034,7 @@ def build_template_text(settings, dehalo_values, fine_dehalo_values, crop_values
     # detail it works from. The dehalos come
     # after denoise rather than before it: run on a noisy clip they sharpen the
     # edges of the grain, and the denoiser then has more to remove.
-    body = list(live_rescale_lines(rescale)) if rescale else []
+    body = list(live_rescale_lines(rescale, num_streams)) if rescale else []
     if denoise_line:
         body.append(denoise_line)
     if do_dehalo:
@@ -810,7 +1054,7 @@ def build_template_text(settings, dehalo_values, fine_dehalo_values, crop_values
     if deband_line:
         body.append(deband_line)
 
-    lines = [header_text(rescale).rstrip("\n"), ""]
+    lines = [header_text(rescale, num_streams, lossless).rstrip("\n"), ""]
     lines.extend(imports)
     lines += ["", "core = vs.core", "core.max_cache_size = 1024", ""]
     lines.append("src = " + source_filter.plain_source_call(filter_name, SOURCE_TOKEN))

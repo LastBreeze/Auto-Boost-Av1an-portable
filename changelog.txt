@@ -1,5 +1,17 @@
 Changelog
 
+v3.4.5
+---------------------------------
+• New advanced tools feature: lossless intermediary mode, offered by both rescale options. The filter
+  chain runs ONCE per video into a lossless mkv file, and the encode reads that file instead of
+  filtering again on every pass.
+• Nvidia TRT Engine support added. This allows for faster rescale when using Nvidia RTX GPUs.
+• Fixed bug where Windows in-use file lock wouldn't release fast enough to allow moving mkv files.
+
+v3.4.4
+---------------------------------
+• Edited more scripts to use explicit folder locations for plugins for compatibility.
+
 v3.4.3
 ---------------------------------
 • Bugfix for auto crop
@@ -275,7 +287,7 @@ v1.63
 
 v1.62
 ---------------------------------
-• Add "filter" folder: filters then encodes your source mkv files one by one, automatically. 
+• Add "filter" folder: filters then encodes your source mkv files one by one, automatically.
 
 v1.61
 ---------------------------------
@@ -414,7 +426,7 @@ v1.34 (Experimental)
 v1.33 (Experimental)
 ---------------------------------
 • Improved scene detection logic.
-• Added --photon-noise setting to batch files. 
+• Added --photon-noise setting to batch files.
   - Allows users to customize the value or disable it (set to 0) if they prefer to use --film-grain flags.
 
 v1.32 (Experimental)

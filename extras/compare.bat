@@ -7,7 +7,7 @@ cd /d "%~dp0"
 :: 2. Set Relative Paths
 ::    Tools are one level up in the "VapourSynth" folder
 set "PYTHON_EXE=..\VapourSynth\python.exe"
-set "COMP_SCRIPT=..\VapourSynth\comp.py"
+set "COMP_SCRIPT=..\tools\comp.py"
 
 if not exist "%PYTHON_EXE%" goto :missing_python
 if not exist "%COMP_SCRIPT%" goto :missing_script

@@ -234,9 +234,18 @@ def activate_vship_plugin(root_dir, tools_dir, gpu):
         gpu_key = "nvidia"
     dll_name = VSHIP_DLLS[gpu_key]
 
-    plugin_dir = os.path.join(root_dir, "VapourSynth", "vs-plugins")
+    # R79 autoloads VapourSynth\Lib\site-packages\vapoursynth\plugins, the folder
+    # ssimu2-workercount.py installs the winning libvship build into. The old
+    # VapourSynth\vs-plugins folder no longer ships and is never autoloaded, so
+    # only fall back to it when a hand-modified package still has one.
+    plugin_dir = os.path.join(root_dir, "VapourSynth", "Lib", "site-packages",
+                              "vapoursynth", "plugins")
     if not os.path.isdir(plugin_dir):
-        print(f"{RED}[Dispatch] WARNING: VapourSynth\\vs-plugins was not found.{RESET}")
+        legacy_dir = os.path.join(root_dir, "VapourSynth", "vs-plugins")
+        if os.path.isdir(legacy_dir):
+            plugin_dir = legacy_dir
+    if not os.path.isdir(plugin_dir):
+        print(f"{RED}[Dispatch] WARNING: the VapourSynth plugin folder was not found.{RESET}")
         return ""
 
     # Two libvship builds in the autoload folder collide on the same plugin ID,
@@ -270,7 +279,7 @@ def activate_vship_plugin(root_dir, tools_dir, gpu):
         print(f"[Dispatch] Activated metric plugin: {dll_name} ({gpu_key})")
         return dst
     except Exception as e:
-        print(f"{RED}[Dispatch] WARNING: Could not copy {dll_name} into vs-plugins: {e}{RESET}")
+        print(f"{RED}[Dispatch] WARNING: Could not copy {dll_name} into the plugin folder: {e}{RESET}")
         return ""
 
 

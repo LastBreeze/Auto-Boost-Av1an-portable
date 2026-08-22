@@ -7,23 +7,80 @@ than the standalone vsmlrt module, but the plugin side is the same one: an
 inference backend has to be there, and which one is available decides how fast
 the rescale is:
 
-  DirectML   ships with this package. vsort.dll plus DirectML.dll and
-             onnxruntime.dll in VapourSynth\\vs-plugins\\vsort, about 40 MB, and
-             it runs on any Direct3D 12 GPU - NVIDIA, AMD or Intel. Slowest of
-             the three, but it works out of the box on every machine.
-  TensorRT   NVIDIA only. Several times faster than DirectML, and 3.5 GB
-             installed, which is why it is not in the package.
-  MIGraphX   AMD only. Faster than DirectML, 385 MB installed.
+  DirectML     ships with this package. vsort.dll plus DirectML.dll and
+               onnxruntime.dll, about 40 MB, and it runs on any Direct3D 12 GPU -
+               NVIDIA, AMD or Intel. The slow one, but it works out of the box
+               on every machine.
+  TensorRT-RTX ships with this package too. NVIDIA RTX only, 20-series and
+               newer. About 250 MB installed. "The TensorRT-RTX files" below is
+               what it is made of.
+  MIGraphX     AMD only. Faster than DirectML, 385 MB installed, and the one
+               backend here that is still fetched on demand.
 
-The two big ones are fetched on demand from the vs-mlrt release this package is
-pinned to, with the curl.exe and 7z.exe that sit in the VapourSynth folder, and
-unpacked into VapourSynth\\vs-plugins. Pinning matters: vsmlrt.py, the plugin
-DLLs and the runtime folders are versioned together, and mixing releases is what
-produces "unable to load" errors that look like a broken install.
+How much TensorRT-RTX is worth depends entirely on the model. On an RTX 5060,
+rescaling a 1500x844 descale of a 1080p source, measured over the rescale alone:
 
-The plugin DLLs and their runtime folders (vsmlrt-cuda, vsmlrt-hip) are looked
-for next to each other, so everything lands in vs-plugins next to vsort.dll. The
-archives already carry those folder names, so they are simply extracted there.
+  ArtCNN C4F32   33 fps on TensorRT-RTX, 32 fps on DirectML
+  ArtCNN R8F64   17 fps on TensorRT-RTX, 11 fps on DirectML
+
+C4F32 is small enough that neither backend is the bottleneck - the descale, the
+masks and the downscale are - so the choice barely shows. R8F64 is where the
+backend does the work, and where the download pays for itself. A full filter
+chain with a dehalo in it moves both numbers down together.
+
+MIGraphX comes from the vs-mlrt release this package is pinned to, with curl and
+the 7z.exe in the VapourSynth folder, and is unpacked into VapourSynth\\vs-plugins.
+Pinning matters: the plugin DLLs and the runtime folders that go with them are
+versioned together, and mixing releases is what produces "unable to load" errors
+that look like a broken install.
+
+Full TensorRT is deliberately not one of the choices. It is the faster of the two
+NVIDIA paths, but it wants vsmlrt-cuda for the plugin (2.6 GB to download, 3.5 GB
+installed) and NVIDIA's tensorrt_cu13_libs wheel for the engine builder that
+vs-jetpack 2 drives (1.9 GB more). TensorRT-RTX does the same job for the models
+this package uses in 250 MB, and builds its engine in under a second rather than
+minutes.
+
+A vs-mlrt plugin DLL and its runtime folder (vsmlrt-cuda, vsmlrt-hip) are looked
+for next to each other - the DLL builds an absolute path to that folder out of
+its own location and gives up if nothing is there - so both land in the same
+directory. The archives already carry the folder names, so they are simply
+extracted alongside the DLL.
+
+--- The TensorRT-RTX files -------------------------------------------------
+
+Four things have to be in place, and all four ship with the package:
+
+    Lib\\site-packages\\vapoursynth\\plugins\\vstrt_rtx.dll
+        the plugin, out of VSTRT-RTX-Windows-x64 in the pinned vs-mlrt release.
+    Lib\\site-packages\\vapoursynth\\plugins\\vsmlrt-cuda\\
+        tensorrt_rtx_1_4.dll and tensorrt_onnxparser_rtx_1_4.dll, out of
+        NVIDIA's tensorrt_rtx_cu13_libs wheel. vstrt_rtx.dll preloads the first
+        of those by absolute path from its own folder, which is why the runtime
+        sits here instead of in site-packages where the wheel puts it.
+    Lib\\site-packages\\tensorrt_rtx_bindings, tensorrt_rtx, tensorrt_rtx_libs
+        the Python side. vs-jetpack 2 builds the engine through the tensorrt_rtx
+        module rather than through trtexec, so the bindings are not optional.
+        tensorrt_rtx and tensorrt_rtx_libs are two short files written by hand:
+        NVIDIA publishes the first only as an sdist that pip would have to
+        build, and the second is what loads the runtime out of vsmlrt-cuda
+        instead of keeping a second 200 MB copy of it.
+    Lib\\site-packages\\cuda
+        cuda-core, with cuda-bindings and cuda-pathfinder under it, which
+        vsscale uses to select the CUDA device before it builds an engine.
+
+The versions are tied together: the plugin reports the TensorRT-RTX version it
+was built against - 1.4.0 for v15.16 - and vsscale refuses to run if the Python
+bindings do not match it to the patch number. To rebuild the set, run this from
+the VapourSynth folder
+
+    python.exe -m pip install --no-deps --extra-index-url https://pypi.nvidia.com
+        tensorrt_rtx_cu13_bindings==1.4.0.76 tensorrt_rtx_cu13_libs==1.4.0.76
+    python.exe -m pip install cuda-core cuda-bindings
+
+then move the two DLLs out of site-packages\\tensorrt_rtx_libs into the
+plugins\\vsmlrt-cuda folder above, leaving that package's hand-written
+__init__.py in place.
 
 Two things moved in vs-jetpack 2 and are no longer this file's business. The
 ArtCNN ONNX models used to sit in vs-plugins\\models; vsscale now resolves them
@@ -41,10 +98,9 @@ run from the VapourSynth folder, which is the directory vsscale's downloader
 hangs its .vsjet off. The Scripts\\vsscale.exe launcher is not used: like the
 other Scripts launchers it carries the build machine's python path and exits
 without doing anything here. That is also why directml_installed() below no
-longer looks for the models. And vs-jetpack's TensorRT
-backend builds its engine through the tensorrt Python module instead of the
-trtexec in vsmlrt-cuda, so the NVIDIA download here covers the plugin but not
-the engine builder.
+longer looks for the models. That same redirect is what decides where a built
+TensorRT engine is cached - VapourSynth\\.vsjet\\vsscale\\artifact - so engines
+travel with the package too.
 
 Used by bat-builder.py's template.vpy page. Nothing in an encode imports this.
 """
@@ -79,12 +135,38 @@ def vapoursynth_dir():
 
 
 def plugins_dir():
-    """VapourSynth\\vs-plugins - where the plugin DLLs and runtime folders live."""
-    return os.path.join(vapoursynth_dir(), "vs-plugins")
+    """Where a downloaded backend is unpacked, and where its markers are looked for.
+
+    R79 autoloads VapourSynth\\Lib\\site-packages\\vapoursynth\\plugins and no
+    longer reads VapourSynth\\vs-plugins, which this package stopped shipping, so
+    a backend unpacked into the old folder installed successfully and then loaded
+    nowhere. The archives carry vstrt.dll / vsmigx.dll plus their own runtime
+    folder (vsmlrt-cuda\\, vsmlrt-hip\\) and collide with none of the pip-installed
+    plugins already in there, so they can be unpacked straight into it.
+
+    The legacy folder is still honoured when a hand-modified package has one.
+    """
+    autoload_dir = pip_plugins_dir()
+    if os.path.isdir(autoload_dir):
+        return autoload_dir
+    legacy_dir = os.path.join(vapoursynth_dir(), "vs-plugins")
+    if os.path.isdir(legacy_dir):
+        return legacy_dir
+    return autoload_dir
 
 
 def curl_path():
-    return os.path.join(vapoursynth_dir(), "curl.exe")
+    """The curl to download with: the bundled one, or Windows' own.
+
+    Windows 10 1803 and later ship curl.exe in System32, so a package built
+    without a copy in the VapourSynth folder still has one. shutil.which is the
+    last word rather than the first so that a bundled curl, if there is one,
+    wins over whatever else is on PATH.
+    """
+    bundled = os.path.join(vapoursynth_dir(), "curl.exe")
+    if os.path.exists(bundled):
+        return bundled
+    return shutil.which("curl") or bundled
 
 
 def sevenzip_path():
@@ -130,25 +212,11 @@ class Backend:
 
 # Sizes are the release's own, so the figures shown before a download are the
 # real ones rather than an estimate.
+#
+# NVIDIA is not in here. TensorRT-RTX is small enough to ship, so it is already
+# in the package rather than something to fetch - tensorrt_rtx_installed() is
+# the NVIDIA question now.
 BACKENDS = {
-    "nvidia": Backend(
-        key="nvidia",
-        title="NVIDIA (TensorRT)",
-        hardware="NVIDIA GeForce / RTX",
-        backend_call="Backend.TRT(fp16=True)",
-        assets=[
-            ("vsmlrt-cuda.v15.16.7z.001", 2147483647),
-            ("vsmlrt-cuda.v15.16.7z.002", 464467988),
-            ("VSTRT-Windows-x64.v15.16.7z", 486704),
-        ],
-        markers=["vstrt.dll", "vsmlrt-cuda"],
-        installed_bytes=3635515392,
-        notes=(
-            "TensorRT builds an optimised engine for your exact GPU the first "
-            "time a rescale runs, which takes a few minutes and is cached "
-            "afterwards. The same files also cover Backend.ORT_CUDA."
-        ),
-    ),
     "amd": Backend(
         key="amd",
         title="AMD (MIGraphX)",
@@ -210,7 +278,10 @@ def find_plugin_file(filename, max_depth=2):
     label stays cheap next to a TensorRT install, whose vsmlrt-cuda folder holds
     thousands of files in trees nothing here needs to look inside.
     """
-    roots = [(plugins_dir(), 0), (pip_plugins_dir(), 0)]
+    # Normally the same folder now; still two entries on a package that kept a
+    # legacy vs-plugins tree, and de-duplicated so the scan is not done twice.
+    roots = [(root, 0) for root in
+             dict.fromkeys((plugins_dir(), pip_plugins_dir()))]
     while roots:
         root, depth = roots.pop(0)
         candidate = os.path.join(root, filename)
@@ -242,6 +313,29 @@ def directml_installed():
     """
     return all(find_plugin_file(name) for name in
                ("vsort.dll", "DirectML.dll", "onnxruntime.dll"))
+
+
+def tensorrt_rtx_installed():
+    """True when every piece of the TensorRT-RTX backend is in place.
+
+    All four are checked, because any one of them missing fails somewhere the
+    error does not name it: without the plugin there is no core.trt_rtx at all,
+    without the runtime DLL the plugin registers and then reports "TensorRT
+    failed to load", and without the Python bindings or cuda-core the rescale
+    gets as far as building an engine before it stops.
+
+    The runtime lives in the vsmlrt-cuda folder beside the plugin - see "The
+    TensorRT-RTX files" at the top of this file for why it is not left where
+    NVIDIA's wheel puts it.
+    """
+    if not find_plugin_file("vstrt_rtx.dll"):
+        return False
+    if not find_plugin_file("tensorrt_rtx_1_4.dll"):
+        return False
+    site_packages = os.path.join(vapoursynth_dir(), "Lib", "site-packages")
+    return all(os.path.isdir(os.path.join(site_packages, package)) for package in
+               ("tensorrt_rtx", "tensorrt_rtx_bindings", "tensorrt_rtx_libs",
+                os.path.join("cuda", "core")))
 
 
 def tools_present():
@@ -390,7 +484,7 @@ def install(key):
     missing = backend.missing_markers()
     if missing:
         return False, (f"The files unpacked, but {', '.join(missing)} is not in "
-                       f"VapourSynth\\vs-plugins. The release layout may have "
+                       f"{plugins_dir()}. The release layout may have "
                        f"changed.")
 
     clear_temp_dir()

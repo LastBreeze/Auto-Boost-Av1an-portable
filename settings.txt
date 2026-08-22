@@ -79,7 +79,7 @@ denoise_setting=src = DFTTest().denoise(src, {0.00:0.30, 0.40:0.30, 0.60:0.60, 0
 [deband]
 # Options available: True, False
 deband=False
-deband_setting=src = core.placebo.Deband(src, threshold=0.8, planes=1)
+deband_setting=src = core.placebo.Deband(src, threshold=0.4, planes=1)
 
 # info
 # [crop]

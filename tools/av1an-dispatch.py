@@ -40,6 +40,7 @@ from svt_fork_setup import setup_svt_av1_fork
 import tonemap_backend
 import source_filter
 import vpy_template
+import lossless_mode
 
 BLUE = "\033[94m"
 RED = "\033[91m"
@@ -627,7 +628,9 @@ def warn_and_pause_if_paths_too_long(input_files, video_output_dir, temp_dir):
         filename = os.path.basename(input_path)
         basename = os.path.splitext(filename)[0]
         video_input_dir = os.path.dirname(input_path)
-        backend_artifact_dir = os.path.join(video_input_dir, basename)
+        # The encode works entirely inside temp now, so these are the paths that
+        # actually get created.
+        backend_artifact_dir = os.path.join(temp_dir, basename)
         paths_to_check = [
             input_path,
             os.path.join(video_output_dir, basename + "-output.mkv"),
@@ -636,11 +639,12 @@ def warn_and_pause_if_paths_too_long(input_files, video_output_dir, temp_dir):
             os.path.join(temp_dir, f"{basename}_scenedetect.json"),
             os.path.join(temp_dir, f"{basename}_scenedetect.zoned.json"),
             os.path.join(temp_dir, f"{basename}-output.mkv"),
-            os.path.join(video_input_dir, f"{basename}-av1.mkv"),
+            # Av1an writes the encoded video straight into temp, so that is the
+            # only place it is ever measured from.
+            os.path.join(temp_dir, f"{basename}-av1.mkv"),
             backend_artifact_dir,
             os.path.join(backend_artifact_dir, f"{basename}.vpy"),
             os.path.join(backend_artifact_dir, f"{basename}{index_suffix}"),
-            os.path.join(backend_artifact_dir, f"{basename}-av1.mkv"),
         ]
         for path in paths_to_check:
             display_path = display_path_for_length(path)
@@ -709,6 +713,12 @@ def gather_input_files(video_input_dir, extensions):
     for ext in extensions:
         input_files.extend(sorted(glob.glob(os.path.join(video_input_dir, ext))))
     return input_files
+
+
+# How long to wait before each attempt at muxing. The first is immediate; a
+# file the encoder only just closed is sometimes still held for a moment by
+# antivirus or a slow drive, and a short pause is enough to clear it.
+MUX_RETRY_WAITS = (0, 5, 10)
 
 
 def scan_for_new_input_files(video_input_dir, extensions, known_input_files):
@@ -1190,6 +1200,18 @@ def build_script_from_template(template_file, source_path, temp_dir, settings,
         stamp = vpy_template.render_stamp(template_text, source_path)
         crop_values = vpy_template.read_crop_values(template_text)
 
+        # Lossless intermediary mode: filter the source once into a lossless
+        # file and point the encode at that instead, so a run that reads the
+        # video more than once does not pay for the rescale every time. The
+        # crop reported below still comes from the template, because the
+        # template is what produced the frames in that file. Returns None when
+        # the mode is off or the intermediary could not be built, and then this
+        # filters normally exactly as it always did.
+        intermediary = lossless_mode.prepare(source_path, template_text)
+        script_text = None
+        if intermediary:
+            script_text, stamp = lossless_mode.passthrough_render(intermediary)
+
         reused = False
         if os.path.exists(vpy_file):
             try:
@@ -1199,7 +1221,8 @@ def build_script_from_template(template_file, source_path, temp_dir, settings,
                 reused = False
 
         if not reused:
-            script_text = vpy_template.render(template_text, source_path, stamp=stamp)
+            if script_text is None:
+                script_text = vpy_template.render(template_text, source_path, stamp=stamp)
             vpy_template.write_rendered(vpy_file, script_text)
     except vpy_template.TemplateError as e:
         print(f"{RED}[Dispatch] ERROR: {os.path.basename(template_file)} cannot be used: {e}{RESET}")
@@ -1207,8 +1230,14 @@ def build_script_from_template(template_file, source_path, temp_dir, settings,
               f"generated script.{RESET}")
         sys.exit(1)
 
-    print(f"{BLUE}[Dispatch] Filtering script: {template_file} "
-          f"(settings.txt filter settings are not used){RESET}")
+    if intermediary:
+        print(f"{BLUE}[Dispatch] Filtering script: {template_file}, already applied on the "
+              f"way into{RESET}")
+        print(f"{BLUE}[Dispatch] {os.path.basename(str(intermediary))}. This encode reads "
+              f"that lossless file, so nothing is filtered twice.{RESET}")
+    else:
+        print(f"{BLUE}[Dispatch] Filtering script: {template_file} "
+              f"(settings.txt filter settings are not used){RESET}")
     if crop_values is None:
         print(f"{BLUE}[Dispatch] Crop: no crop line in the template{RESET}")
     elif any(crop_values):
@@ -2036,20 +2065,20 @@ def main():
     script_path = os.path.abspath(__file__)
     tools_dir = os.path.dirname(script_path)
     root_dir = os.path.dirname(tools_dir)
-    
+
     video_input_dir = os.path.join(root_dir, "video-input")
     video_output_dir = os.path.join(root_dir, "video-output")
     temp_dir = os.path.join(root_dir, "temp")
-    
+
     # Scripts & Tools
     av1an_exe = os.path.join(tools_dir, "av1an", "av1an.exe")
     scene_detect_script = os.path.join(tools_dir, "Progressive-Scene-Detection.py")
     mediainfo_exe = os.path.join(tools_dir, "MediaInfo_CLI", "MediaInfo.exe")
-    
+
     # UPDATED: Use the specific av1an- versions of tag and mux
     tag_script = os.path.join(tools_dir, "av1an-tag.py")
     mux_script = os.path.join(tools_dir, "av1an-mux.py")
-    
+
     # --- Ensure Directories Exist ---
     if not os.path.exists(video_input_dir):
         os.makedirs(video_input_dir)
@@ -2059,10 +2088,10 @@ def main():
         os.makedirs(video_output_dir)
     if not os.path.exists(temp_dir):
         os.makedirs(temp_dir)
-        
+
     # --- Argument Parsing ---
     args = sys.argv[1:]
-    
+
     crf = "30"
     workers = "1"
     photon_noise = "0"
@@ -2075,7 +2104,7 @@ def main():
     autocrop = False
     convert_yuv420p10 = False
     tonemap_enabled = False
-    
+
     i = 0
     while i < len(args):
         arg = args[i]
@@ -2168,13 +2197,13 @@ def main():
     sanitize_input_filenames(video_input_dir, extensions)
     input_files = gather_input_files(video_input_dir, extensions)
     known_input_files = set(input_files)
-    
+
     if not input_files:
         print(f"[Dispatch] No video files found in {video_input_dir}")
         sys.exit(0)
 
     warn_and_pause_if_paths_too_long(input_files, video_output_dir, temp_dir)
-        
+
     print(f"[Dispatch] Found {len(input_files)} files to process.")
 
     # --- Main Processing Loop ---
@@ -2186,13 +2215,13 @@ def main():
         input_index += 1
         filename = os.path.basename(input_abspath_origin)
         basename = os.path.splitext(filename)[0]
-        
+
         final_output_path = os.path.join(video_output_dir, basename + "-output.mkv")
-        
+
         print("\n" + "="*80)
         print(f"Processing: {filename}")
         print("="*80)
-        
+
         if os.path.exists(final_output_path):
             print(f"[Dispatch] Output file already exists: {final_output_path}")
             continue
@@ -2200,12 +2229,12 @@ def main():
         try:
             # Note: We are NO LONGER moving the file to temp.
             # We read directly from input_abspath_origin.
-            
+
             # 1. Scene Detection
             # We run this in temp_dir so the JSON appears there
             json_file = f"{basename}_scenedetect.json"
             json_abspath = os.path.join(temp_dir, json_file)
-            
+
             scenes_override = source_filter.read_override()
             scenes_are_current = (os.path.exists(json_abspath)
                                   and source_filter.scenes_marker_matches(json_abspath, scenes_override))
@@ -2276,14 +2305,21 @@ def main():
             )
 
             # 3. Encoding (Direct Av1an Call)
-            av1_output = f"{basename}-av1.mkv"
-            
+            # Everything this encode produces is written where it is finally
+            # wanted, so nothing is ever moved afterwards:
+            #   temp\<name>\           Av1an's own .<hash> chunk folder and logs
+            #   temp\<name>-av1.mkv    the encoded video, at temp root, which is
+            #                          where av1an-tag.py and av1an-mux.py look
+            work_dir = os.path.join(temp_dir, basename)
+            av1_output = os.path.join(temp_dir, f"{basename}-av1.mkv")
+            os.makedirs(work_dir, exist_ok=True)
+
             # Construct Encoder Parameters (-v)
             # Combine CRF, preset, and the batch settings
             encoder_params = f"--crf {crf} --preset {final_speed} {final_params}"
             if current_color_flags:
                 encoder_params += current_color_flags
-            
+
             # Clean up double spaces if any
             encoder_params = " ".join(encoder_params.split())
 
@@ -2303,12 +2339,12 @@ def main():
             # a re-detection after the source filter changed, say - would keep
             # encoding the old frame ranges against the current .vpy.
             for discarded in source_filter.discard_stale_av1an_resume_state(
-                    video_input_dir, vpy_abspath, json_abspath):
+                    work_dir, vpy_abspath, json_abspath):
                 print(f"[Dispatch] Discarded av1an resume state that was built from an older "
                       f"scene list: {os.path.basename(discarded)}")
 
-            # We run Av1an in video_input_dir, so artifacts appear there (and we can resume if needed).
-            # We pass an absolute scenes path because the json lives in temp.
+            # Every path here is absolute, so the working directory only decides
+            # where Av1an puts its own .<hash> chunk folder and its logs.
             cmd_av1an = [
                 av1an_exe,
                 "-i", vpy_abspath,
@@ -2321,18 +2357,19 @@ def main():
                 "-o", av1_output,
                 "-v", encoder_params
             ]
-            
+
             if resume:
                 cmd_av1an.append("--resume")
-                
+
             print(f"[Dispatch] Starting Av1an Encoding...")
             print(f"svt-av1 fork: {svt_fork_display_name(selected_fork)}")
             av1an_started_at = time.monotonic()
-            
+
             try:
                 with keep.running():
-                    # Run in video_input_dir so temp folders created by av1an stay with source until done
-                    subprocess.check_call(cmd_av1an, cwd=video_input_dir)
+                    # Run in temp\<name> so Av1an's chunk folder and logs are
+                    # created there and never need moving.
+                    subprocess.check_call(cmd_av1an, cwd=work_dir)
             except subprocess.CalledProcessError:
                 print("[Dispatch] Encoding failed.")
                 send_ntfy_notification(
@@ -2346,45 +2383,9 @@ def main():
 
             av1an_elapsed = time.monotonic() - av1an_started_at
 
-            # 3. Move Av1an Artifacts from video-input to Temp
-            # Artifacts are: {basename}-av1.mkv and {basename} (folder)
-            av1_file_src = os.path.join(video_input_dir, f"{basename}-av1.mkv")
-            av1_folder_src = os.path.join(video_input_dir, basename)
-            
-            av1_file_dst = os.path.join(temp_dir, f"{basename}-av1.mkv")
-            av1_folder_dst = os.path.join(temp_dir, basename)
-            
-            print("[Dispatch] Moving encoding artifacts to temp folder...")
-            
-            # Move the folder
-            if os.path.exists(av1_folder_src):
-                if os.path.exists(av1_folder_dst):
-                    try:
-                        shutil.rmtree(av1_folder_dst)
-                    except Exception as e:
-                        print(f"[Dispatch] Warning: Failed to clean destination folder {av1_folder_dst}: {e}")
-                try:
-                    shutil.move(av1_folder_src, av1_folder_dst)
-                    print(f"[Dispatch] Moved folder: {av1_folder_src} -> {av1_folder_dst}")
-                except Exception as e:
-                    print(f"[Dispatch] Error moving folder: {e}")
-            else:
-                print(f"[Dispatch] Warning: Expected temp folder not found at {av1_folder_src}")
-                
-            # Move the file
-            if os.path.exists(av1_file_src):
-                if os.path.exists(av1_file_dst):
-                    try:
-                        os.remove(av1_file_dst)
-                    except Exception as e:
-                        print(f"[Dispatch] Warning: Failed to clean destination file {av1_file_dst}: {e}")
-                try:
-                    shutil.move(av1_file_src, av1_file_dst)
-                    print(f"[Dispatch] Moved file: {av1_file_src} -> {av1_file_dst}")
-                except Exception as e:
-                    print(f"[Dispatch] Error moving encoded file: {e}")
-            else:
-                print(f"[Dispatch] Warning: Expected encoded file not found at {av1_file_src}")
+            # 3. Nothing to move: the encode wrote straight into temp.
+            if not os.path.exists(av1_output):
+                print(f"[Dispatch] Warning: Expected encoded file not found at {av1_output}")
 
             # 4. Tagging (using av1an-tag.py)
             print("[Dispatch] Applying Tags...")
@@ -2394,16 +2395,36 @@ def main():
                 print("[Dispatch] Warning: Tagging reported an error.")
 
             # 5. Muxing (using av1an-mux.py)
+            # Name the file to mux rather than letting it sweep the folder: Av1an
+            # writes into temp directly now, so an interrupted run can leave a
+            # partial -av1.mkv here that is not ours to touch.
             print("[Dispatch] Muxing...")
-            try:
-                subprocess.check_call([sys.executable, mux_script], cwd=temp_dir)
-            except subprocess.CalledProcessError:
+            temp_output_mkv = os.path.join(temp_dir, f"{basename}-output.mkv")
+            mux_cmd = [sys.executable, mux_script, basename]
+            # av1an-mux.py exits 0 even when it finds nothing to mux, so the
+            # only honest test is whether <name>-output.mkv is there
+            # afterwards. Give a file that is still settling a second chance,
+            # and then a longer one, before calling the run lost.
+            mux_ok = False
+            for wait in MUX_RETRY_WAITS:
+                if wait:
+                    print(f"[Dispatch] Muxing produced no {basename}-output.mkv. "
+                          f"Waiting {wait} seconds and trying again...")
+                    time.sleep(wait)
+                try:
+                    mux_rc = subprocess.call(mux_cmd, cwd=temp_dir)
+                except OSError as exc:
+                    print(f"[Dispatch] Could not run av1an-mux.py: {exc}")
+                    mux_rc = 1
+                if (mux_rc == 0 and os.path.exists(temp_output_mkv)
+                        and os.path.getsize(temp_output_mkv) > 0):
+                    mux_ok = True
+                    break
+            if not mux_ok:
                 print("[Dispatch] Muxing failed.")
                 continue
-                
+
             # 6. Move Final Output
-            temp_output_mkv = os.path.join(temp_dir, f"{basename}-output.mkv")
-            
             output_moved = False
             if os.path.exists(temp_output_mkv):
                 print(f"[Dispatch] Moving final file to: {final_output_path}")
@@ -2427,7 +2448,7 @@ def main():
                 if newly_detected_files:
                     warn_and_pause_if_paths_too_long(newly_detected_files, video_output_dir, temp_dir)
                     input_files.extend(newly_detected_files)
-        
+
         except Exception as e:
             print(f"[Dispatch] Critical Error during processing: {e}")
             send_ntfy_notification(
